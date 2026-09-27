@@ -4,13 +4,27 @@ import { INTERCARDINALS } from '../engine/heading.js';
 
 const SHORT = { NORTH: 'N', 'NORTH-EAST': 'NE', EAST: 'E', 'SOUTH-EAST': 'SE', SOUTH: 'S', 'SOUTH-WEST': 'SW', WEST: 'W', 'NORTH-WEST': 'NW' };
 
-export function drawCompassTape(canvas, camera, { exact = false } = {}) {
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  const w = canvas.clientWidth, h = canvas.clientHeight;
-  canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
-  const ctx = canvas.getContext('2d');
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, w, h);
+/**
+ * Draws onto `canvas` sized to its CSS box, or - with `target` - onto an
+ * existing 2D context inside the rectangle {x, y, width, height, scale}.
+ */
+export function drawCompassTape(canvas, camera, { exact = false, target = null } = {}) {
+  let ctx, w;
+  if (target) {
+    ctx = target.ctx;
+    w = target.width / target.scale;
+    ctx.save();
+    ctx.translate(target.x, target.y);
+    ctx.scale(target.scale, target.scale);
+  } else {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+  }
   const half = (camera.fov / 2) * Math.PI / 180;
   const f = (w / 2) / Math.tan(half);
   const y = 0;
@@ -46,4 +60,5 @@ export function drawCompassTape(canvas, camera, { exact = false } = {}) {
   ctx.fillStyle = 'rgba(255, 214, 102, 0.95)';
   ctx.beginPath();
   ctx.moveTo(w / 2 - 5, 0); ctx.lineTo(w / 2 + 5, 0); ctx.lineTo(w / 2, 6); ctx.closePath(); ctx.fill();
+  if (target) ctx.restore();
 }

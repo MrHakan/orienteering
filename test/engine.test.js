@@ -107,3 +107,29 @@ test('heading formatting per difficulty', () => {
   assert.equal(formatHeading(45, 'intercardinal').text, 'FACING NORTH-EAST');
   assert.equal(formatHeading(37, 'exact').text, 'FACING 037°');
 });
+
+test('MP4 muxer writes a well-formed fast-start file', async () => {
+  const { muxMp4 } = await import('../src/export/mp4.js');
+  const samples = Array.from({ length: 45 }, (_, i) => ({ data: new Uint8Array(100 + i).fill(i), key: i % 30 === 0 }));
+  const blob = muxMp4({ codec: 'avc1.640028', width: 1080, height: 1920, fps: 30, description: Uint8Array.from([1, 100, 0, 40, 255, 225, 0, 0, 1, 0, 0]), samples });
+  const b = new Uint8Array(await blob.arrayBuffer());
+  const dv = new DataView(b.buffer);
+  const top = [];
+  for (let off = 0; off < b.length;) {
+    const size = dv.getUint32(off);
+    top.push([String.fromCharCode(...b.subarray(off + 4, off + 8)), off, size]);
+    off += size;
+  }
+  assert.deepEqual(top.map((t) => t[0]), ['ftyp', 'moov', 'mdat']);
+  const text = new TextDecoder('latin1').decode(b);
+  const stco = text.indexOf('stco');
+  const chunkOffset = dv.getUint32(stco + 12);
+  assert.equal(chunkOffset, top[2][1] + 8, 'stco points at the first sample');
+  assert.equal(b[chunkOffset], 0);
+  const mvhd = text.indexOf('mvhd');
+  assert.equal(dv.getUint32(mvhd + 16), 1000);
+  assert.equal(dv.getUint32(mvhd + 20), 1500, '45 frames at 30 fps = 1.5 s');
+  const stss = text.indexOf('stss');
+  assert.equal(dv.getUint32(stss + 8), 2);
+  assert.ok(text.includes('avcC'));
+});

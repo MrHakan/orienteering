@@ -25,6 +25,10 @@ uniform vec3 uSunDir;
 uniform vec2 uHeightRange;
 uniform vec3 uFogColor;
 uniform float uFogDensity;
+uniform float uTime;
+uniform float uCloud;   // 0..1 cloud cover (moving shadows)
+uniform vec2 uWind;     // wind vector, m/s (east, north)
+uniform float uWet;     // 0..1 rain darkening
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p) {
@@ -53,9 +57,27 @@ void main() {
             + (vnoise(vWorld.xz / 75.0) - 0.5) * 0.25;
   col *= 1.0 + tex;
 
+  // Wind: bands of bent grass sweeping downwind.
+  float windSpeed = length(uWind);
+  if (windSpeed > 0.01) {
+    vec2 wd = uWind / windSpeed;
+    vec2 ground = vec2(vWorld.x, -vWorld.z);
+    float phase = dot(ground, wd) / 7.0 - uTime * (1.2 + windSpeed * 0.25) + vnoise(ground / 35.0) * 5.0;
+    col *= 1.0 + 0.07 * sin(phase) * min(1.0, windSpeed / 8.0) * (1.0 - smoothstep(80.0, 700.0, d));
+  }
+  col *= 1.0 - 0.2 * uWet;
+
   float diff = max(dot(n, uSunDir), 0.0);
   float hemi = 0.55 + 0.45 * n.y;
-  vec3 lit = col * (0.42 * hemi + 0.95 * diff);
+  // Moving cloud shadows (and a duller, flatter light under overcast skies).
+  float shadow = 0.0;
+  if (uCloud > 0.0) {
+    vec2 cp = (vec2(vWorld.x, -vWorld.z) - uWind * uTime * 6.0) / 520.0;
+    float c = vnoise(cp) * 0.6 + vnoise(cp * 2.3) * 0.3 + vnoise(cp * 5.1) * 0.1;
+    shadow = smoothstep(0.62 - 0.35 * uCloud, 0.8 - 0.3 * uCloud, c) * uCloud;
+  }
+  float sun = 0.95 * (1.0 - 0.35 * uWet) * (1.0 - 0.6 * shadow);
+  vec3 lit = col * ((0.42 + 0.12 * uWet) * hemi + sun * diff);
 
   float fog = 1.0 - exp(-pow(d * uFogDensity, 1.35));
   gl_FragColor = vec4(mix(lit, uFogColor, clamp(fog, 0.0, 1.0)), 1.0);
@@ -71,12 +93,42 @@ precision highp float;
 varying vec2 vNdc;
 uniform float uPitch;
 uniform float uTanHalfV;
+uniform float uTanHalfH;
+uniform float uHeading;
 uniform vec3 uHorizon;
 uniform vec3 uZenith;
+uniform float uTime;
+uniform float uCloud;
+uniform vec2 uWind;
+uniform float uWet;
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float fbm(vec2 p) {
+  float s = 0.0, a = 0.5;
+  for (int i = 0; i < 5; i++) { s += a * vnoise(p); p *= 2.03; a *= 0.5; }
+  return s;
+}
+
 void main() {
   float elev = uPitch + atan(vNdc.y * uTanHalfV);
   float t = smoothstep(-0.02, 0.6, elev);
   vec3 c = mix(uHorizon, uZenith, pow(t, 0.8));
+  if (uCloud > 0.0 && elev > 0.0) {
+    // Project the view ray onto a cloud deck and scroll it with the wind.
+    float az = uHeading + atan(vNdc.x * uTanHalfH);
+    vec2 dir = vec2(sin(az), cos(az));
+    float dist = 1.0 / max(sin(elev), 0.03);
+    vec2 p = dir * dist * 0.9 - uWind * uTime * 0.012;
+    float n = fbm(p);
+    float cover = smoothstep(0.62 - 0.4 * uCloud, 0.9 - 0.3 * uCloud, n);
+    vec3 cloudCol = mix(vec3(0.86, 0.87, 0.88), vec3(0.52, 0.55, 0.58), uWet * 0.8 + 0.25 * (1.0 - n));
+    c = mix(c, cloudCol, cover * smoothstep(0.0, 0.08, elev) * 0.95);
+  }
   gl_FragColor = vec4(c, 1.0);
 }`;
 
@@ -193,14 +245,28 @@ export class TerrainRenderer {
     return { vbo, ibo, count: idx.length, type: big ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT };
   }
 
+  /** Render at a fixed pixel size instead of the canvas's CSS size (exports). */
+  setFixedSize(width, height) {
+    this.fixedSize = width && height ? { width, height } : null;
+  }
+
   resize() {
+    if (this.fixedSize) {
+      const { width, height } = this.fixedSize;
+      if (this.canvas.width !== width || this.canvas.height !== height) { this.canvas.width = width; this.canvas.height = height; }
+      return;
+    }
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = Math.round(this.canvas.clientWidth * dpr), h = Math.round(this.canvas.clientHeight * dpr);
     if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
   }
 
-  /** camera: { x, y, z (eye elevation), heading, fov (horizontal), pitch } in metres / degrees. */
-  render(camera) {
+  /**
+   * camera: { x, y, z (eye elevation), heading, fov (horizontal), pitch } in metres / degrees.
+   * weather: { cloud 0..1, wind [east, north] m/s, wet 0..1, fog 0..1 }, time in seconds.
+   * Weather is purely visual: it never changes the terrain geometry.
+   */
+  render(camera, { weather = {}, time = 0 } = {}) {
     if (!this.model) return;
     this.resize();
     const gl = this.gl, m = this.model;
@@ -212,7 +278,13 @@ export class TerrainRenderer {
     const hd = (camera.heading * Math.PI) / 180, pt = (camera.pitch * Math.PI) / 180;
     const eye = [camera.x, camera.z, -camera.y];
     const fwd = [Math.sin(hd) * Math.cos(pt), Math.sin(pt), -Math.cos(hd) * Math.cos(pt)];
-    const horizon = [0.36, 0.43, 0.5], zenith = [0.23, 0.34, 0.47];
+    const { cloud = 0, wind = [0, 0], wet = 0, fog = 0 } = weather;
+    const grey = [0.52, 0.55, 0.58];
+    const mixc = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+    let horizon = [0.36, 0.43, 0.5], zenith = [0.23, 0.34, 0.47];
+    const overcast = Math.max(wet * 0.9, cloud * 0.35);
+    horizon = mixc(horizon, grey, overcast); zenith = mixc(zenith, [0.38, 0.42, 0.46], overcast);
+    if (fog > 0) { horizon = mixc(horizon, [0.66, 0.69, 0.71], fog); zenith = mixc(zenith, [0.55, 0.59, 0.62], fog * 0.8); }
 
     gl.disable(gl.DEPTH_TEST);
     gl.useProgram(this.sky);
@@ -224,6 +296,12 @@ export class TerrainRenderer {
     gl.uniform1f(gl.getUniformLocation(this.sky, 'uTanHalfV'), Math.tan(vfov / 2));
     gl.uniform3fv(gl.getUniformLocation(this.sky, 'uHorizon'), horizon);
     gl.uniform3fv(gl.getUniformLocation(this.sky, 'uZenith'), zenith);
+    gl.uniform1f(gl.getUniformLocation(this.sky, 'uTanHalfH'), Math.tan(hf / 2));
+    gl.uniform1f(gl.getUniformLocation(this.sky, 'uHeading'), hd);
+    gl.uniform1f(gl.getUniformLocation(this.sky, 'uTime'), time);
+    gl.uniform1f(gl.getUniformLocation(this.sky, 'uCloud'), Math.max(cloud, wet * 0.9));
+    gl.uniform2fv(gl.getUniformLocation(this.sky, 'uWind'), wind);
+    gl.uniform1f(gl.getUniformLocation(this.sky, 'uWet'), wet);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.disableVertexAttribArray(sp);
 
@@ -242,7 +320,12 @@ export class TerrainRenderer {
     gl.uniform3fv(gl.getUniformLocation(p, 'uSunDir'), [Math.sin(sunAz) * Math.cos(sunEl), Math.sin(sunEl), -Math.cos(sunAz) * Math.cos(sunEl)]);
     gl.uniform2fv(gl.getUniformLocation(p, 'uHeightRange'), [m.min, m.max]);
     gl.uniform3fv(gl.getUniformLocation(p, 'uFogColor'), horizon);
-    gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 1 / 5200);
+    // Fog shortens visibility to ~1.5 km but keeps the near and middle distance readable.
+    gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 1 / Math.max(1400, 5200 - 3700 * fog - 1200 * wet));
+    gl.uniform1f(gl.getUniformLocation(p, 'uTime'), time);
+    gl.uniform1f(gl.getUniformLocation(p, 'uCloud'), Math.max(cloud, wet * 0.6));
+    gl.uniform2fv(gl.getUniformLocation(p, 'uWind'), wind);
+    gl.uniform1f(gl.getUniformLocation(p, 'uWet'), wet);
     const aPos = gl.getAttribLocation(p, 'aPos'), aNor = gl.getAttribLocation(p, 'aNormal');
     for (const mesh of this.meshes) {
       gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vbo);

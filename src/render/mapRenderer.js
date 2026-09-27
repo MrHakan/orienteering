@@ -32,12 +32,19 @@ function chaikin(pts, closed) {
 }
 
 export class MapRenderer {
-  constructor(canvas, { onPick } = {}) {
+  /**
+   * @param {HTMLCanvasElement} canvas
+   * @param {{onPick?:Function, fixedSize?:{width:number,height:number,dpr:number}}} opts
+   *   fixedSize renders at an explicit CSS size / pixel ratio (offscreen exports).
+   */
+  constructor(canvas, { onPick, fixedSize = null } = {}) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.onPick = onPick;
+    this.fixedSize = fixedSize;
     this.overlays = { hillshade: false, landforms: false, drainage: false };
     this.hover = null;
+    if (fixedSize) return; // no pointer interaction offscreen
     canvas.addEventListener('mousemove', (e) => {
       const o = this.hit(e);
       const label = o ? o.label : null;
@@ -66,8 +73,9 @@ export class MapRenderer {
   setOverlays(o) { Object.assign(this.overlays, o); this.draw(); }
 
   layout() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+    const f = this.fixedSize;
+    const dpr = f ? f.dpr : Math.min(window.devicePixelRatio || 1, 2);
+    const w = f ? f.width : this.canvas.clientWidth, h = f ? f.height : this.canvas.clientHeight;
     if (this.canvas.width !== Math.round(w * dpr) || this.canvas.height !== Math.round(h * dpr)) {
       this.canvas.width = Math.round(w * dpr); this.canvas.height = Math.round(h * dpr);
     }
@@ -112,6 +120,7 @@ export class MapRenderer {
     this.layout();
     const { ctx, dpr } = this;
     const w = this.canvas.width / dpr, h = this.canvas.height / dpr;
+    this.cssW = w; this.cssH = h;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = COLORS.bg;
     ctx.fillRect(0, 0, w, h);
@@ -180,9 +189,9 @@ export class MapRenderer {
     ctx.closePath();
     ctx.stroke();
 
-    this.drawMarkers();
     this.drawNorthArrow();
     this.drawScaleBar();
+    this.drawMarkers(); // last, so nothing ever hides an answer option
   }
 
   prepareLines() {
@@ -258,7 +267,7 @@ export class MapRenderer {
         const x = p[k], y = p[k + 1];
         if (markers.some(([mx, my]) => Math.hypot(mx - x, my - y) < 34)) continue;
         if (labels.some((o) => Math.hypot(o.x - x, o.y - y) < 70)) continue;
-        if (x < 30 || y < 16 || x > this.canvas.width / this.dpr - 30 || y > this.canvas.height / this.dpr - 16) continue;
+        if (x < 30 || y < 16 || x > this.cssW - 30 || y > this.cssH - 16) continue;
         let angle = Math.atan2(p[k1 + 1] - p[k0 + 1], p[k1] - p[k0]);
         // Cartographic convention: the top of the number faces uphill.
         const [wx, wy] = this.toWorld(x, y);
@@ -418,8 +427,7 @@ export class MapRenderer {
     const [ax, ay] = this.toCanvas(L / 2, L / 2), [bx, by] = this.toCanvas(L / 2, L / 2 + 1);
     const l = Math.hypot(bx - ax, by - ay);
     const dx = (bx - ax) / l, dy = (by - ay) / l;
-    const w = this.canvas.width / this.dpr;
-    const ox = w - 64, oy = 46;
+    const ox = this.cssW - 64, oy = 46;
     ctx.fillStyle = 'rgba(21, 26, 32, 0.8)';
     ctx.beginPath(); ctx.arc(ox, oy, 38, 0, Math.PI * 2); ctx.fill();
     const x0 = ox - dx * 26, y0 = oy - dy * 26, x1 = ox + dx * 26, y1 = oy + dy * 26;
@@ -441,8 +449,7 @@ export class MapRenderer {
     const pxPerM = this.S / L;
     const metres = pxPerM * 500 > 140 ? 250 : 500;
     const len = metres * pxPerM;
-    const h = this.canvas.height / this.dpr;
-    const x = 22, y = h - 20;
+    const x = 22, y = this.cssH - 20;
     ctx.fillStyle = 'rgba(21, 26, 32, 0.75)';
     ctx.fillRect(x - 6, y - 26, len + 70, 34);
     ctx.strokeStyle = COLORS.marker; ctx.lineWidth = 1.4;

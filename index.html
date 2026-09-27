@@ -92,7 +92,10 @@
           <summary>Generation log</summary>
           <pre id="gen-log"></pre>
         </details>
-        <button type="button" class="btn ghost small" id="copy-link">Copy link to this quiz</button>
+        <div class="row-btns">
+          <button type="button" class="btn ghost small" id="copy-link">Copy link to this quiz</button>
+          <button type="button" class="btn primary small" id="open-export">Export for Instagram</button>
+        </div>
       </section>
 
       <section class="box about">
@@ -103,6 +106,45 @@
       </section>
     </aside>
   </main>
+
+  <dialog id="export-dialog" class="export-dialog" aria-labelledby="export-title">
+    <div class="export-body">
+      <div class="export-preview"><canvas id="export-canvas" aria-label="Export preview"></canvas></div>
+      <form class="export-options" method="dialog" id="export-form">
+        <h2 id="export-title">Export</h2>
+        <fieldset>
+          <legend>Format</legend>
+          <label class="toggle"><input type="radio" name="format" value="reels" checked> Reels / Story 9:16 <small>1080×1920</small></label>
+          <label class="toggle"><input type="radio" name="format" value="post"> Post 4:5 <small>1080×1350</small></label>
+        </fieldset>
+        <fieldset>
+          <legend>Weather (animated)</legend>
+          <label class="toggle"><input type="checkbox" name="weather" value="wind"> Wind</label>
+          <label class="toggle"><input type="checkbox" name="weather" value="rain"> Rain</label>
+          <label class="toggle"><input type="checkbox" name="weather" value="clouds"> Clouds</label>
+          <label class="toggle"><input type="checkbox" name="weather" value="fog"> Fog</label>
+        </fieldset>
+        <fieldset>
+          <legend>Frame</legend>
+          <label class="field"><span>Handle / footer</span><input type="text" id="export-handle" maxlength="40" placeholder="@yourhandle"></label>
+          <label class="toggle"><input type="checkbox" id="export-caption" checked> Caption ("You are at A, B or C…")</label>
+          <label class="toggle"><input type="checkbox" id="export-tape" checked> Bearing tape</label>
+          <label class="toggle"><input type="checkbox" id="export-reveal" checked> Reveal answer in the last 3 s</label>
+        </fieldset>
+        <div class="export-actions">
+          <button type="button" class="btn ghost" id="export-png">Question image (PNG)</button>
+          <button type="button" class="btn ghost" id="export-answer-png">Answer image (PNG)</button>
+          <button type="button" class="btn primary" id="export-video">Record 15 s video</button>
+        </div>
+        <div class="export-status" id="export-status" aria-live="polite"></div>
+        <progress id="export-progress" max="1" value="0" hidden></progress>
+        <div class="export-actions">
+          <button type="button" class="btn ghost" id="export-share" hidden>Share…</button>
+          <button type="button" class="btn ghost" id="export-close">Close</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
 
   <script type="module" src="src/ui/app.js"></script>
 </body>

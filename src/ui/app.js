@@ -6,6 +6,8 @@ import { DIFFICULTIES } from '../engine/difficulty.js';
 import { TerrainRenderer } from '../render/webglTerrain.js';
 import { MapRenderer } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
+import { ExportComposer } from '../export/composer.js';
+import { encodeCanvasVideo, pickVideoPath } from '../export/recorder.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -301,6 +303,7 @@ function currentCamera() {
 }
 
 document.addEventListener('keydown', (e) => {
+  if ($('export-dialog').open) return;
   if (e.target.matches('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key.toUpperCase();
   if (k === 'N') newQuiz();
@@ -318,6 +321,163 @@ window.addEventListener('resize', () => {
     renderScene(currentCamera());
     map.draw();
   }, 60);
+});
+
+// ---------------------------------------------------------------- export
+
+const exportUi = { composer: null, raf: 0, start: 0, busy: false, last: null };
+
+function exportOptions() {
+  const form = $('export-form');
+  return {
+    format: form.querySelector('[name="format"]:checked').value,
+    weather: [...form.querySelectorAll('[name="weather"]:checked')].map((el) => el.value),
+    handle: $('export-handle').value.trim(),
+    caption: $('export-caption').checked,
+    tape: $('export-tape').checked,
+    reveal: $('export-reveal').checked,
+    northUp: state.settings.northUp,
+    duration: 15,
+  };
+}
+
+function restoreExportOptions() {
+  const saved = store.get('otq.export', null);
+  if (!saved) return;
+  const form = $('export-form');
+  const fmt = form.querySelector(`[name="format"][value="${saved.format}"]`);
+  if (fmt) fmt.checked = true;
+  form.querySelectorAll('[name="weather"]').forEach((el) => { el.checked = (saved.weather || []).includes(el.value); });
+  $('export-handle').value = saved.handle || '';
+  $('export-caption').checked = saved.caption !== false;
+  $('export-tape').checked = saved.tape !== false;
+  $('export-reveal').checked = saved.reveal !== false;
+}
+
+function previewLoop() {
+  const c = exportUi.composer;
+  if (!c) return;
+  const d = c.options.duration;
+  const t = ((performance.now() - exportUi.start) / 1000) % d;
+  c.animated = true;
+  c.drawFrame(t, { reveal: c.options.reveal && t >= d - 3 });
+  exportUi.raf = requestAnimationFrame(previewLoop);
+}
+
+function startPreview() {
+  cancelAnimationFrame(exportUi.raf);
+  exportUi.start = performance.now();
+  exportUi.raf = requestAnimationFrame(previewLoop);
+}
+
+function stopPreview() { cancelAnimationFrame(exportUi.raf); }
+
+function openExport() {
+  if (!state.quiz || !renderer) return;
+  restoreExportOptions();
+  exportUi.composer?.dispose();
+  exportUi.composer = new ExportComposer(state.quiz, state.model, { ...exportOptions(), canvas: $('export-canvas') });
+  exportUi.last = null;
+  $('export-share').hidden = true;
+  $('export-dialog').showModal();
+  exportUi.videoPath = null;
+  $('export-video').disabled = true;
+  pickVideoPath(1080, 1920).then((p) => {
+    exportUi.videoPath = p;
+    $('export-video').disabled = !p || exportUi.busy;
+    setExportStatus(!p ? 'Video export is not supported in this browser; images still work.'
+      : p.h264 ? '' : 'This browser cannot encode H.264: the video will be VP9/WebM, which Instagram may reject. Chrome, Edge or Safari give an Instagram-ready MP4.');
+  });
+  startPreview();
+}
+
+function closeExport() {
+  if (exportUi.busy) return;
+  stopPreview();
+  exportUi.composer?.dispose();
+  exportUi.composer = null;
+  $('export-dialog').close();
+}
+
+function setExportStatus(text) { $('export-status').textContent = text; }
+
+function exportName(suffix, ext) {
+  const q = state.quiz;
+  return `where-are-you-${q.seed}-${q.difficulty}${suffix}.${ext}`.replace(/[^a-z0-9._-]+/gi, '-');
+}
+
+function download(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  exportUi.last = new File([blob], name, { type: blob.type });
+  $('export-share').hidden = !(navigator.canShare && navigator.canShare({ files: [exportUi.last] }));
+}
+
+function setExportBusy(on) {
+  exportUi.busy = on;
+  for (const id of ['export-png', 'export-answer-png', 'export-video', 'export-close']) $(id).disabled = on || (id === 'export-video' && !exportUi.videoPath);
+  $('export-form').querySelectorAll('input').forEach((el) => { el.disabled = on; });
+}
+
+async function exportImage(reveal) {
+  const c = exportUi.composer;
+  stopPreview();
+  const blob = await c.toImage({ reveal });
+  download(blob, exportName(reveal ? '-answer' : '', 'png'));
+  setExportStatus(`Saved ${exportName(reveal ? '-answer' : '', 'png')}`);
+  startPreview();
+}
+
+async function exportVideo() {
+  const c = exportUi.composer;
+  stopPreview();
+  setExportBusy(true);
+  const progress = $('export-progress');
+  progress.hidden = false;
+  setExportStatus(exportUi.videoPath?.kind === 'recorder' ? 'Recording 15 s in real time — keep this tab visible…' : 'Rendering 450 frames…');
+  try {
+    c.animated = true;
+    const d = c.options.duration;
+    const { blob, extension, h264 } = await encodeCanvasVideo(c.canvas, (t) => c.drawFrame(t, { reveal: c.options.reveal && t >= d - 3 }), {
+      duration: d, fps: 30, onProgress: (p) => { progress.value = p; },
+    });
+    const name = exportName('', extension);
+    download(blob, name);
+    setExportStatus(h264 ? `Saved ${name} (H.264, ${(blob.size / 1e6).toFixed(1)} MB)` : `Saved ${name}. Not H.264, so convert it to MP4/H.264 before uploading to Instagram.`);
+  } catch (err) {
+    setExportStatus(`Recording failed: ${err.message}`);
+  } finally {
+    progress.hidden = true;
+    setExportBusy(false);
+    startPreview();
+  }
+}
+
+$('open-export').addEventListener('click', openExport);
+$('export-close').addEventListener('click', closeExport);
+$('export-dialog').addEventListener('cancel', (e) => { e.preventDefault(); closeExport(); });
+$('export-form').addEventListener('change', () => {
+  const opts = exportOptions();
+  store.set('otq.export', opts);
+  exportUi.composer?.setOptions(opts);
+  startPreview();
+});
+$('export-handle').addEventListener('input', () => {
+  const opts = exportOptions();
+  store.set('otq.export', opts);
+  exportUi.composer?.setOptions({ handle: opts.handle });
+});
+$('export-png').addEventListener('click', () => exportImage(false));
+$('export-answer-png').addEventListener('click', () => exportImage(true));
+$('export-video').addEventListener('click', exportVideo);
+$('export-share').addEventListener('click', async () => {
+  if (!exportUi.last) return;
+  try { await navigator.share({ files: [exportUi.last], title: 'Where are you?' }); } catch { /* dismissed */ }
 });
 
 // ---------------------------------------------------------------- boot

@@ -17,6 +17,25 @@ node scripts/generate.mjs <seed> [easy|medium|hard|expert]   # dump one quiz as 
 node scripts/batch.mjs 10                                     # pass-rate / timing stats
 ```
 
+## GitHub Pages
+
+The site is fully static and uses relative paths only, so it works from a sub-path like `https://<user>.github.io/orienteering/`. `.github/workflows/pages.yml` runs the tests and deploys on every push to `main`.
+
+One-time setup: **Settings → Pages → Build and deployment → Source: GitHub Actions**. Alternatively pick "Deploy from a branch" → `main` / `(root)`, which also works because there is no build step.
+
+## Instagram export
+
+**Export for Instagram** (in the Question panel) opens a live preview:
+
+- **Formats:** Reels/Story 9:16 (1080×1920) and Post 4:5 (1080×1350).
+- **Question image / Answer image (PNG):** for a carousel post, or a question plus answer pair.
+- **15 s video:** animated weather, any combination of **wind** (bands of grass sweeping downwind, faster clouds), **rain** (falling streaks, wet overcast light), **clouds** (a moving cloud deck and cloud shadows drifting over the terrain) and **fog** (visibility down to ~1.5 km). A countdown bar runs under the scene; optionally the last 3 s reveal the answer and the view wedge on the map.
+- **Frame:** handle/footer text, caption ("You are at A, B or C, facing north."), bearing tape.
+
+Weather is purely visual. It never changes the terrain, and the camera stays fixed, so the puzzle is identical to the one on the page.
+
+Videos are encoded frame by frame with WebCodecs and muxed into MP4 by a small built-in muxer (`src/export/mp4.js`). The output is always exactly 30 fps and 15.0 s, however fast the machine renders. In Chrome, Edge and Safari the codec is **H.264**, which is what Instagram expects. Browsers without an H.264 encoder fall back to VP9 (or real-time MediaRecorder WebM), and the dialog warns that the file needs converting before upload. On phones, the **Share…** button hands the file to the system share sheet, which includes Instagram.
+
 ## Core principle
 
 There is exactly **one** elevation model per quiz (`TerrainModel`). The WebGL scene, the contour map, the skyline analysis and the distractor search all read `getElevation()` from that model. Even the lowland beyond the map edge is part of the model, so the analysis sees what the renderer draws.
@@ -82,6 +101,7 @@ Contours are extracted from the final heightmap. Every fifth contour is an index
 src/engine/   terrain engine (no DOM, runs in Node and in a Web Worker)
 src/render/   webglTerrain.js (first-person scene), mapRenderer.js, compassTape.js
 src/ui/       app.js (controller), worker.js
+src/export/   composer.js (social frame + weather), recorder.js (WebCodecs/MediaRecorder), mp4.js (muxer)
 scripts/      dev server, CLI generator, batch stats, debug PNG
 test/         node:test suite
 ```
