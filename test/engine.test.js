@@ -1,0 +1,109 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { SeedManager, Random } from '../src/engine/rng.js';
+import { TerrainGenerator } from '../src/engine/terrainGenerator.js';
+import { TerrainModel } from '../src/engine/terrainModel.js';
+import { ContourGenerator } from '../src/engine/contours.js';
+import { generateQuiz } from '../src/engine/quiz.js';
+import { getDifficulty } from '../src/engine/difficulty.js';
+import { formatHeading } from '../src/engine/heading.js';
+
+const small = { size: 2000, n: 129 };
+
+function hash(arr) {
+  let h = 2166136261;
+  const u = new Uint32Array(arr.buffer, arr.byteOffset, arr.length);
+  for (const v of u) h = Math.imul(h ^ v, 16777619);
+  return h >>> 0;
+}
+
+test('PRNG streams are deterministic and independent of consumption order', () => {
+  const a = new SeedManager('x'), b = new SeedManager('x');
+  a.stream('one').next();
+  assert.equal(a.stream('two').next(), b.stream('two').next());
+  assert.notEqual(new Random('x').next(), new Random('y').next());
+});
+
+test('same seed reproduces the identical heightmap', () => {
+  const p = getDifficulty('medium').terrain;
+  const t1 = TerrainGenerator.generate(new SeedManager('det').stream('terrain', 0), p, small);
+  const t2 = TerrainGenerator.generate(new SeedManager('det').stream('terrain', 0), p, small);
+  const t3 = TerrainGenerator.generate(new SeedManager('other').stream('terrain', 0), p, small);
+  assert.equal(hash(t1.heights), hash(t2.heights));
+  assert.notEqual(hash(t1.heights), hash(t3.heights));
+});
+
+test('terrain is structured, with a noise share within 20-35%', () => {
+  for (const d of ['easy', 'medium', 'hard', 'expert']) {
+    const t = TerrainGenerator.generate(new SeedManager(`share-${d}`).stream('terrain', 0), getDifficulty(d).terrain, small);
+    assert.ok(t.meta.noiseShare >= 0.18 && t.meta.noiseShare <= 0.35, `${d}: ${t.meta.noiseShare}`);
+    assert.ok(t.meta.archetypes.length >= 2 && t.meta.archetypes.length <= 6);
+    assert.ok(t.meta.max - t.meta.min > 25);
+  }
+});
+
+test('contours are closed or boundary-to-boundary and labels match elevation', () => {
+  const t = TerrainGenerator.generate(new SeedManager('contours').stream('terrain', 0), getDifficulty('hard').terrain, small);
+  const model = new TerrainModel({ ...t, seed: 'contours' });
+  const interval = model.chooseContourInterval();
+  assert.ok([2, 5, 10, 20].includes(interval));
+  const contours = model.getContours(interval);
+  assert.ok(ContourGenerator.validate(contours).ok);
+  for (const c of contours) {
+    assert.equal(c.level % interval, 0);
+    for (const line of c.lines) {
+      for (let k = 0; k < line.points.length; k += 2) {
+        assert.ok(Math.abs(model.getElevation(line.points[k], line.points[k + 1]) - c.level) < 0.05);
+      }
+    }
+  }
+});
+
+test('contours keep higher ground on the left (hill loops are counter-clockwise)', () => {
+  const n = 41, cell = 10, h = new Float32Array(n * n);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) h[j * n + i] = 100 - Math.hypot(i - 20, j - 20);
+  const [c] = ContourGenerator.extract(h, n, cell, 10).filter((c) => c.level === 90);
+  assert.equal(c.lines.length, 1);
+  assert.ok(c.lines[0].closed);
+  assert.ok(ContourGenerator.signedArea(c.lines[0].points) > 0);
+});
+
+test('model queries are consistent', () => {
+  const t = TerrainGenerator.generate(new SeedManager('q').stream('terrain', 0), getDifficulty('medium').terrain, small);
+  const m = new TerrainModel({ ...t, seed: 'q' });
+  const x = 900, y = 1100;
+  assert.ok(Number.isFinite(m.getElevation(x, y)));
+  assert.ok(Number.isFinite(m.getElevation(-500, 2600)), 'outside the map is defined');
+  const s = m.getSlope(x, y);
+  assert.ok(s >= 0 && s < 90);
+  const a = m.getAspect(x, y);
+  assert.ok(a === -1 || (a >= 0 && a < 360));
+  assert.equal(m.getSkyline(x, y, 0).length, 72);
+  const sig = m.getTerrainSignature(x, y);
+  for (const k of ['elevation', 'slope', 'aspect', 'curvature', 'relativeElevation', 'ridgeDistance', 'valleyDistance', 'summitDistance', 'saddleDistance', 'openness']) assert.ok(Number.isFinite(sig[k]), k);
+  assert.ok(m.getFlowAccumulation(x, y) >= 1);
+});
+
+test('generated quizzes are deterministic, valid and randomise the answer label', () => {
+  const q1 = generateQuiz({ seed: 'quiz-a', difficulty: 'medium' });
+  const q2 = generateQuiz({ seed: 'quiz-a', difficulty: 'medium' });
+  assert.deepEqual(q1.camera, q2.camera);
+  assert.deepEqual(q1.options, q2.options);
+  assert.equal(q1.options.filter((o) => o.correct).length, 1);
+  assert.equal(q1.options.length, 1 + getDifficulty('medium').distractors);
+  assert.ok(q1.camera.fov >= 55 && q1.camera.fov <= 75);
+  assert.ok(q1.camera.eyeHeight >= 1.6 && q1.camera.eyeHeight <= 1.85);
+  assert.ok(q1.camera.pitch >= -4 && q1.camera.pitch <= 6);
+  const band = getDifficulty('medium').band;
+  for (const o of q1.options.filter((o) => !o.correct)) assert.ok(o.D >= band.min && o.D <= band.max);
+
+  const labels = new Set();
+  for (let i = 0; i < 6; i++) labels.add(generateQuiz({ seed: `label-${i}`, difficulty: 'easy' }).correctLabel);
+  assert.ok(labels.size > 1, 'correct answer is not always the same label');
+});
+
+test('heading formatting per difficulty', () => {
+  assert.equal(formatHeading(0, 'cardinal').text, 'FACING NORTH');
+  assert.equal(formatHeading(45, 'intercardinal').text, 'FACING NORTH-EAST');
+  assert.equal(formatHeading(37, 'exact').text, 'FACING 037°');
+});

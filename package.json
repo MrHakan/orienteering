@@ -1,0 +1,14 @@
+{
+  "name": "orienteering-terrain-quiz",
+  "version": "0.1.0",
+  "description": "Procedural orienteering 'Where are you?' quiz: one seeded elevation model drives both a first-person 3D view and a contour map.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node scripts/serve.mjs",
+    "test": "node --test test/*.test.js",
+    "generate": "node scripts/generate.mjs",
+    "batch": "node scripts/batch.mjs"
+  },
+  "engines": { "node": ">=18" }
+}

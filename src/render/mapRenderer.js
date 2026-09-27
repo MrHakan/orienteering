@@ -1,0 +1,456 @@
+// 2D topographic map renderer (Canvas 2D). Contours come straight from the
+// TerrainModel's oriented Marching Squares output.
+
+import { ContourGenerator } from '../engine/contours.js';
+
+const COLORS = {
+  bg: '#151a20',
+  frame: 'rgba(230, 226, 214, 0.28)',
+  contour: 'rgba(226, 222, 212, 0.62)',
+  index: 'rgba(240, 236, 226, 0.95)',
+  label: 'rgba(240, 236, 226, 0.95)',
+  marker: '#f1ede4',
+  correct: '#5fd08a',
+  wrong: '#ff6b5e',
+  cone: 'rgba(255, 214, 102, 0.20)',
+  coneLine: 'rgba(255, 214, 102, 0.85)',
+};
+
+function chaikin(pts, closed) {
+  if (pts.length < 6) return pts;
+  const out = [];
+  const m = pts.length / 2;
+  if (!closed) out.push(pts[0], pts[1]);
+  const last = closed ? m : m - 1;
+  for (let k = 0; k < last; k++) {
+    const a = k * 2, b = ((k + 1) % m) * 2;
+    out.push(0.75 * pts[a] + 0.25 * pts[b], 0.75 * pts[a + 1] + 0.25 * pts[b + 1]);
+    out.push(0.25 * pts[a] + 0.75 * pts[b], 0.25 * pts[a + 1] + 0.75 * pts[b + 1]);
+  }
+  if (!closed) out.push(pts[pts.length - 2], pts[pts.length - 1]);
+  return out;
+}
+
+export class MapRenderer {
+  constructor(canvas, { onPick } = {}) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.onPick = onPick;
+    this.overlays = { hillshade: false, landforms: false, drainage: false };
+    this.hover = null;
+    canvas.addEventListener('mousemove', (e) => {
+      const o = this.hit(e);
+      const label = o ? o.label : null;
+      if (label !== this.hover) { this.hover = label; this.canvas.style.cursor = label && this.pickable ? 'pointer' : 'default'; this.draw(); }
+    });
+    canvas.addEventListener('mouseleave', () => { this.hover = null; this.draw(); });
+    canvas.addEventListener('click', (e) => {
+      const o = this.hit(e);
+      if (o && this.onPick) this.onPick(o.label);
+    });
+  }
+
+  /** data: { model, interval, options, rotation, landmarks } */
+  setData(data) {
+    this.data = data;
+    this.contours = data.model.getContours(data.interval);
+    this.reveal = null;
+    this.viewing = null;
+    this.pickable = true;
+    this._hillshade = null;
+    this.draw();
+  }
+
+  setReveal(reveal) { this.reveal = reveal; this.pickable = !reveal; this.draw(); }
+  setViewing(v) { this.viewing = v; this.draw(); }
+  setOverlays(o) { Object.assign(this.overlays, o); this.draw(); }
+
+  layout() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+    if (this.canvas.width !== Math.round(w * dpr) || this.canvas.height !== Math.round(h * dpr)) {
+      this.canvas.width = Math.round(w * dpr); this.canvas.height = Math.round(h * dpr);
+    }
+    const pad = Math.max(14, Math.min(w, h) * 0.035);
+    this.dpr = dpr;
+    this.S = Math.min(w, h) - 2 * pad;
+    this.cx = w / 2; this.cy = h / 2;
+    const th = ((this.data?.rotation || 0) * Math.PI) / 180;
+    this.cos = Math.cos(th); this.sin = Math.sin(th);
+  }
+
+  /** World metres -> CSS pixels. Map rotation is a pure display transform. */
+  toCanvas(x, y) {
+    const L = this.data.model.size;
+    const u = x / L - 0.5, v = 0.5 - y / L;
+    return [this.cx + (u * this.cos - v * this.sin) * this.S, this.cy + (u * this.sin + v * this.cos) * this.S];
+  }
+
+  /** CSS pixels -> world metres (inverse of toCanvas). */
+  toWorld(px, py) {
+    const L = this.data.model.size;
+    const a = (px - this.cx) / this.S, b = (py - this.cy) / this.S;
+    const u = a * this.cos + b * this.sin, v = -a * this.sin + b * this.cos;
+    return [(u + 0.5) * L, (0.5 - v) * L];
+  }
+
+  hit(e) {
+    if (!this.data) return null;
+    const r = this.canvas.getBoundingClientRect();
+    const px = e.clientX - r.left, py = e.clientY - r.top;
+    let best = null, bd = 22;
+    for (const o of this.data.options) {
+      const [x, y] = this.toCanvas(o.x, o.y);
+      const d = Math.hypot(x - px, y - py);
+      if (d < bd) { bd = d; best = o; }
+    }
+    return best;
+  }
+
+  draw() {
+    if (!this.data) return;
+    this.layout();
+    const { ctx, dpr } = this;
+    const w = this.canvas.width / dpr, h = this.canvas.height / dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = COLORS.bg;
+    ctx.fillRect(0, 0, w, h);
+
+    const corners = [[0, 0], [this.data.model.size, 0], [this.data.model.size, this.data.model.size], [0, this.data.model.size]].map(([x, y]) => this.toCanvas(x, y));
+    ctx.save();
+    ctx.beginPath();
+    corners.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+    ctx.clip();
+
+    if (this.overlays.hillshade) this.drawHillshade();
+
+    const lines = this.prepareLines();
+    const labels = this.placeLabels(lines);
+
+    // Knock the label boxes out of the contour lines.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, w, h);
+    for (const l of labels) {
+      const c = Math.cos(l.angle), s = Math.sin(l.angle);
+      const hw = l.w / 2 + 3, hh = 7;
+      const pts = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([a, b]) => [l.x + a * c - b * s, l.y + a * s + b * c]);
+      ctx.moveTo(pts[3][0], pts[3][1]);
+      for (const p of pts) ctx.lineTo(p[0], p[1]);
+      ctx.closePath();
+    }
+    ctx.clip('evenodd');
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    for (const l of lines) {
+      ctx.strokeStyle = l.index ? COLORS.index : COLORS.contour;
+      ctx.lineWidth = l.index ? 1.5 : 0.8;
+      ctx.beginPath();
+      const p = l.px;
+      ctx.moveTo(p[0], p[1]);
+      for (let k = 2; k < p.length; k += 2) ctx.lineTo(p[k], p[k + 1]);
+      if (l.closed) ctx.closePath();
+      ctx.stroke();
+      if (l.depression) this.drawTicks(l);
+    }
+    ctx.restore();
+
+    ctx.fillStyle = COLORS.label;
+    ctx.font = '600 10.5px system-ui, -apple-system, "Segoe UI", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const l of labels) {
+      ctx.save();
+      ctx.translate(l.x, l.y);
+      ctx.rotate(l.angle);
+      ctx.fillText(l.text, 0, 0.5);
+      ctx.restore();
+    }
+
+    if (this.overlays.drainage) this.drawDrainage();
+    if (this.overlays.landforms) this.drawLandforms();
+    this.drawCone();
+    ctx.restore();
+
+    ctx.strokeStyle = COLORS.frame;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    corners.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+    ctx.stroke();
+
+    this.drawMarkers();
+    this.drawNorthArrow();
+    this.drawScaleBar();
+  }
+
+  prepareLines() {
+    if (this._lines && this._linesKey === `${this.S}|${this.data.rotation}|${this.data.interval}`) return this._lines;
+    const out = [];
+    for (const c of this.contours) {
+      for (const line of c.lines) {
+        const src = chaikin(line.points, line.closed);
+        const px = new Float32Array(src.length);
+        for (let k = 0; k < src.length; k += 2) {
+          const [x, y] = this.toCanvas(src[k], src[k + 1]);
+          px[k] = x; px[k + 1] = y;
+        }
+        const depression = line.closed && ContourGenerator.signedArea(line.points) < 0;
+        out.push({ level: c.level, index: c.index, closed: line.closed, px, world: line.points, depression });
+      }
+    }
+    this._lines = out;
+    this._linesKey = `${this.S}|${this.data.rotation}|${this.data.interval}`;
+    return out;
+  }
+
+  /** Downhill tick marks on depression contours (right side of travel). */
+  drawTicks(l) {
+    const { ctx } = this;
+    const p = l.px;
+    let acc = 0;
+    ctx.beginPath();
+    for (let k = 2; k < p.length; k += 2) {
+      const dx = p[k] - p[k - 2], dy = p[k + 1] - p[k - 1];
+      const len = Math.hypot(dx, dy);
+      acc += len;
+      if (acc < 9 || len < 1e-6) continue;
+      acc = 0;
+      // Canvas y is flipped relative to the world, so the world's right side is canvas-left.
+      const [ax, ay] = this.toCanvas(0, 0), [bx, by] = this.toCanvas(1, 0), [cx2, cy2] = this.toCanvas(0, 1);
+      const mirrored = (bx - ax) * (cy2 - ay) - (by - ay) * (cx2 - ax) < 0;
+      const s = mirrored ? -1 : 1;
+      const nx = (dy / len) * s, ny = (-dx / len) * s;
+      const mx = (p[k] + p[k - 2]) / 2, my = (p[k + 1] + p[k - 1]) / 2;
+      ctx.moveTo(mx, my);
+      ctx.lineTo(mx + nx * 3.5, my + ny * 3.5);
+    }
+    ctx.stroke();
+  }
+
+  placeLabels(lines) {
+    const labels = [];
+    const markers = this.data.options.map((o) => this.toCanvas(o.x, o.y));
+    const model = this.data.model;
+    this.ctx.font = '600 10.5px system-ui, -apple-system, "Segoe UI", sans-serif';
+    const candidates = lines.filter((l) => l.index).map((l) => {
+      let len = 0;
+      for (let k = 2; k < l.px.length; k += 2) len += Math.hypot(l.px[k] - l.px[k - 2], l.px[k + 1] - l.px[k - 1]);
+      return { l, len };
+    }).filter((c) => c.len > 70).sort((a, b) => b.len - a.len);
+
+    for (const { l, len } of candidates) {
+      const text = String(Math.round(l.level));
+      const tw = this.ctx.measureText(text).width;
+      const every = Math.max(260, len / 3);
+      let acc = every * 0.45, placedOnLine = 0;
+      const p = l.px;
+      for (let k = 2; k < p.length - 2 && placedOnLine < 3; k += 2) {
+        acc += Math.hypot(p[k] - p[k - 2], p[k + 1] - p[k - 1]);
+        if (acc < every) continue;
+        // Straightness over a short window.
+        const k0 = Math.max(0, k - 8), k1 = Math.min(p.length - 2, k + 8);
+        const a0 = Math.atan2(p[k + 1] - p[k0 + 1], p[k] - p[k0]);
+        const a1 = Math.atan2(p[k1 + 1] - p[k + 1], p[k1] - p[k]);
+        let da = Math.abs(a0 - a1); if (da > Math.PI) da = 2 * Math.PI - da;
+        if (da > 0.45) continue;
+        const x = p[k], y = p[k + 1];
+        if (markers.some(([mx, my]) => Math.hypot(mx - x, my - y) < 34)) continue;
+        if (labels.some((o) => Math.hypot(o.x - x, o.y - y) < 70)) continue;
+        if (x < 30 || y < 16 || x > this.canvas.width / this.dpr - 30 || y > this.canvas.height / this.dpr - 16) continue;
+        let angle = Math.atan2(p[k1 + 1] - p[k0 + 1], p[k1] - p[k0]);
+        // Cartographic convention: the top of the number faces uphill.
+        const [wx, wy] = this.toWorld(x, y);
+        const [ux, uy] = this.uphill(model, wx, wy);
+        if (Math.sin(angle) * ux - Math.cos(angle) * uy < 0) angle += Math.PI;
+        labels.push({ x, y, angle, text, w: tw });
+        placedOnLine++;
+        acc = 0;
+      }
+    }
+    return labels;
+  }
+
+  /** Uphill direction in canvas space at a world point. */
+  uphill(model, x, y) {
+    const { gx, gy } = model.getGradient(x, y, model.cell * 2);
+    const [ax, ay] = this.toCanvas(x, y);
+    const [bx, by] = this.toCanvas(x + gx * 1000, y + gy * 1000);
+    const l = Math.hypot(bx - ax, by - ay) || 1;
+    return [(bx - ax) / l, (by - ay) / l];
+  }
+
+  drawHillshade() {
+    const { model } = this.data;
+    if (!this._hillshade) {
+      const n = model.n, h = model.heights, cell = model.cell;
+      const c = document.createElement('canvas');
+      c.width = n; c.height = n;
+      const cx = c.getContext('2d');
+      const img = cx.createImageData(n, n);
+      const lx = -0.5, ly = 0.5, lz = 0.7; // light from the north-west
+      for (let j = 0; j < n; j++) {
+        for (let i = 0; i < n; i++) {
+          const gx = (h[j * n + Math.min(i + 1, n - 1)] - h[j * n + Math.max(i - 1, 0)]) / (2 * cell);
+          const gy = (h[Math.min(j + 1, n - 1) * n + i] - h[Math.max(j - 1, 0) * n + i]) / (2 * cell);
+          const l = Math.hypot(gx, gy, 1);
+          const shade = (-gx * lx - gy * ly + lz) / l;
+          const o = ((n - 1 - j) * n + i) * 4;
+          const v = Math.max(0, Math.min(255, shade * 255));
+          img.data[o] = v; img.data[o + 1] = v; img.data[o + 2] = v;
+          img.data[o + 3] = Math.round(Math.abs(shade - 0.7) * 260);
+        }
+      }
+      cx.putImageData(img, 0, 0);
+      this._hillshade = c;
+    }
+    const { ctx } = this;
+    ctx.save();
+    ctx.globalAlpha = 0.4;
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(Math.atan2(this.sin, this.cos));
+    ctx.drawImage(this._hillshade, -this.S / 2, -this.S / 2, this.S, this.S);
+    ctx.restore();
+  }
+
+  drawDrainage() {
+    const { model } = this.data;
+    const { accumulation, receiver } = model.drainage;
+    const n = model.n, cell = model.cell;
+    const { ctx } = this;
+    ctx.strokeStyle = 'rgba(90, 170, 255, 0.8)';
+    for (let k = 0; k < accumulation.length; k++) {
+      const a = accumulation[k];
+      if (a < 120 || receiver[k] < 0) continue;
+      const r = receiver[k];
+      const [x0, y0] = this.toCanvas((k % n) * cell, Math.floor(k / n) * cell);
+      const [x1, y1] = this.toCanvas((r % n) * cell, Math.floor(r / n) * cell);
+      ctx.lineWidth = Math.min(3, 0.5 + Math.log10(a / 120) * 1.2);
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    }
+  }
+
+  drawLandforms() {
+    const { ctx } = this;
+    const lm = this.data.landmarks;
+    const tri = (x, y, r, up) => {
+      ctx.beginPath();
+      ctx.moveTo(x, y - r * up); ctx.lineTo(x + r * 0.9, y + r * 0.6 * up); ctx.lineTo(x - r * 0.9, y + r * 0.6 * up); ctx.closePath();
+    };
+    for (const s of lm.summits) {
+      const [x, y] = this.toCanvas(s.x, s.y);
+      ctx.fillStyle = s.kind === 'summit' ? '#ffb347' : '#ffd79a';
+      tri(x, y, s.kind === 'summit' ? 6 : 4.5, 1); ctx.fill();
+    }
+    for (const s of lm.saddles) {
+      const [x, y] = this.toCanvas(s.x, s.y);
+      ctx.strokeStyle = '#c792ea'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, y - 5, 5, 0.2 * Math.PI, 0.8 * Math.PI); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y + 5, 5, 1.2 * Math.PI, 1.8 * Math.PI); ctx.stroke();
+    }
+    for (const s of lm.depressions) {
+      const [x, y] = this.toCanvas(s.x, s.y);
+      ctx.fillStyle = '#7fdbff';
+      tri(x, y, 5, -1); ctx.fill();
+    }
+  }
+
+  drawCone() {
+    const v = this.viewing || (this.reveal && this.reveal.camera ? { ...this.reveal.camera, color: COLORS.coneLine } : null);
+    if (!v) return;
+    const { ctx } = this;
+    const len = 750;
+    const a0 = ((v.heading - v.fov / 2) * Math.PI) / 180, a1 = ((v.heading + v.fov / 2) * Math.PI) / 180;
+    const [ox, oy] = this.toCanvas(v.x, v.y);
+    ctx.beginPath();
+    ctx.moveTo(ox, oy);
+    for (let t = 0; t <= 16; t++) {
+      const a = a0 + ((a1 - a0) * t) / 16;
+      const [x, y] = this.toCanvas(v.x + Math.sin(a) * len, v.y + Math.cos(a) * len);
+      ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = COLORS.cone;
+    ctx.fill();
+    ctx.strokeStyle = v.color || COLORS.coneLine;
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([4, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  drawMarkers() {
+    const { ctx } = this;
+    for (const o of this.data.options) {
+      const [x, y] = this.toCanvas(o.x, o.y);
+      let ring = COLORS.marker, fill = COLORS.bg, text = COLORS.marker;
+      if (this.reveal) {
+        if (o.correct) { ring = COLORS.correct; text = COLORS.correct; }
+        else if (o.label === this.reveal.chosen) { ring = COLORS.wrong; text = COLORS.wrong; }
+      }
+      const hovered = this.pickable && this.hover === o.label;
+      ctx.beginPath();
+      ctx.arc(x, y, 18, 0, Math.PI * 2);
+      ctx.strokeStyle = ring;
+      ctx.globalAlpha = 0.35;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      ctx.arc(x, y, hovered ? 13.5 : 12, 0, Math.PI * 2);
+      ctx.fillStyle = hovered ? '#27313b' : fill;
+      ctx.fill();
+      ctx.lineWidth = 2.2;
+      ctx.strokeStyle = ring;
+      ctx.stroke();
+      ctx.fillStyle = text;
+      ctx.font = '700 13px system-ui, -apple-system, "Segoe UI", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(o.label, x, y + 0.5);
+    }
+  }
+
+  drawNorthArrow() {
+    const { ctx } = this;
+    const L = this.data.model.size;
+    const [ax, ay] = this.toCanvas(L / 2, L / 2), [bx, by] = this.toCanvas(L / 2, L / 2 + 1);
+    const l = Math.hypot(bx - ax, by - ay);
+    const dx = (bx - ax) / l, dy = (by - ay) / l;
+    const w = this.canvas.width / this.dpr;
+    const ox = w - 64, oy = 46;
+    ctx.fillStyle = 'rgba(21, 26, 32, 0.8)';
+    ctx.beginPath(); ctx.arc(ox, oy, 38, 0, Math.PI * 2); ctx.fill();
+    const x0 = ox - dx * 26, y0 = oy - dy * 26, x1 = ox + dx * 26, y1 = oy + dy * 26;
+    ctx.strokeStyle = COLORS.marker; ctx.fillStyle = COLORS.marker; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x1 + dx * 4, y1 + dy * 4);
+    ctx.lineTo(x1 - dx * 6 - dy * 4, y1 - dy * 6 + dx * 4);
+    ctx.lineTo(x1 - dx * 6 + dy * 4, y1 - dy * 6 - dx * 4);
+    ctx.closePath(); ctx.fill();
+    ctx.font = '700 13px system-ui, -apple-system, "Segoe UI", sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('N', x0 - dx * 10, y0 - dy * 10);
+  }
+
+  drawScaleBar() {
+    const { ctx } = this;
+    const L = this.data.model.size;
+    const pxPerM = this.S / L;
+    const metres = pxPerM * 500 > 140 ? 250 : 500;
+    const len = metres * pxPerM;
+    const h = this.canvas.height / this.dpr;
+    const x = 22, y = h - 20;
+    ctx.fillStyle = 'rgba(21, 26, 32, 0.75)';
+    ctx.fillRect(x - 6, y - 26, len + 70, 34);
+    ctx.strokeStyle = COLORS.marker; ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.moveTo(x, y - 4); ctx.lineTo(x, y); ctx.lineTo(x + len, y); ctx.lineTo(x + len, y - 4); ctx.stroke();
+    ctx.fillStyle = COLORS.marker;
+    ctx.font = '500 11px system-ui, -apple-system, "Segoe UI", sans-serif';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(`${metres} m`, x + len + 8, y + 1);
+    ctx.fillText(`${this.data.interval} m contours`, x, y - 12);
+  }
+}

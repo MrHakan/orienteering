@@ -1,0 +1,339 @@
+// UI controller: wires the engine (in a worker), the WebGL scene and the map.
+
+import { TerrainModel } from '../engine/terrainModel.js';
+import { SeedManager } from '../engine/rng.js';
+import { DIFFICULTIES } from '../engine/difficulty.js';
+import { TerrainRenderer } from '../render/webglTerrain.js';
+import { MapRenderer } from '../render/mapRenderer.js';
+import { drawCompassTape } from '../render/compassTape.js';
+
+const $ = (id) => document.getElementById(id);
+
+const store = {
+  get(key, fallback) {
+    try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch { return fallback; }
+  },
+  set(key, value) {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage unavailable */ }
+  },
+};
+
+const state = {
+  quiz: null,
+  model: null,
+  answered: false,
+  chosen: null,
+  viewing: null,
+  score: store.get('otq.score', { correct: 0, total: 0, streak: 0 }),
+  settings: store.get('otq.settings', { northUp: false, tape: true, hillshade: false, landforms: false, drainage: false }),
+  requestId: 0,
+};
+
+let renderer = null;
+try {
+  renderer = new TerrainRenderer($('scene'));
+} catch (err) {
+  $('loading-text').textContent = `WebGL unavailable: ${err.message}`;
+}
+const map = new MapRenderer($('map'), { onPick: (label) => answer(label) });
+
+// ---------------------------------------------------------------- generation
+
+let worker = null;
+function getWorker() {
+  if (worker !== null) return worker;
+  try {
+    worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+  } catch {
+    worker = false;
+  }
+  return worker;
+}
+
+function requestQuiz(seed, difficulty) {
+  const id = ++state.requestId;
+  return new Promise((resolve, reject) => {
+    const w = getWorker();
+    if (!w) {
+      // Fallback: generate on the main thread.
+      import('../engine/quiz.js').then(({ generateQuiz }) => {
+        setTimeout(() => {
+          try { resolve(generateQuiz({ seed, difficulty })); } catch (e) { reject(e); }
+        }, 30);
+      }, reject);
+      return;
+    }
+    const onMessage = (e) => {
+      if (e.data.id !== id) return;
+      if (e.data.type === 'progress') { $('loading-text').textContent = `${e.data.message}…`; return; }
+      w.removeEventListener('message', onMessage);
+      if (e.data.type === 'result') resolve(e.data.quiz);
+      else reject(new Error(e.data.message));
+    };
+    w.addEventListener('message', onMessage);
+    w.postMessage({ id, seed, difficulty });
+  });
+}
+
+async function load(seed, difficulty) {
+  $('seed').value = seed;
+  $('difficulty').value = difficulty;
+  setLoading(true, 'Generating terrain…');
+  setAnswersEnabled(false);
+  const myId = state.requestId + 1;
+  let quiz;
+  try {
+    quiz = await requestQuiz(seed, difficulty);
+  } catch (err) {
+    console.error(err);
+    setLoading(true, `Generation failed: ${err.message}`);
+    return;
+  }
+  if (myId !== state.requestId) return; // superseded by a newer request
+  show(quiz);
+  history.replaceState(null, '', `#seed=${encodeURIComponent(seed)}&d=${difficulty}`);
+}
+
+function show(quiz) {
+  state.quiz = quiz;
+  state.answered = false;
+  state.chosen = null;
+  state.viewing = null;
+  const t = quiz.terrain;
+  state.model = new TerrainModel({ size: t.size, n: t.n, heights: t.heights, seed: t.modelSeed });
+
+  $('facing-text').textContent = quiz.heading.text;
+  $('facing-arrow').textContent = quiz.heading.mode === 'exact' ? '' : quiz.heading.arrow;
+  $('credit').textContent = `seed ${quiz.seed} · ${DIFFICULTIES[quiz.difficulty].label.toLowerCase()} · ${Math.round(t.size / 1000 * 10) / 10} km × ${Math.round(t.size / 1000 * 10) / 10} km`;
+  $('viewing-badge').hidden = true;
+  $('result').hidden = true;
+  $('prompt').hidden = false;
+
+  if (renderer) {
+    renderer.setTerrain(state.model);
+    renderScene(quiz.camera);
+  }
+  map.setData({
+    model: state.model,
+    interval: t.contourInterval,
+    options: quiz.options,
+    rotation: state.settings.northUp ? 0 : quiz.mapRotation,
+    landmarks: quiz.landmarks,
+  });
+  map.setOverlays(state.settings);
+
+  const answers = $('answers');
+  answers.innerHTML = '';
+  for (const o of quiz.options) {
+    const b = document.createElement('button');
+    b.className = 'answer';
+    b.type = 'button';
+    b.textContent = o.label;
+    b.dataset.label = o.label;
+    b.addEventListener('click', () => answer(o.label));
+    answers.append(b);
+  }
+  renderFacts();
+  setLoading(false);
+  setAnswersEnabled(true);
+}
+
+function renderScene(camera) {
+  if (!renderer) return;
+  renderer.render(camera);
+  if (state.settings.tape) drawCompassTape($('tape'), camera, { exact: state.quiz.heading.mode === 'exact' });
+  else $('tape').getContext('2d').clearRect(0, 0, $('tape').width, $('tape').height);
+}
+
+// ---------------------------------------------------------------- answering
+
+function answer(label) {
+  if (!state.quiz || state.answered) return;
+  const quiz = state.quiz;
+  if (!quiz.options.some((o) => o.label === label)) return;
+  state.answered = true;
+  state.chosen = label;
+  const right = label === quiz.correctLabel;
+  state.score.total++;
+  if (right) { state.score.correct++; state.score.streak++; } else state.score.streak = 0;
+  store.set('otq.score', state.score);
+  renderScore();
+
+  for (const b of $('answers').children) {
+    b.disabled = true;
+    if (b.dataset.label === quiz.correctLabel) b.classList.add('correct');
+    else if (b.dataset.label === label) b.classList.add('wrong');
+  }
+  map.setReveal({ chosen: label, camera: quiz.camera });
+  $('prompt').hidden = true;
+
+  const res = $('result');
+  res.hidden = false;
+  const verdict = right ? `<div class="verdict good">Correct — you were at ${quiz.correctLabel}.</div>`
+    : `<div class="verdict bad">Not quite — you were at ${quiz.correctLabel}.</div>`;
+  const rows = quiz.options.map((o) => `<tr><td><strong>${o.label}</strong>${o.correct ? ' ✓' : ''}</td><td>${o.landform}</td><td>${Math.round(o.z)} m</td><td>${o.correct ? '—' : `${o.D.toFixed(1)}°`}</td></tr>`).join('');
+  res.innerHTML = `${verdict}
+    <p>Compare the views: the dashed wedge on the map shows what each position looks at.</p>
+    <div class="views">${quiz.options.map((o) => `<button type="button" class="btn ghost" data-view="${o.label}">View from ${o.label}${o.correct ? ' (true)' : ''}</button>`).join('')}</div>
+    <table><tr><th>Point</th><th>Landform</th><th>Elevation</th><th>View difference</th></tr>${rows}</table>
+    <button type="button" class="btn primary" id="next">Next quiz (N)</button>`;
+  res.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => viewFrom(b.dataset.view)));
+  $('next').addEventListener('click', newQuiz);
+  highlightView(quiz.correctLabel);
+}
+
+function viewFrom(label) {
+  const quiz = state.quiz;
+  const o = quiz.options.find((p) => p.label === label);
+  const cam = { ...quiz.camera, x: o.x, y: o.y, z: state.model.getElevation(o.x, o.y) + quiz.camera.eyeHeight };
+  renderScene(cam);
+  map.setViewing({ ...cam, color: o.correct ? '#5fd08a' : '#ff9f5e' });
+  const badge = $('viewing-badge');
+  badge.hidden = false;
+  badge.textContent = `Viewing from ${label}${o.correct ? ' — true position' : ' — distractor'}`;
+  highlightView(label);
+}
+
+function highlightView(label) {
+  document.querySelectorAll('[data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === label));
+}
+
+// ---------------------------------------------------------------- panels
+
+function renderScore() {
+  $('score-correct').textContent = state.score.correct;
+  $('score-total').textContent = state.score.total;
+  $('score-streak').textContent = state.score.streak;
+}
+
+function renderFacts() {
+  const q = state.quiz;
+  const facts = [
+    ['Heading', `${String(Math.round(q.camera.heading)).padStart(3, '0')}° (${q.heading.mode})`],
+    ['Field of view', `${q.camera.fov}° · eye ${q.camera.eyeHeight} m`],
+    ['Relief', `${Math.round(q.terrain.min)}–${Math.round(q.terrain.max)} m`],
+    ['Contours', `${q.terrain.contourInterval} m (index every ${q.terrain.contourInterval * 5} m)`],
+    ['Map', q.mapRotation && !state.settings.northUp ? `rotated ${q.mapRotation}° (see N arrow)` : 'north-up'],
+    ['Terrain', q.terrain.archetypes.map((a) => a.replace(/([A-Z])/g, ' $1').toLowerCase()).join(', ')],
+    ['Confidence', `${Math.round(q.validation.confidence * 100)}%${q.lowConfidence ? ' (below threshold)' : ''}`],
+    ['Generated', `${q.stats.ms} ms · ${q.stats.viewpointsEvaluated} views scored`],
+  ];
+  $('facts').innerHTML = facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+  const comp = [
+    ['Skyline complexity', q.quality.skylineComplexity],
+    ['Landmark visibility', q.quality.landmarkVisibility],
+    ['Terrain variation', q.quality.terrainVariation],
+    ['Ridge / valley info', q.quality.ridgeValleyInformation],
+    ['Foreground info', q.quality.foregroundInformation],
+    ['Orientation identifiability', q.quality.orientationIdentifiability],
+    ['Occlusion penalty', -q.quality.occlusionPenalty],
+    ['Total quality', q.quality.total],
+    ['Uniqueness', q.validation.uniqueness],
+  ];
+  $('quality').innerHTML = comp.map(([k, v]) => `<div class="bar"><span>${k}</span><span class="track"><span class="fill${v < 0 ? ' neg' : ''}" style="width:${Math.min(100, Math.abs(v) * 100).toFixed(0)}%"></span></span><span class="v">${v.toFixed(2)}</span></div>`).join('');
+  $('gen-log').textContent = q.log.map((l) => l.stage === 'terrain'
+    ? `terrain #${l.attempt}: rejected — ${l.issues.join('; ')}`
+    : `terrain #${l.attempt} view ${l.try}: ${l.ok ? 'accepted' : 'rejected'} (confidence ${l.confidence})${l.issues.length ? ' — ' + l.issues.join('; ') : ''}`).join('\n');
+}
+
+function setLoading(on, text) {
+  $('loading').classList.toggle('hidden', !on);
+  if (text) $('loading-text').textContent = text;
+}
+
+function setAnswersEnabled(on) {
+  for (const b of $('answers').children) b.disabled = !on;
+}
+
+// ---------------------------------------------------------------- controls
+
+function newQuiz() {
+  load(SeedManager.randomSeed(), $('difficulty').value);
+}
+
+$('controls').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const seed = $('seed').value.trim() || SeedManager.randomSeed();
+  load(seed, $('difficulty').value);
+});
+$('new-quiz').addEventListener('click', newQuiz);
+$('difficulty').addEventListener('change', () => load($('seed').value.trim() || SeedManager.randomSeed(), $('difficulty').value));
+$('copy-link').addEventListener('click', async () => {
+  const btn = $('copy-link');
+  try {
+    await navigator.clipboard.writeText(location.href);
+    btn.textContent = 'Link copied';
+  } catch {
+    btn.textContent = location.href;
+  }
+  setTimeout(() => { btn.textContent = 'Copy link to this quiz'; }, 1600);
+});
+
+const toggles = { 'opt-northup': 'northUp', 'opt-tape': 'tape', 'opt-hillshade': 'hillshade', 'opt-landforms': 'landforms', 'opt-drainage': 'drainage' };
+for (const [id, key] of Object.entries(toggles)) {
+  const el = $(id);
+  el.checked = !!state.settings[key];
+  el.addEventListener('change', () => {
+    state.settings[key] = el.checked;
+    store.set('otq.settings', state.settings);
+    $('legend').hidden = !state.settings.landforms;
+    if (!state.quiz) return;
+    if (key === 'northUp') {
+      map.data.rotation = state.settings.northUp ? 0 : state.quiz.mapRotation;
+      map.draw();
+      renderFacts();
+    } else if (key === 'tape') {
+      renderScene(currentCamera());
+    } else {
+      map.setOverlays(state.settings);
+    }
+  });
+}
+$('legend').hidden = !state.settings.landforms;
+
+function currentCamera() {
+  const q = state.quiz;
+  if (!state.answered) return q.camera;
+  const active = document.querySelector('[data-view].active');
+  if (!active) return q.camera;
+  const o = q.options.find((p) => p.label === active.dataset.view);
+  return { ...q.camera, x: o.x, y: o.y, z: state.model.getElevation(o.x, o.y) + q.camera.eyeHeight };
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.matches('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key.toUpperCase();
+  if (k === 'N') newQuiz();
+  else if (/^[A-E]$/.test(k)) {
+    if (state.answered) { if (state.quiz.options.some((o) => o.label === k)) viewFrom(k); }
+    else answer(k);
+  }
+});
+
+let resizeTimer = 0;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (!state.quiz) return;
+    renderScene(currentCamera());
+    map.draw();
+  }, 60);
+});
+
+// ---------------------------------------------------------------- boot
+
+function parseHash() {
+  const p = new URLSearchParams(location.hash.slice(1));
+  const d = p.get('d');
+  return { seed: p.get('seed'), difficulty: d && DIFFICULTIES[d] ? d : null };
+}
+
+window.addEventListener('hashchange', () => {
+  const { seed, difficulty } = parseHash();
+  if (seed && (seed !== state.quiz?.seed || difficulty !== state.quiz?.difficulty)) load(seed, difficulty || 'medium');
+});
+
+renderScore();
+const initial = parseHash();
+load(initial.seed || SeedManager.randomSeed(), initial.difficulty || store.get('otq.difficulty', 'medium'));
+$('difficulty').addEventListener('change', () => store.set('otq.difficulty', $('difficulty').value));

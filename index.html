@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Where Are You? — Orienteering Terrain Quiz</title>
+  <meta name="description" content="Procedural orienteering quiz: match a first-person terrain view to a contour map.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18c3-6 5-9 8-9s4 4 6 4 2-2 4-3" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M3 21c3-4 5-6 8-6s4 2 6 2 2-1 4-2" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".6"/><path d="M7 13c2-4 3-6 5-6s3 3 4 3" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".6"/></svg>
+      <span>Terrain Quiz</span>
+    </div>
+    <form class="controls" id="controls">
+      <label class="field">
+        <span>Difficulty</span>
+        <select id="difficulty">
+          <option value="easy">Easy</option>
+          <option value="medium" selected>Medium</option>
+          <option value="hard">Hard</option>
+          <option value="expert">Expert</option>
+        </select>
+      </label>
+      <label class="field seed-field">
+        <span>Seed</span>
+        <input id="seed" type="text" spellcheck="false" autocomplete="off" maxlength="40">
+      </label>
+      <button type="submit" class="btn ghost" id="load-seed" title="Generate the quiz for this seed">Load</button>
+      <button type="button" class="btn primary" id="new-quiz" title="New random quiz (N)">New quiz</button>
+    </form>
+  </header>
+
+  <main class="layout">
+    <section class="card" aria-labelledby="quiz-title">
+      <h1 id="quiz-title">WHERE ARE YOU?</h1>
+      <p class="facing"><span id="facing-text">&nbsp;</span> <span id="facing-arrow" class="arrow"></span></p>
+
+      <div class="scene-wrap">
+        <canvas id="scene" aria-label="First-person view of the terrain"></canvas>
+        <canvas id="tape" aria-hidden="true"></canvas>
+        <div id="viewing-badge" class="badge" hidden></div>
+        <div id="loading" class="loading">
+          <div class="spinner"></div>
+          <div id="loading-text">Generating terrain…</div>
+        </div>
+      </div>
+
+      <div class="rule"></div>
+
+      <div class="map-wrap">
+        <canvas id="map" aria-label="Topographic contour map with candidate locations"></canvas>
+      </div>
+
+      <p class="prompt" id="prompt">You are at one of the marked points, facing the direction shown. Which one?</p>
+      <div class="answers" id="answers"></div>
+      <div class="result" id="result" hidden></div>
+      <p class="credit" id="credit"></p>
+    </section>
+
+    <aside class="panel">
+      <section class="box">
+        <h2>Score</h2>
+        <div class="score">
+          <div><strong id="score-correct">0</strong><span>correct</span></div>
+          <div><strong id="score-total">0</strong><span>answered</span></div>
+          <div><strong id="score-streak">0</strong><span>streak</span></div>
+        </div>
+      </section>
+
+      <section class="box">
+        <h2>Map</h2>
+        <label class="toggle"><input type="checkbox" id="opt-northup"> Always north-up</label>
+        <label class="toggle"><input type="checkbox" id="opt-tape" checked> Bearing tape on view</label>
+        <label class="toggle"><input type="checkbox" id="opt-hillshade"> Hillshade</label>
+        <label class="toggle"><input type="checkbox" id="opt-landforms"> Detected landforms <small>(reveals hints)</small></label>
+        <label class="toggle"><input type="checkbox" id="opt-drainage"> Drainage network</label>
+        <div class="legend" id="legend" hidden>
+          <span><i class="lg summit"></i>summit</span><span><i class="lg knoll"></i>knoll</span><span><i class="lg saddle"></i>saddle</span><span><i class="lg dep"></i>depression</span>
+        </div>
+      </section>
+
+      <section class="box">
+        <h2>Question</h2>
+        <dl class="facts" id="facts"></dl>
+        <details>
+          <summary>View quality breakdown</summary>
+          <div id="quality"></div>
+        </details>
+        <details>
+          <summary>Generation log</summary>
+          <pre id="gen-log"></pre>
+        </details>
+        <button type="button" class="btn ghost small" id="copy-link">Copy link to this quiz</button>
+      </section>
+
+      <section class="box about">
+        <h2>How it works</h2>
+        <p>One seeded elevation model is generated from landform primitives (ridges, spurs, re-entrants, valleys, saddles, knolls), fractal noise and a drainage/erosion pass. The 3D view and the contour map are both drawn from it.</p>
+        <p>Observer positions are scored on skyline, landmarks and occlusion. Distractors are picked from spots whose view, facing the same way, looks similar but can still be told apart.</p>
+        <p class="keys">Keys: <kbd>A</kbd>–<kbd>D</kbd> answer · <kbd>N</kbd> new quiz</p>
+      </section>
+    </aside>
+  </main>
+
+  <script type="module" src="src/ui/app.js"></script>
+</body>
+</html>
