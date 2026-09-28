@@ -180,6 +180,31 @@ export class TerrainAnalyzer {
     return TerrainAnalyzer.suppress(out, 150);
   }
 
+  /**
+   * True when two points sit on the same continuous landform (one hillside,
+   * one valley floor, one ridge flank): walking the straight line between
+   * them crosses no drainage channel and no dip or rise of `relief` metres
+   * relative to the endpoints. Answer options on the same feature look like
+   * one location to a player, however far apart their coordinates are.
+   */
+  sameFeature(ax, ay, bx, by, { relief = 6, channel = 150 } = {}) {
+    const m = this.model;
+    const d = Math.hypot(bx - ax, by - ay);
+    const steps = Math.max(2, Math.ceil(d / (this.cell * 0.8)));
+    const ha = m.getElevation(ax, ay), hb = m.getElevation(bx, by);
+    const lo = Math.min(ha, hb) - relief, hi = Math.max(ha, hb) + relief;
+    const acc = m.drainage.accumulation;
+    for (let s = 1; s < steps; s++) {
+      const t = s / steps;
+      const x = ax + (bx - ax) * t, y = ay + (by - ay) * t;
+      const h = m.getElevation(x, y);
+      if (h < lo || h > hi) return false;
+      // Ignore the first/last 30 m so a point standing in a gully is not "split" from itself.
+      if (d * t > 30 && d * (1 - t) > 30 && acc[this.idx(x, y)] >= channel) return false;
+    }
+    return true;
+  }
+
   /** Landmarks visible in a scene: summits, knolls, saddles, depressions. */
   get landmarks() {
     if (!this._landmarks) this._landmarks = [...this.summits, ...this.saddles, ...this.depressions];

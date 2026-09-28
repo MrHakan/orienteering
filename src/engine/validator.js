@@ -44,10 +44,12 @@ export class QuizValidator {
     if (correct.desc.edgeFrac > 0.4) issues.push('view relies on terrain outside the map');
     if (distractors.length < preset.distractors) issues.push(`only ${distractors.length}/${preset.distractors} plausible distractors`);
 
-    const pts = [correct, ...distractors];
     let minSep = Infinity;
-    for (let a = 0; a < pts.length; a++) for (let b = a + 1; b < pts.length; b++) minSep = Math.min(minSep, Math.hypot(pts[a].x - pts[b].x, pts[a].y - pts[b].y));
-    if (minSep < preset.minSeparation * 0.99) issues.push('candidate points too close together');
+    for (let a = 0; a < distractors.length; a++) for (let b = a + 1; b < distractors.length; b++) minSep = Math.min(minSep, Math.hypot(distractors[a].x - distractors[b].x, distractors[a].y - distractors[b].y));
+    const minTrue = distractors.reduce((m, d) => Math.min(m, Math.hypot(d.x - correct.x, d.y - correct.y)), Infinity);
+    if (minSep < preset.minSeparation * 0.99) issues.push('distractors too close together');
+    if (minTrue < (preset.minTrueDistance ?? preset.minSeparation) * 0.99) issues.push('a distractor is too close to the true position');
+    minSep = Math.min(minSep, minTrue);
 
     const ds = distractors.map((d) => d.D);
     const minD = ds.length ? Math.min(...ds) : 0;

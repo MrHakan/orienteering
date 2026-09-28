@@ -2,7 +2,7 @@
 // different from the true observer position but produce a plausible,
 // moderately similar view for the same heading.
 
-import { descriptorDistance } from './skyline.js';
+import { descriptorDistance, horizonDistance } from './skyline.js';
 import { TerrainAnalyzer } from './analyzer.js';
 import { wrap360 } from './grid.js';
 
@@ -71,10 +71,15 @@ export class QuizCandidateGenerator {
     const grid = this.candidateGrid();
     const descs = this.descriptors(view);
 
+    // Similarity is searched across the whole map; distance and landform are
+    // hard constraints, never part of the similarity itself. Nearby points
+    // always look alike, so without these rules the "most similar" options
+    // simply line up on the same slope as the true position.
+    const minTrue = preset.minTrueDistance ?? preset.minSeparation;
     const candidates = [];
     let considered = 0;
     for (const p of grid) {
-      if (Math.hypot(p.x - view.x, p.y - view.y) < preset.minSeparation) continue;
+      if (Math.hypot(p.x - view.x, p.y - view.y) < minTrue) continue;
       considered++;
       const desc = descs[p.id];
       // An option the player cannot evaluate from the map is not a fair distractor.
@@ -85,26 +90,34 @@ export class QuizCandidateGenerator {
       candidates.push({ ...p, D, desc, cue: distinguishingCue(correctDesc, desc) });
     }
 
-    // Terrain signature similarity (includes the full 360 skyline).
     const w = preset.signatureWeight;
     const spread = 0.5 * (band.max - band.min);
+    const kept = [];
     for (const c of candidates) {
+      if (analyzer.sameFeature(view.x, view.y, c.x, c.y)) continue; // same hillside / valley floor
       c.signature = this.signature(c, view.eyeHeight);
       c.sigDist = TerrainAnalyzer.signatureDistance(correctSig, c.signature, relief);
-      const bandScore = Math.exp(-(((c.D - band.target) / spread) ** 2));
-      const sigScore = Math.exp(-1.6 * c.sigDist);
-      c.score = (1 - w) * bandScore + w * sigScore;
+      // Visual similarity of the view in the given heading.
+      const viewSim = c.D <= band.target ? 1 : Math.exp(-(((c.D - band.target) / spread) ** 2));
+      const horizonSim = Math.exp(-horizonDistance(correctDesc.horizon, c.desc.horizon) / 2);
+      const slopeSim = Math.exp(-Math.abs(c.signature.slope - correctSig.slope) / 8);
+      const elevSim = Math.exp(-Math.abs(c.signature.elevation - correctSig.elevation) / Math.max(8, 0.15 * relief));
+      const depthSim = Math.exp(-depthDifference(correctDesc, c.desc) / 0.5);
+      const visual = (0.55 * viewSim + 0.2 * horizonSim + 0.15 * slopeSim + 0.1 * elevSim) * (0.7 + 0.3 * depthSim);
+      c.score = (1 - w) * visual + w * Math.exp(-1.6 * c.sigDist);
       // A distractor must differ somewhere the player can actually see.
       if (preset.search && c.cue.magnitude < preset.search.cue) c.score *= 0.05;
+      kept.push(c);
     }
 
     const chosen = [];
-    const pool = candidates.slice();
+    const pool = kept;
     const power = preset.search?.pickPower ?? 3;
     while (chosen.length < count && pool.length) {
       const c = rng.weighted(pool, (p) => p.score ** power);
       pool.splice(pool.indexOf(c), 1);
       if (chosen.some((q) => Math.hypot(q.x - c.x, q.y - c.y) < preset.minSeparation)) continue;
+      if (chosen.some((q) => analyzer.sameFeature(q.x, q.y, c.x, c.y))) continue;
       if (chosen.some((q) => descriptorDistance(q.desc, c.desc) < band.min * 0.8)) continue;
       chosen.push(c);
     }
@@ -116,6 +129,13 @@ export class QuizCandidateGenerator {
       inBand: candidates.length,
     };
   }
+}
+
+/** Mean |ln| ratio of horizon distances: do the skylines sit at similar depths? */
+export function depthDifference(a, b) {
+  let s = 0;
+  for (let c = 0; c < a.dist.length; c++) s += Math.abs(Math.log(Math.max(20, a.dist[c]) / Math.max(20, b.dist[c])));
+  return s / a.dist.length;
 }
 
 /**

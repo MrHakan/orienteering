@@ -8,7 +8,8 @@ export const DIFFICULTIES = {
     heading: 'cardinal',
     distractors: 2,
     fov: [68, 75],
-    minSeparation: 420,
+    minSeparation: 420,      // between any two options (m)
+    minTrueDistance: 480,    // true position to each distractor (m)
     // View-descriptor distance band (degrees RMS) for distractors.
     band: { min: 2.6, target: 4.5, max: 9 },
     signatureWeight: 0.2,
@@ -27,7 +28,8 @@ export const DIFFICULTIES = {
     heading: 'intercardinal',
     distractors: 2,
     fov: [60, 72],
-    minSeparation: 330,
+    minSeparation: 380,
+    minTrueDistance: 460,
     band: { min: 1.8, target: 3.2, max: 6.5 },
     signatureWeight: 0.4,
     quality: { landmark: 1.1, occlusion: 1.2 },
@@ -45,7 +47,8 @@ export const DIFFICULTIES = {
     heading: 'exact',
     distractors: 3,
     fov: [55, 70],
-    minSeparation: 260,
+    minSeparation: 360,
+    minTrueDistance: 460,
     band: { min: 1.3, target: 2.3, max: 4.5 },
     signatureWeight: 0.6,
     quality: { landmark: 1.0, occlusion: 1.0 },
@@ -63,7 +66,8 @@ export const DIFFICULTIES = {
     heading: 'exact',
     distractors: 3,
     fov: [55, 65],
-    minSeparation: 220,
+    minSeparation: 360,
+    minTrueDistance: 480,
     band: { min: 1.0, target: 1.8, max: 3.5 },
     signatureWeight: 0.85,
     quality: { landmark: 0.9, occlusion: 0.7 },
@@ -84,8 +88,9 @@ export const DIFFICULTIES = {
     heading: 'exact',
     distractors: 2,
     fov: [58, 66],
-    minSeparation: 240,
-    band: { min: 0.8, target: 1.05, max: 2.4 },
+    minSeparation: 380,
+    minTrueDistance: 500,
+    band: { min: 0.9, target: 1.3, max: 3.0 },
     signatureWeight: 0.35,
     quality: { landmark: 1.1, occlusion: 1.1 },
     minQuality: 0.55,
@@ -96,7 +101,7 @@ export const DIFFICULTIES = {
     // only used when nothing harder is valid.
     facing: { minD: 1.0 },
     search: {
-      viewTries: 36,   // viewpoints fully evaluated per terrain
+      viewTries: 48,   // viewpoints fully evaluated per terrain
       cue: 1.6,        // every distractor needs a visible skyline difference of at least this (deg)
       shortlist: 3,    // final pick is random among the N hardest valid questions
       pickPower: 6,    // sharper preference for the closest-looking distractors

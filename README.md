@@ -93,6 +93,13 @@ The view comparison (`descriptorDistance`) uses only what's inside the field of 
 - similar elevations;
 - options spread across the map, so "the one in the middle" gives nothing away.
 
+Distractors are searched by similarity across the **whole map**. Distance is only a hard constraint, never a similarity term, because neighbouring points always look alike, and treating closeness as similarity lines every option up on one slope. The rules:
+- at least 500 m from the true position;
+- at least 380 m between options;
+- no two options on the **same landform**: `TerrainAnalyzer.sameFeature` rejects a pair when the straight line between them crosses no drainage channel and no dip or rise of 6 m (one hillside, one valley floor).
+
+The similarity score weights the view descriptor at 55 %, horizon profile 20 %, slope 15 % and elevation 10 %, scaled by how similar the skyline depths are. Master then keeps the viewpoint whose distant "twins" come closest. Other difficulties use the same rules with 360–420 m spacing.
+
 Solvability is enforced: every distractor must differ from the true view by at least 1.6° somewhere on the skyline. The answer screen names that **key difference** ("088°: skyline 2.1° lower"). The final question is drawn at random from the three hardest.
 
 **Heading style** (the *Heading* control, `&h=` in the link) overrides the difficulty default in any "Where are you?" game, Master included:

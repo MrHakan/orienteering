@@ -197,3 +197,26 @@ test('"Which way?" mode: 8 directions, one correct, distinct from the rest', asy
     for (const o of q.options.filter((o) => !o.correct)) assert.ok(o.D >= minD, `${o.label} ${o.D}`);
   }
 });
+
+test('options are spread out: distance rules and no two on the same landform', async () => {
+  const { generate } = await import('../src/engine/quiz.js');
+  const { TerrainModel } = await import('../src/engine/terrainModel.js');
+  for (const [difficulty, headingMode] of [['master', 'intercardinal'], ['hard', null]]) {
+    const q = await generate({ seed: 'spread', difficulty, headingMode });
+    const p = getDifficulty(difficulty);
+    const t = q.terrain;
+    const model = new TerrainModel({ size: t.size, n: t.n, heights: t.heights, seed: t.modelSeed });
+    const correct = q.options.find((o) => o.correct);
+    const others = q.options.filter((o) => !o.correct);
+    for (const o of others) {
+      assert.ok(Math.hypot(o.x - correct.x, o.y - correct.y) >= p.minTrueDistance - 1, 'far enough from the true point');
+      assert.ok(!model.analyzer.sameFeature(correct.x, correct.y, o.x, o.y), 'not on the same landform as the true point');
+    }
+    for (let a = 0; a < others.length; a++) {
+      for (let b = a + 1; b < others.length; b++) {
+        assert.ok(Math.hypot(others[a].x - others[b].x, others[a].y - others[b].y) >= p.minSeparation - 1);
+        assert.ok(!model.analyzer.sameFeature(others[a].x, others[a].y, others[b].x, others[b].y));
+      }
+    }
+  }
+});
