@@ -16,6 +16,10 @@ export const DIFFICULTIES = {
     minQuality: 0.5,
     minConfidence: 0.55,
     mapRotation: false,
+    // "Which way?" mode: the closest-looking wrong direction must differ by at
+    // least minD (deg RMS); views where it differs by more than maxD are
+    // only used when nothing harder is valid.
+    facing: { minD: 3.2 },
   },
   medium: {
     label: 'Medium',
@@ -30,6 +34,10 @@ export const DIFFICULTIES = {
     minQuality: 0.45,
     minConfidence: 0.5,
     mapRotation: false,
+    // "Which way?" mode: the closest-looking wrong direction must differ by at
+    // least minD (deg RMS); views where it differs by more than maxD are
+    // only used when nothing harder is valid.
+    facing: { minD: 2.4, maxD: 6 },
   },
   hard: {
     label: 'Hard',
@@ -44,6 +52,10 @@ export const DIFFICULTIES = {
     minQuality: 0.4,
     minConfidence: 0.45,
     mapRotation: true,
+    // "Which way?" mode: the closest-looking wrong direction must differ by at
+    // least minD (deg RMS); views where it differs by more than maxD are
+    // only used when nothing harder is valid.
+    facing: { minD: 1.8, maxD: 4 },
   },
   expert: {
     label: 'Expert',
@@ -58,6 +70,10 @@ export const DIFFICULTIES = {
     minQuality: 0.35,
     minConfidence: 0.4,
     mapRotation: true,
+    // "Which way?" mode: the closest-looking wrong direction must differ by at
+    // least minD (deg RMS); views where it differs by more than maxD are
+    // only used when nothing harder is valid.
+    facing: { minD: 1.4, maxD: 3 },
   },
   // Brain-burner: many viewpoints are fully evaluated and the question whose
   // distractors are hardest to rule out - while each still differs visibly
@@ -75,6 +91,10 @@ export const DIFFICULTIES = {
     minQuality: 0.55,
     minConfidence: 0.35,
     mapRotation: true,
+    // "Which way?" mode: the closest-looking wrong direction must differ by at
+    // least minD (deg RMS); views where it differs by more than maxD are
+    // only used when nothing harder is valid.
+    facing: { minD: 1.0 },
     search: {
       viewTries: 36,   // viewpoints fully evaluated per terrain
       cue: 1.6,        // every distractor needs a visible skyline difference of at least this (deg)

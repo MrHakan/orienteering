@@ -5,7 +5,7 @@ import { SeedManager } from '../engine/rng.js';
 import { scrambleLabels } from '../engine/scramble.js';
 import { DIFFICULTIES } from '../engine/difficulty.js';
 import { TerrainRenderer } from '../render/webglTerrain.js';
-import { MapRenderer } from '../render/mapRenderer.js';
+import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
 import { ExportComposer } from '../export/composer.js';
 import { encodeCanvasVideo, pickVideoPath } from '../export/recorder.js';
@@ -53,16 +53,14 @@ function getWorker() {
   return worker;
 }
 
-function requestQuiz(seed, difficulty, variant = 0) {
+function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode }) {
   const id = ++state.requestId;
   return new Promise((resolve, reject) => {
     const w = getWorker();
     if (!w) {
       // Fallback: generate on the main thread.
-      import('../engine/quiz.js').then(({ generateQuiz }) => {
-        setTimeout(() => {
-          try { resolve(generateQuiz({ seed, difficulty, variant })); } catch (e) { reject(e); }
-        }, 30);
+      import('../engine/quiz.js').then(({ generate }) => {
+        setTimeout(() => generate({ seed, difficulty, variant, mode, headingMode }).then(resolve, reject), 30);
       }, reject);
       return;
     }
@@ -74,34 +72,62 @@ function requestQuiz(seed, difficulty, variant = 0) {
       else reject(new Error(e.data.message));
     };
     w.addEventListener('message', onMessage);
-    w.postMessage({ id, seed, difficulty, variant });
+    w.postMessage({ id, seed, difficulty, variant, mode, headingMode });
   });
 }
 
-async function load(seed, difficulty, variant = 0, scramble = 0) {
-  $('seed').value = seed;
-  $('difficulty').value = difficulty;
-  setLoading(true, difficulty === 'master' ? 'Searching for a devious question…' : 'Generating terrain…');
+/**
+ * req: { seed, difficulty, variant, scramble, mode, headingMode }.
+ * Missing fields come from the controls.
+ */
+async function load(req) {
+  const r = {
+    seed: req.seed || SeedManager.randomSeed(),
+    difficulty: req.difficulty || $('difficulty').value,
+    variant: req.variant || 0,
+    scramble: req.scramble || 0,
+    mode: req.mode || $('mode').value,
+    headingMode: req.headingMode || $('heading-mode').value,
+  };
+  $('seed').value = r.seed;
+  $('difficulty').value = r.difficulty;
+  $('mode').value = r.mode;
+  $('heading-mode').value = r.headingMode;
+  syncControls();
+  setLoading(true, r.difficulty === 'master' ? 'Searching for a devious question…' : 'Generating terrain…');
   setAnswersEnabled(false);
   const myId = state.requestId + 1;
   let quiz;
   try {
-    quiz = await requestQuiz(seed, difficulty, variant);
+    quiz = await requestQuiz({ ...r, headingMode: r.headingMode === 'auto' ? null : r.headingMode });
   } catch (err) {
     console.error(err);
     setLoading(true, `Generation failed: ${err.message}`);
     return;
   }
   if (myId !== state.requestId) return; // superseded by a newer request
+  quiz.headingChoice = r.headingMode;
   state.baseQuiz = quiz;
-  show(scramble ? scrambleLabels(quiz, scramble) : quiz);
+  show(r.scramble && quiz.mode !== 'facing' ? scrambleLabels(quiz, r.scramble) : quiz);
   updateHash();
 }
 
 function updateHash() {
   const q = state.quiz;
   if (!q) return;
-  history.replaceState(null, '', `#seed=${encodeURIComponent(q.seed)}&d=${q.difficulty}${q.variant ? `&v=${q.variant}` : ''}${q.scramble ? `&s=${q.scramble}` : ''}`);
+  const parts = [`seed=${encodeURIComponent(q.seed)}`, `d=${q.difficulty}`];
+  if (q.mode === 'facing') parts.push('m=facing');
+  else if (q.headingChoice && q.headingChoice !== 'auto') parts.push(`h=${q.headingChoice}`);
+  if (q.variant) parts.push(`v=${q.variant}`);
+  if (q.scramble) parts.push(`s=${q.scramble}`);
+  history.replaceState(null, '', `#${parts.join('&')}`);
+}
+
+/** Show only the controls that apply to the selected mode. */
+function syncControls() {
+  const facing = $('mode').value === 'facing';
+  $('heading-field').hidden = facing;
+  $('scramble').hidden = facing;
 }
 
 function show(quiz) {
@@ -112,8 +138,13 @@ function show(quiz) {
   const t = quiz.terrain;
   state.model = new TerrainModel({ size: t.size, n: t.n, heights: t.heights, seed: t.modelSeed });
 
-  $('facing-text').textContent = quiz.heading.text;
-  $('facing-arrow').textContent = quiz.heading.mode === 'exact' ? '' : quiz.heading.arrow;
+  const facing = quiz.mode === 'facing';
+  $('quiz-title').textContent = facing ? 'WHICH WAY ARE YOU FACING?' : 'WHERE ARE YOU?';
+  $('quiz-title').classList.toggle('long', facing);
+  $('facing-text').textContent = facing ? 'YOU ARE AT THE MARKED POINT' : quiz.heading.text;
+  $('facing-arrow').textContent = facing || quiz.heading.mode === 'exact' ? '' : quiz.heading.arrow;
+  $('prompt').textContent = facing ? 'You stand at the marked point. Which of the 8 directions are you looking in?'
+    : 'You are at one of the marked points, facing the direction shown. Which one?';
   $('credit').textContent = `seed ${quiz.seed}${quiz.variant ? ` · positions #${quiz.variant}` : ''} · ${DIFFICULTIES[quiz.difficulty].label.toLowerCase()} · ${Math.round(t.size / 1000 * 10) / 10} km × ${Math.round(t.size / 1000 * 10) / 10} km`;
   $('viewing-badge').hidden = true;
   $('result').hidden = true;
@@ -126,7 +157,7 @@ function show(quiz) {
   map.setData({
     model: state.model,
     interval: t.contourInterval,
-    options: quiz.options,
+    options: quizMarkers(quiz),
     rotation: state.settings.northUp ? 0 : quiz.mapRotation,
     landmarks: quiz.landmarks,
   });
@@ -138,9 +169,33 @@ function show(quiz) {
   setAnswersEnabled(true);
 }
 
+const ROSE = ['NW', 'N', 'NE', 'W', '', 'E', 'SW', 'S', 'SE'];
+
 function renderAnswerButtons() {
   const answers = $('answers');
   answers.innerHTML = '';
+  const facing = state.quiz.mode === 'facing';
+  answers.classList.toggle('rose', facing);
+  if (facing) {
+    for (const label of ROSE) {
+      if (!label) {
+        const c = document.createElement('div');
+        c.className = 'rose-centre';
+        c.setAttribute('aria-hidden', 'true');
+        answers.append(c);
+        continue;
+      }
+      const b = document.createElement('button');
+      b.className = 'answer dir';
+      b.type = 'button';
+      b.textContent = label;
+      b.dataset.label = label;
+      b.addEventListener('click', () => answer(label));
+      answers.append(b);
+    }
+    $('scramble').disabled = true;
+    return;
+  }
   for (const o of state.quiz.options) {
     const b = document.createElement('button');
     b.className = 'answer';
@@ -156,7 +211,9 @@ function renderAnswerButtons() {
 function renderScene(camera) {
   if (!renderer) return;
   renderer.render(camera);
-  if (state.settings.tape) drawCompassTape($('tape'), camera, { exact: state.quiz.heading.mode === 'exact' });
+  // In "Which way?" the bearing tape would give the answer away.
+  const tapeAllowed = state.quiz.mode !== 'facing' || state.answered;
+  if (state.settings.tape && tapeAllowed) drawCompassTape($('tape'), camera, { exact: state.quiz.heading.mode === 'exact' });
   else $('tape').getContext('2d').clearRect(0, 0, $('tape').width, $('tape').height);
 }
 
@@ -182,6 +239,8 @@ function answer(label) {
   map.setReveal({ chosen: label, camera: quiz.camera });
   $('scramble').disabled = true;
   $('prompt').hidden = true;
+  renderFacts();
+  if (quiz.mode === 'facing') { showFacingResult(label, right); return; }
 
   const res = $('result');
   res.hidden = false;
@@ -200,15 +259,49 @@ function answer(label) {
   highlightView(quiz.correctLabel);
 }
 
-function viewFrom(label) {
+function showFacingResult(label, right) {
+  const quiz = state.quiz;
+  const res = $('result');
+  res.hidden = false;
+  const verdict = right ? `<div class="verdict good">Correct — you were facing ${quiz.correctLabel}.</div>`
+    : `<div class="verdict bad">Not quite — you were facing ${quiz.correctLabel}, not ${label}.</div>`;
+  // Where in the frame the difference is, since the other direction's view shares only the screen position.
+  const side = (o) => {
+    const rel = ((o.cue.bearing - quiz.camera.heading + 540) % 360) - 180;
+    return rel < -quiz.camera.fov / 6 ? 'left side' : rel > quiz.camera.fov / 6 ? 'right side' : 'centre';
+  };
+  const cue = (o) => (o.cue ? `${side(o)}: skyline ${Math.abs(o.cue.delta).toFixed(1)}° ${o.cue.delta > 0 ? 'higher' : 'lower'}` : '—');
+  const ranked = quiz.options.filter((o) => !o.correct).sort((a, b) => a.D - b.D);
+  const rows = ranked.slice(0, 3).map((o) => `<tr><td><strong>${o.label}</strong>${o.label === label ? ' (your pick)' : ''}</td><td>${o.D.toFixed(1)}°</td><td>${cue(o)}</td></tr>`).join('');
+  res.innerHTML = `${verdict}
+    <p>Look in each direction from the point; the dashed wedge on the map shows the view.</p>
+    <div class="views">${quiz.options.map((o) => `<button type="button" class="btn ghost" data-view="${o.label}">${o.label}${o.correct ? ' ✓' : ''}</button>`).join('')}</div>
+    <table><tr><th>Most similar wrong directions</th><th>View diff.</th><th>Key difference</th></tr>${rows}</table>
+    <p class="note">Key difference: where in the frame the skyline in that direction would differ most from the view you were shown.</p>
+    <button type="button" class="btn primary" id="next">Next quiz (N)</button>`;
+  res.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => viewFrom(b.dataset.view)));
+  $('next').addEventListener('click', newQuiz);
+  highlightView(quiz.correctLabel);
+  renderScene(quiz.camera);
+}
+
+/** Camera for an answer option: another point (where-am-i) or another heading (facing). */
+function optionCamera(label) {
   const quiz = state.quiz;
   const o = quiz.options.find((p) => p.label === label);
-  const cam = { ...quiz.camera, x: o.x, y: o.y, z: state.model.getElevation(o.x, o.y) + quiz.camera.eyeHeight };
+  if (quiz.mode === 'facing') return { cam: { ...quiz.camera, heading: o.heading }, o };
+  return { cam: { ...quiz.camera, x: o.x, y: o.y, z: state.model.getElevation(o.x, o.y) + quiz.camera.eyeHeight }, o };
+}
+
+function viewFrom(label) {
+  const quiz = state.quiz;
+  const { cam, o } = optionCamera(label);
   renderScene(cam);
   map.setViewing({ ...cam, color: o.correct ? '#5fd08a' : '#ff9f5e' });
   const badge = $('viewing-badge');
   badge.hidden = false;
-  badge.textContent = `Viewing from ${label}${o.correct ? ' — true position' : ' — distractor'}`;
+  badge.textContent = quiz.mode === 'facing' ? `Facing ${label}${o.correct ? ' — true direction' : ''}`
+    : `Viewing from ${label}${o.correct ? ' — true position' : ' — distractor'}`;
   highlightView(label);
 }
 
@@ -227,7 +320,8 @@ function renderScore() {
 function renderFacts() {
   const q = state.quiz;
   const facts = [
-    ['Heading', `${String(Math.round(q.camera.heading)).padStart(3, '0')}° (${q.heading.mode})`],
+    ['Mode', q.mode === 'facing' ? 'Which way are you facing?' : 'Where are you?'],
+    ['Heading', q.mode === 'facing' && !state.answered ? 'hidden until you answer' : `${String(Math.round(q.camera.heading)).padStart(3, '0')}° (${q.mode === 'facing' ? 'one of 8 directions' : q.heading.mode})`],
     ['Field of view', `${q.camera.fov}° · eye ${q.camera.eyeHeight} m`],
     ['Relief', `${Math.round(q.terrain.min)}–${Math.round(q.terrain.max)} m`],
     ['Contours', `${q.terrain.contourInterval} m (index every ${q.terrain.contourInterval * 5} m)`],
@@ -267,7 +361,7 @@ function setAnswersEnabled(on) {
 // ---------------------------------------------------------------- controls
 
 function newQuiz() {
-  load(SeedManager.randomSeed(), $('difficulty').value);
+  load({ seed: SeedManager.randomSeed() });
 }
 
 /**
@@ -276,7 +370,7 @@ function newQuiz() {
  */
 function scrambleOptions() {
   const q = state.quiz;
-  if (!q || state.answered) return;
+  if (!q || state.answered || q.mode === 'facing') return;
   // Derived from the unscrambled quiz so "&s=N" in a link reproduces it.
   const quiz = scrambleLabels(state.baseQuiz, (q.scramble || 0) + 1);
   state.quiz = quiz;
@@ -292,20 +386,22 @@ function scrambleOptions() {
 function newPositions() {
   if (!state.quiz) return;
   const q = state.quiz;
-  const difficulty = $('difficulty').value;
-  const sameTerrain = difficulty === q.difficulty && $('seed').value.trim() === q.seed;
-  load(q.seed, difficulty, sameTerrain ? (q.variant || 0) + 1 : 0);
+  const same = $('difficulty').value === q.difficulty && $('seed').value.trim() === q.seed
+    && $('mode').value === q.mode && $('heading-mode').value === (q.headingChoice || 'auto');
+  load({ seed: q.seed, variant: same ? (q.variant || 0) + 1 : 0 });
 }
 
 $('controls').addEventListener('submit', (e) => {
   e.preventDefault();
-  const seed = $('seed').value.trim() || SeedManager.randomSeed();
-  load(seed, $('difficulty').value);
+  load({ seed: $('seed').value.trim() });
 });
 $('new-quiz').addEventListener('click', newQuiz);
 $('new-positions').addEventListener('click', newPositions);
 $('scramble').addEventListener('click', scrambleOptions);
-$('difficulty').addEventListener('change', () => load($('seed').value.trim() || SeedManager.randomSeed(), $('difficulty').value));
+// Changing mode, difficulty or heading style keeps the seed, so the terrain carries over.
+for (const id of ['difficulty', 'mode', 'heading-mode']) {
+  $(id).addEventListener('change', () => { syncControls(); load({ seed: $('seed').value.trim() }); });
+}
 $('copy-link').addEventListener('click', async () => {
   const btn = $('copy-link');
   try {
@@ -344,14 +440,18 @@ function currentCamera() {
   if (!state.answered) return q.camera;
   const active = document.querySelector('[data-view].active');
   if (!active) return q.camera;
-  const o = q.options.find((p) => p.label === active.dataset.view);
-  return { ...q.camera, x: o.x, y: o.y, z: state.model.getElevation(o.x, o.y) + q.camera.eyeHeight };
+  return optionCamera(active.dataset.view).cam;
 }
 
 document.addEventListener('keydown', (e) => {
   if ($('export-dialog').open) return;
   if (e.target.matches('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key.toUpperCase();
+  if (state.quiz?.mode === 'facing') {
+    // Q W E / A · D / Z X C laid out like the compass rose.
+    const dir = { Q: 'NW', W: 'N', E: 'NE', A: 'W', D: 'E', Z: 'SW', X: 'S', C: 'SE' }[k];
+    if (dir) { state.answered ? viewFrom(dir) : answer(dir); return; }
+  }
   if (k === 'N') newQuiz();
   else if (k === 'P') newPositions();
   else if (k === 'S') scrambleOptions();
@@ -535,15 +635,24 @@ function parseHash() {
   const d = p.get('d');
   const v = Math.max(0, Math.floor(+p.get('v') || 0));
   const sc = Math.max(0, Math.floor(+p.get('s') || 0));
-  return { seed: p.get('seed'), difficulty: d && DIFFICULTIES[d] ? d : null, variant: v, scramble: sc };
+  const h = p.get('h');
+  return {
+    seed: p.get('seed'), difficulty: d && DIFFICULTIES[d] ? d : null, variant: v, scramble: sc,
+    mode: p.get('m') === 'facing' ? 'facing' : 'where-am-i',
+    headingMode: ['exact', 'intercardinal', 'cardinal'].includes(h) ? h : 'auto',
+  };
 }
 
 window.addEventListener('hashchange', () => {
-  const { seed, difficulty, variant, scramble } = parseHash();
-  if (seed && (seed !== state.quiz?.seed || difficulty !== state.quiz?.difficulty || variant !== (state.quiz?.variant || 0) || scramble !== (state.quiz?.scramble || 0))) load(seed, difficulty || 'medium', variant, scramble);
+  const h = parseHash();
+  const q = state.quiz;
+  if (h.seed && (h.seed !== q?.seed || h.difficulty !== q?.difficulty || h.variant !== (q?.variant || 0) || h.scramble !== (q?.scramble || 0)
+    || h.mode !== q?.mode || h.headingMode !== (q?.headingChoice || 'auto'))) load({ ...h, difficulty: h.difficulty || 'medium' });
 });
 
 renderScore();
 const initial = parseHash();
-load(initial.seed || SeedManager.randomSeed(), initial.difficulty || store.get('otq.difficulty', 'medium'), initial.seed ? initial.variant : 0, initial.seed ? initial.scramble : 0);
+if (initial.seed) load({ ...initial, difficulty: initial.difficulty || store.get('otq.difficulty', 'medium') });
+else load({ difficulty: store.get('otq.difficulty', 'medium'), mode: store.get('otq.mode', 'where-am-i') });
 $('difficulty').addEventListener('change', () => store.set('otq.difficulty', $('difficulty').value));
+$('mode').addEventListener('change', () => store.set('otq.mode', $('mode').value));

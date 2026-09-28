@@ -170,3 +170,30 @@ test('scrambling moves every letter but keeps the points', async () => {
     prev = s;
   }
 });
+
+test('heading style can be overridden (master with 8 directions or exact bearings)', async () => {
+  const { generate } = await import('../src/engine/quiz.js');
+  const eight = await generate({ seed: 'hm', difficulty: 'master', headingMode: 'intercardinal' });
+  assert.equal(eight.camera.heading % 45, 0);
+  assert.match(eight.heading.text, /^FACING (NORTH|SOUTH|EAST|WEST)(-(EAST|WEST))?$/);
+  const exact = await generate({ seed: 'hm', difficulty: 'master' });
+  assert.match(exact.heading.text, /^FACING \d{3}°$/);
+  assert.equal(hash(exact.terrain.heights), hash(eight.terrain.heights), 'same terrain');
+});
+
+test('"Which way?" mode: 8 directions, one correct, distinct from the rest', async () => {
+  const { generate } = await import('../src/engine/quiz.js');
+  for (const difficulty of ['easy', 'master']) {
+    const q = await generate({ seed: 'facing-t', difficulty, mode: 'facing' });
+    assert.equal(q.mode, 'facing');
+    assert.deepEqual(q.options.map((o) => o.label), ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']);
+    assert.equal(q.options.filter((o) => o.correct).length, 1);
+    const correct = q.options.find((o) => o.correct);
+    assert.equal(correct.label, q.correctLabel);
+    assert.equal(correct.heading, q.camera.heading);
+    assert.equal(q.point.x, q.camera.x);
+    assert.ok(!q.lowConfidence);
+    const minD = getDifficulty(difficulty).facing.minD;
+    for (const o of q.options.filter((o) => !o.correct)) assert.ok(o.D >= minD, `${o.label} ${o.D}`);
+  }
+});

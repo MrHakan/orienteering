@@ -4,7 +4,7 @@
 // exported picture comes from exactly the same TerrainModel as the page.
 
 import { TerrainRenderer } from '../render/webglTerrain.js';
-import { MapRenderer } from '../render/mapRenderer.js';
+import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
 import { Random } from '../engine/rng.js';
 
@@ -37,6 +37,7 @@ export function weatherParams(selected, heading) {
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 export function captionText(quiz) {
+  if (quiz.mode === 'facing') return 'Which way: N, NE, E, SE, S, SW, W or NW?';
   const labels = quiz.options.map((o) => o.label);
   const list = labels.length > 1 ? `${labels.slice(0, -1).join(', ')} or ${labels[labels.length - 1]}` : labels[0];
   return `You are at ${list}, ${quiz.heading.text.toLowerCase()}.`;
@@ -110,7 +111,7 @@ export class ExportComposer {
     const make = (reveal) => {
       const c = document.createElement('canvas');
       const mr = new MapRenderer(c, { fixedSize: { width: s / 2, height: s / 2, dpr: 2 } });
-      mr.setData({ model: this.model, interval: q.terrain.contourInterval, options: q.options, rotation: this.options.northUp ? 0 : q.mapRotation, landmarks: q.landmarks });
+      mr.setData({ model: this.model, interval: q.terrain.contourInterval, options: quizMarkers(q), rotation: this.options.northUp ? 0 : q.mapRotation, landmarks: q.landmarks });
       if (reveal) mr.setReveal({ chosen: null, camera: q.camera });
       return c;
     };
@@ -141,11 +142,12 @@ export class ExportComposer {
     ctx.textBaseline = 'alphabetic';
     ctx.font = `800 ${L.title.size}px ${FONT}`;
     if ('letterSpacing' in ctx) ctx.letterSpacing = `${Math.round(L.title.size * 0.06)}px`;
-    ctx.fillText('WHERE ARE YOU?', W / 2, L.title.y);
+    const facingMode = q.mode === 'facing';
+    ctx.fillText(facingMode ? 'WHICH WAY?' : 'WHERE ARE YOU?', W / 2, L.title.y);
     if ('letterSpacing' in ctx) ctx.letterSpacing = `${Math.round(L.facing.size * 0.08)}px`;
     ctx.font = `500 ${L.facing.size}px ${FONT}`;
     ctx.fillStyle = '#cfd3d6';
-    const facing = q.heading.mode === 'exact' ? q.heading.text : `${q.heading.text} ${q.heading.arrow}`;
+    const facing = facingMode ? 'YOU ARE AT THE MARKED POINT' : q.heading.mode === 'exact' ? q.heading.text : `${q.heading.text} ${q.heading.arrow}`;
     ctx.fillText(facing, W / 2, L.facing.y);
     if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
 
@@ -156,7 +158,8 @@ export class ExportComposer {
     ctx.save();
     ctx.beginPath(); ctx.rect(S.x, S.y, S.w, S.h); ctx.clip();
     if (this.weather.rain) this.drawRain(t);
-    if (this.options.tape) drawCompassTape(null, q.camera, { exact: q.heading.mode === 'exact', target: { ctx, x: S.x, y: S.y, width: S.w, scale: S.w / 666 } });
+    // The bearing tape would reveal the answer in "Which way?" until the reveal.
+    if (this.options.tape && (!facingMode || reveal)) drawCompassTape(null, q.camera, { exact: q.heading.mode === 'exact', target: { ctx, x: S.x, y: S.y, width: S.w, scale: S.w / 666 } });
     ctx.restore();
 
     // Countdown bar under the scene (video only).

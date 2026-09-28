@@ -13,26 +13,51 @@ import { clamp } from './grid.js';
 
 export const LABELS = ['A', 'B', 'C', 'D', 'E'];
 
+export const HEADING_MODES = ['cardinal', 'intercardinal', 'exact'];
+
 /**
- * @param {{seed:string, difficulty?:string, variant?:number, size?:number, n?:number, maxTerrainAttempts?:number, onProgress?:(msg:string)=>void}} opts
+ * Terrain for (seed, difficulty, attempt). Shared by every quiz mode, so one
+ * seed gives the same landscape in "Where are you?" and "Which way?".
+ */
+export function buildTerrain({ seed, difficulty, attempt, preset, seeds, size = DEFAULT_SIZE, n = DEFAULT_RES }) {
+  const terrain = TerrainGenerator.generate(seeds.stream('terrain', attempt), preset.terrain, { size, n });
+  const model = new TerrainModel({ ...terrain, seed: `${seed}#${difficulty}#${attempt}` });
+  const interval = model.chooseContourInterval();
+  const terrainCheck = QuizValidator.validateTerrain(model, model.getContours(interval));
+  return { model, interval, terrainCheck };
+}
+
+/** Dispatch on quiz mode: 'where-am-i' (default) or 'facing'. */
+export async function generate(opts) {
+  if (opts.mode === 'facing') {
+    const { generateFacingQuiz } = await import('./facingQuiz.js');
+    return generateFacingQuiz(opts);
+  }
+  return generateQuiz(opts);
+}
+
+/**
+ * @param {{seed:string, difficulty?:string, variant?:number, headingMode?:string, size?:number, n?:number, maxTerrainAttempts?:number, onProgress?:(msg:string)=>void}} opts
  * `variant` keeps the terrain of (seed, difficulty) but draws a new observer
  * position, heading and distractors. Variant 0 is the original question.
+ * `headingMode` overrides the difficulty's heading style
+ * ('cardinal' | 'intercardinal' | 'exact').
  */
-export function generateQuiz({ seed, difficulty = 'medium', variant = 0, size = DEFAULT_SIZE, n = DEFAULT_RES, maxTerrainAttempts = 4, maxViewTries = 8, onProgress = () => {} }) {
+export function generateQuiz({ seed, difficulty = 'medium', variant = 0, headingMode = null, size = DEFAULT_SIZE, n = DEFAULT_RES, maxTerrainAttempts = 4, maxViewTries = 8, onProgress = () => {} }) {
   const t0 = now();
-  const preset = getDifficulty(difficulty);
+  const base = getDifficulty(difficulty);
+  const override = HEADING_MODES.includes(headingMode) && headingMode !== base.heading ? headingMode : null;
+  const preset = override ? { ...base, heading: override } : base;
   const seeds = new SeedManager(`${seed}#${difficulty}`);
-  // Streams that decide positions get the variant tag; terrain streams do not.
-  const vt = variant ? [`v${variant}`] : [];
+  // Streams that decide positions get the variant (and heading style) tag;
+  // terrain streams do not.
+  const vt = [...(variant ? [`v${variant}`] : []), ...(override ? [`h-${override}`] : [])];
   const log = [];
   let best = null;
 
   for (let attempt = 0; attempt < maxTerrainAttempts; attempt++) {
     onProgress(`Generating terrain (attempt ${attempt + 1})`);
-    const terrain = TerrainGenerator.generate(seeds.stream('terrain', attempt), preset.terrain, { size, n });
-    const model = new TerrainModel({ ...terrain, seed: `${seed}#${difficulty}#${attempt}` });
-    const interval = model.chooseContourInterval();
-    const terrainCheck = QuizValidator.validateTerrain(model, model.getContours(interval));
+    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n });
     if (!terrainCheck.ok) {
       log.push({ attempt, stage: 'terrain', issues: terrainCheck.issues });
       continue;
@@ -107,7 +132,36 @@ export function puzzleHardness(e, preset) {
 }
 
 const rank = (e) => (e.validation.ok ? 10 : 0) + e.validation.confidence + 0.2 * e.candidates.distractors.length;
-const now = () => (globalThis.performance ? performance.now() : Date.now());
+export const now = () => (globalThis.performance ? performance.now() : Date.now());
+
+/** Plain-data landform summary (for overlays), shared by all modes. */
+export function landmarkSummary(model) {
+  const a = model.analyzer;
+  return {
+    summits: a.summits.map(({ x, y, z, prominence, kind }) => ({ x, y, z, prominence, kind })),
+    saddles: a.saddles.map(({ x, y, z }) => ({ x, y, z })),
+    depressions: a.depressions.map(({ x, y, z, depth }) => ({ x, y, z, depth })),
+  };
+}
+
+/** Terrain block of a quiz object, shared by all modes. */
+export function terrainSummary(model, interval, terrainCheck) {
+  return {
+    size: model.size, n: model.n, heights: model.heights,
+    modelSeed: model.seed,
+    min: model.min, max: model.max,
+    archetypes: model.meta.archetypes,
+    noiseShare: model.meta.noiseShare,
+    contourInterval: interval,
+    check: terrainCheck,
+  };
+}
+
+/** Pitch that frames the horizon slightly above centre. */
+export function framingPitch(horizon) {
+  const mean = horizon.reduce((a, b) => a + b, 0) / horizon.length;
+  return +clamp(mean * 0.6 - 1.5, -4, 6).toFixed(2);
+}
 
 function assemble(e, { seed, difficulty, variant = 0, preset, seeds, vt = [], log, t0, lowConfidence = false, searched = 0 }) {
   const { model, view, quality, candidates, validation } = e;
@@ -119,10 +173,7 @@ function assemble(e, { seed, difficulty, variant = 0, preset, seeds, vt = [], lo
   const options = rng.shuffle(points).map((p, i) => ({ label: LABELS[i], ...p, z: model.getElevation(p.x, p.y) }));
   const correctLabel = options.find((o) => o.correct).label;
 
-  const horizon = Array.from(candidates.correct.desc.horizon);
-  const meanHorizon = horizon.reduce((a, b) => a + b, 0) / horizon.length;
-  const pitch = +clamp(meanHorizon * 0.6 - 1.5, -4, 6).toFixed(2);
-  const a = model.analyzer;
+  const pitch = framingPitch(Array.from(candidates.correct.desc.horizon));
   const headingLabel = formatHeading(view.heading, preset.heading);
   const mapRotation = preset.mapRotation ? rng.fork('rotation').pick([0, 90, 180, 270]) : 0;
 
@@ -130,16 +181,9 @@ function assemble(e, { seed, difficulty, variant = 0, preset, seeds, vt = [], lo
     version: 1,
     mode: 'where-am-i',
     seed, difficulty, variant,
+    headingMode: preset.heading,
     lowConfidence,
-    terrain: {
-      size: model.size, n: model.n, heights: model.heights,
-      modelSeed: model.seed,
-      min: model.min, max: model.max,
-      archetypes: model.meta.archetypes,
-      noiseShare: model.meta.noiseShare,
-      contourInterval: e.interval,
-      check: e.terrainCheck,
-    },
+    terrain: terrainSummary(model, e.interval, e.terrainCheck),
     camera: {
       x: view.x, y: view.y, eyeHeight: view.eyeHeight, z: model.getElevation(view.x, view.y) + view.eyeHeight,
       heading: view.heading, fov: view.fov, pitch, roll: 0,
@@ -151,11 +195,7 @@ function assemble(e, { seed, difficulty, variant = 0, preset, seeds, vt = [], lo
     quality: { total: quality.total, ...quality.components, blockedFrac: quality.blockedFrac, edgeFrac: quality.edgeFrac, landmarksInView: quality.landmarksInView },
     validation,
     hardness: e.hardness ?? puzzleHardness(e, preset),
-    landmarks: {
-      summits: a.summits.map(({ x, y, z, prominence, kind }) => ({ x, y, z, prominence, kind })),
-      saddles: a.saddles.map(({ x, y, z }) => ({ x, y, z })),
-      depressions: a.depressions.map(({ x, y, z, depth }) => ({ x, y, z, depth })),
-    },
+    landmarks: landmarkSummary(model),
     stats: {
       viewpointsEvaluated: e.evaluated,
       distractorCandidates: candidates.considered,

@@ -95,6 +95,17 @@ The view comparison (`descriptorDistance`) uses only what's inside the field of 
 
 Solvability is enforced: every distractor must differ from the true view by at least 1.6° somewhere on the skyline. The answer screen names that **key difference** ("088°: skyline 2.1° lower"). The final question is drawn at random from the three hardest.
 
+**Heading style** (the *Heading* control, `&h=` in the link) overrides the difficulty default in any "Where are you?" game, Master included:
+- `exact`: exact bearing ("FACING 067°");
+- `intercardinal`: 8 fixed directions (N, NE, E…);
+- `cardinal`: 4 directions.
+
+The terrain stays the same; only the chosen viewpoint and heading change.
+
+### "Which way are you facing?" mode
+
+`Mode → Which way are you facing?` (`&m=facing`) marks where you stand on the map and hides the heading. You pick one of 8 compass directions from a rose (keys `Q W E / A D / Z X C`). For each candidate point the generator renders the view descriptor in all 8 directions. The point is accepted only if the most similar wrong direction still differs by a difficulty-dependent margin: from 3.2° on Easy down to 1.0° on Master. On Master that nearest wrong direction must also differ visibly somewhere in the frame, and the hardest of ~40 evaluated points is chosen. The bearing tape stays hidden until you answer, and the sun always lights the scene from the same side relative to the view, so neither gives the heading away. The same seed gives the same terrain in both modes, and exports switch to a "WHICH WAY?" frame.
+
 **Scramble letters** (`S`, or `&s=N` in the link) leaves every point where it is and moves only the letters. Each press is a derangement, so every point gets a new letter, and it is reproducible from the seed. It works before answering and carries into exports.
 
 **New positions** (`P`, or `&v=N` in the link) keeps the seed's terrain and draws a new observer position, heading and set of options. `v=0` is always the original question.

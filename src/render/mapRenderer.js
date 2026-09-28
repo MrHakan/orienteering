@@ -16,6 +16,15 @@ const COLORS = {
   coneLine: 'rgba(255, 214, 102, 0.85)',
 };
 
+/**
+ * Points to mark on the map for a quiz: the answer options in "Where are
+ * you?", or the single (unlabelled) observer point in "Which way?".
+ */
+export function quizMarkers(quiz) {
+  if (quiz.mode === 'facing') return [{ label: '', x: quiz.point.x, y: quiz.point.y, correct: true }];
+  return quiz.options;
+}
+
 function chaikin(pts, closed) {
   if (pts.length < 6) return pts;
   const out = [];
@@ -417,7 +426,8 @@ export class MapRenderer {
       ctx.font = '700 13px system-ui, -apple-system, "Segoe UI", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(o.label, x, y + 0.5);
+      if (o.label) ctx.fillText(o.label, x, y + 0.5);
+      else { ctx.beginPath(); ctx.arc(x, y, 2.6, 0, Math.PI * 2); ctx.fillStyle = ring; ctx.fill(); }
     }
   }
 

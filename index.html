@@ -15,6 +15,13 @@
     </div>
     <form class="controls" id="controls">
       <label class="field">
+        <span>Mode</span>
+        <select id="mode">
+          <option value="where-am-i" selected>Where are you?</option>
+          <option value="facing">Which way are you facing?</option>
+        </select>
+      </label>
+      <label class="field">
         <span>Difficulty</span>
         <select id="difficulty">
           <option value="easy">Easy</option>
@@ -22,6 +29,15 @@
           <option value="hard">Hard</option>
           <option value="expert">Expert</option>
           <option value="master">Master (brain-burner)</option>
+        </select>
+      </label>
+      <label class="field" id="heading-field">
+        <span>Heading</span>
+        <select id="heading-mode">
+          <option value="auto" selected>Difficulty default</option>
+          <option value="exact">Exact bearing (067°)</option>
+          <option value="intercardinal">8 directions (NE…)</option>
+          <option value="cardinal">4 directions (N/E/S/W)</option>
         </select>
       </label>
       <label class="field seed-field">
@@ -111,7 +127,8 @@
         <p>One seeded elevation model is generated from landform primitives (ridges, spurs, re-entrants, valleys, saddles, knolls), fractal noise and a drainage/erosion pass. The 3D view and the contour map are both drawn from it.</p>
         <p>Observer positions are scored on skyline, landmarks and occlusion. Distractors are picked from spots whose view, facing the same way, looks similar but can still be told apart.</p>
         <p>Master mode fully evaluates dozens of viewpoints and keeps the question whose distractors are hardest to rule out. Every distractor still differs visibly somewhere in the scene, and the answer screen shows where.</p>
-        <p class="keys">Keys: <kbd>A</kbd>–<kbd>D</kbd> answer · <kbd>S</kbd> scramble letters · <kbd>P</kbd> new positions · <kbd>N</kbd> new quiz</p>
+        <p>"Which way are you facing?" marks where you stand and hides the heading. Pick the one of 8 directions whose view matches, which works best by comparing the skyline with the contours around the point.</p>
+        <p class="keys">Keys: <kbd>A</kbd>–<kbd>D</kbd> answer · <kbd>S</kbd> scramble letters · <kbd>P</kbd> new positions · <kbd>N</kbd> new quiz · "Which way?": <kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd> / <kbd>A</kbd><kbd>D</kbd> / <kbd>Z</kbd><kbd>X</kbd><kbd>C</kbd> as a compass rose</p>
       </section>
     </aside>
   </main>
