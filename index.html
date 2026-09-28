@@ -56,7 +56,13 @@
       </div>
 
       <p class="prompt" id="prompt">You are at one of the marked points, facing the direction shown. Which one?</p>
-      <div class="answers" id="answers"></div>
+      <div class="answer-row">
+        <div class="answers" id="answers"></div>
+        <button type="button" class="btn ghost scramble" id="scramble" title="Move the letters between the points (S)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h4l10 10h4M3 17h4l3-3M14 10l3-3h4M18 4l3 3-3 3M18 14l3 3-3 3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Scramble letters
+        </button>
+      </div>
       <div class="result" id="result" hidden></div>
       <p class="credit" id="credit"></p>
     </section>
@@ -105,7 +111,7 @@
         <p>One seeded elevation model is generated from landform primitives (ridges, spurs, re-entrants, valleys, saddles, knolls), fractal noise and a drainage/erosion pass. The 3D view and the contour map are both drawn from it.</p>
         <p>Observer positions are scored on skyline, landmarks and occlusion. Distractors are picked from spots whose view, facing the same way, looks similar but can still be told apart.</p>
         <p>Master mode fully evaluates dozens of viewpoints and keeps the question whose distractors are hardest to rule out. Every distractor still differs visibly somewhere in the scene, and the answer screen shows where.</p>
-        <p class="keys">Keys: <kbd>A</kbd>–<kbd>D</kbd> answer · <kbd>P</kbd> new positions · <kbd>N</kbd> new quiz</p>
+        <p class="keys">Keys: <kbd>A</kbd>–<kbd>D</kbd> answer · <kbd>S</kbd> scramble letters · <kbd>P</kbd> new positions · <kbd>N</kbd> new quiz</p>
       </section>
     </aside>
   </main>

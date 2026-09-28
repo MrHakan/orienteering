@@ -2,6 +2,7 @@
 
 import { TerrainModel } from '../engine/terrainModel.js';
 import { SeedManager } from '../engine/rng.js';
+import { scrambleLabels } from '../engine/scramble.js';
 import { DIFFICULTIES } from '../engine/difficulty.js';
 import { TerrainRenderer } from '../render/webglTerrain.js';
 import { MapRenderer } from '../render/mapRenderer.js';
@@ -77,7 +78,7 @@ function requestQuiz(seed, difficulty, variant = 0) {
   });
 }
 
-async function load(seed, difficulty, variant = 0) {
+async function load(seed, difficulty, variant = 0, scramble = 0) {
   $('seed').value = seed;
   $('difficulty').value = difficulty;
   setLoading(true, difficulty === 'master' ? 'Searching for a devious question…' : 'Generating terrain…');
@@ -92,8 +93,15 @@ async function load(seed, difficulty, variant = 0) {
     return;
   }
   if (myId !== state.requestId) return; // superseded by a newer request
-  show(quiz);
-  history.replaceState(null, '', `#seed=${encodeURIComponent(seed)}&d=${difficulty}${variant ? `&v=${variant}` : ''}`);
+  state.baseQuiz = quiz;
+  show(scramble ? scrambleLabels(quiz, scramble) : quiz);
+  updateHash();
+}
+
+function updateHash() {
+  const q = state.quiz;
+  if (!q) return;
+  history.replaceState(null, '', `#seed=${encodeURIComponent(q.seed)}&d=${q.difficulty}${q.variant ? `&v=${q.variant}` : ''}${q.scramble ? `&s=${q.scramble}` : ''}`);
 }
 
 function show(quiz) {
@@ -124,9 +132,16 @@ function show(quiz) {
   });
   map.setOverlays(state.settings);
 
+  renderAnswerButtons();
+  renderFacts();
+  setLoading(false);
+  setAnswersEnabled(true);
+}
+
+function renderAnswerButtons() {
   const answers = $('answers');
   answers.innerHTML = '';
-  for (const o of quiz.options) {
+  for (const o of state.quiz.options) {
     const b = document.createElement('button');
     b.className = 'answer';
     b.type = 'button';
@@ -135,9 +150,7 @@ function show(quiz) {
     b.addEventListener('click', () => answer(o.label));
     answers.append(b);
   }
-  renderFacts();
-  setLoading(false);
-  setAnswersEnabled(true);
+  $('scramble').disabled = state.answered;
 }
 
 function renderScene(camera) {
@@ -167,6 +180,7 @@ function answer(label) {
     else if (b.dataset.label === label) b.classList.add('wrong');
   }
   map.setReveal({ chosen: label, camera: quiz.camera });
+  $('scramble').disabled = true;
   $('prompt').hidden = true;
 
   const res = $('result');
@@ -256,6 +270,24 @@ function newQuiz() {
   load(SeedManager.randomSeed(), $('difficulty').value);
 }
 
+/**
+ * Move the letters between the answer points (points and view unchanged).
+ * Only before answering, so the result stays meaningful.
+ */
+function scrambleOptions() {
+  const q = state.quiz;
+  if (!q || state.answered) return;
+  // Derived from the unscrambled quiz so "&s=N" in a link reproduces it.
+  const quiz = scrambleLabels(state.baseQuiz, (q.scramble || 0) + 1);
+  state.quiz = quiz;
+  map.data.options = quiz.options;
+  map.draw();
+  renderAnswerButtons();
+  updateHash();
+  const btn = $('scramble');
+  btn.classList.remove('flash'); void btn.offsetWidth; btn.classList.add('flash');
+}
+
 /** Same seed and terrain, next set of observer/answer positions. */
 function newPositions() {
   if (!state.quiz) return;
@@ -272,6 +304,7 @@ $('controls').addEventListener('submit', (e) => {
 });
 $('new-quiz').addEventListener('click', newQuiz);
 $('new-positions').addEventListener('click', newPositions);
+$('scramble').addEventListener('click', scrambleOptions);
 $('difficulty').addEventListener('change', () => load($('seed').value.trim() || SeedManager.randomSeed(), $('difficulty').value));
 $('copy-link').addEventListener('click', async () => {
   const btn = $('copy-link');
@@ -321,6 +354,7 @@ document.addEventListener('keydown', (e) => {
   const k = e.key.toUpperCase();
   if (k === 'N') newQuiz();
   else if (k === 'P') newPositions();
+  else if (k === 'S') scrambleOptions();
   else if (/^[A-E]$/.test(k)) {
     if (state.answered) { if (state.quiz.options.some((o) => o.label === k)) viewFrom(k); }
     else answer(k);
@@ -500,15 +534,16 @@ function parseHash() {
   const p = new URLSearchParams(location.hash.slice(1));
   const d = p.get('d');
   const v = Math.max(0, Math.floor(+p.get('v') || 0));
-  return { seed: p.get('seed'), difficulty: d && DIFFICULTIES[d] ? d : null, variant: v };
+  const sc = Math.max(0, Math.floor(+p.get('s') || 0));
+  return { seed: p.get('seed'), difficulty: d && DIFFICULTIES[d] ? d : null, variant: v, scramble: sc };
 }
 
 window.addEventListener('hashchange', () => {
-  const { seed, difficulty, variant } = parseHash();
-  if (seed && (seed !== state.quiz?.seed || difficulty !== state.quiz?.difficulty || variant !== (state.quiz?.variant || 0))) load(seed, difficulty || 'medium', variant);
+  const { seed, difficulty, variant, scramble } = parseHash();
+  if (seed && (seed !== state.quiz?.seed || difficulty !== state.quiz?.difficulty || variant !== (state.quiz?.variant || 0) || scramble !== (state.quiz?.scramble || 0))) load(seed, difficulty || 'medium', variant, scramble);
 });
 
 renderScore();
 const initial = parseHash();
-load(initial.seed || SeedManager.randomSeed(), initial.difficulty || store.get('otq.difficulty', 'medium'), initial.seed ? initial.variant : 0);
+load(initial.seed || SeedManager.randomSeed(), initial.difficulty || store.get('otq.difficulty', 'medium'), initial.seed ? initial.variant : 0, initial.seed ? initial.scramble : 0);
 $('difficulty').addEventListener('change', () => store.set('otq.difficulty', $('difficulty').value));

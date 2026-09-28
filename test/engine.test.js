@@ -154,3 +154,19 @@ test('master questions are hard but every distractor has a visible cue', () => {
   }
   assert.ok(q.hardness > 0 && q.hardness <= 1);
 });
+
+test('scrambling moves every letter but keeps the points', async () => {
+  const { scrambleLabels } = await import('../src/engine/scramble.js');
+  const q = generateQuiz({ seed: 'scr', difficulty: 'hard' });
+  const at = (quiz) => new Map(quiz.options.map((o) => [`${o.x},${o.y}`, o.label]));
+  let prev = q;
+  for (let n = 1; n <= 5; n++) {
+    const s = scrambleLabels(q, n);
+    assert.deepEqual([...at(s).keys()].sort(), [...at(q).keys()].sort(), 'same points');
+    assert.deepEqual(s.options.map((o) => o.label), q.options.map((o) => o.label), 'letters stay A, B, C...');
+    for (const [pt, label] of at(s)) assert.notEqual(label, at(prev).get(pt), 'every letter moved');
+    assert.equal(s.correctLabel, s.options.find((o) => o.correct).label);
+    assert.deepEqual(scrambleLabels(q, n).options, s.options, 'deterministic');
+    prev = s;
+  }
+});

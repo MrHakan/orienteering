@@ -95,6 +95,8 @@ The view comparison (`descriptorDistance`) uses only what's inside the field of 
 
 Solvability is enforced: every distractor must differ from the true view by at least 1.6° somewhere on the skyline. The answer screen names that **key difference** ("088°: skyline 2.1° lower"). The final question is drawn at random from the three hardest.
 
+**Scramble letters** (`S`, or `&s=N` in the link) leaves every point where it is and moves only the letters. Each press is a derangement, so every point gets a new letter, and it is reproducible from the seed. It works before answering and carries into exports.
+
 **New positions** (`P`, or `&v=N` in the link) keeps the seed's terrain and draws a new observer position, heading and set of options. `v=0` is always the original question.
 
 A rotated map is only a display transform. The north arrow always shows true north and the coordinates never rotate. Every preset lives in `src/engine/difficulty.js`.
