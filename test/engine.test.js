@@ -146,7 +146,7 @@ test('variants keep the terrain but move the positions', () => {
 test('master questions are hard but every distractor has a visible cue', () => {
   const q = generateQuiz({ seed: 'master-t', difficulty: 'master' });
   const p = getDifficulty('master');
-  assert.equal(q.options.length, 4);
+  assert.equal(q.options.length, 3);
   assert.ok(!q.lowConfidence);
   for (const o of q.options.filter((o) => !o.correct)) {
     assert.ok(o.D >= p.band.min && o.D <= p.band.max);

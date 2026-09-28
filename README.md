@@ -85,7 +85,7 @@ The view comparison (`descriptorDistance`) uses only what's inside the field of 
 | Hard | exact bearing | 4 | highly plausible | more spurs/re-entrants | may be rotated |
 | Expert | exact bearing | 4 | subtle | 4–5 systems, more drainage, occlusion allowed | may be rotated |
 
-| **Master** | exact bearing | 4 | hardest valid of ~36 fully evaluated questions | 4–5 systems, max complexity | may be rotated |
+| **Master** | exact bearing | 3 | hardest valid of ~36 fully evaluated questions | 4–5 systems, max complexity | may be rotated |
 
 **Master (brain-burner)** does not stop at the first valid question. It fully evaluates about 36 viewpoints on the terrain (candidate view descriptors are cached per heading, so this takes only ~2–3 s) and scores each valid question for *puzzle hardness*:
 - distractor views close to the ambiguity limit;

@@ -66,7 +66,7 @@ export const DIFFICULTIES = {
     label: 'Master',
     terrain: { archetypes: [4, 5], relief: 1.4, complexity: 1.0, noiseShare: [0.24, 0.3] },
     heading: 'exact',
-    distractors: 3,
+    distractors: 2,
     fov: [58, 66],
     minSeparation: 240,
     band: { min: 0.8, target: 1.05, max: 2.4 },
