@@ -7,6 +7,7 @@ import { DIFFICULTIES, TUNABLES, tunableValue, encodeTuning, decodeTuning } from
 import { TerrainRenderer } from '../render/webglTerrain.js';
 import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
+import { drawSkylineOverlay } from '../render/skylineOverlay.js';
 import { ExportComposer } from '../export/composer.js';
 import { encodeCanvasVideo, pickVideoPath } from '../export/recorder.js';
 
@@ -217,8 +218,19 @@ function renderScene(camera) {
   renderer.render(camera);
   // In "Which way?" the bearing tape would give the answer away.
   const tapeAllowed = state.quiz.mode !== 'facing' || state.answered;
-  if (state.settings.tape && tapeAllowed) drawCompassTape($('tape'), camera, { exact: state.quiz.heading.mode === 'exact' });
-  else $('tape').getContext('2d').clearRect(0, 0, $('tape').width, $('tape').height);
+  const tape = $('tape');
+  if (state.settings.tape && tapeAllowed) drawCompassTape(tape, camera, { exact: state.quiz.heading.mode === 'exact' });
+  else {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    tape.width = Math.round(tape.clientWidth * dpr); tape.height = Math.round(tape.clientHeight * dpr);
+  }
+  // Developer check: engine skyline over the GPU render (hidden before answering in "Which way?").
+  if (typeof dev !== 'undefined' && dev.enabled && dev.skyline && tapeAllowed) {
+    const dpr = tape.width / tape.clientWidth || 1;
+    const ctx = tape.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawSkylineOverlay(ctx, camera, state.model, tape.clientWidth, tape.clientHeight);
+  }
 }
 
 // ---------------------------------------------------------------- answering
@@ -680,6 +692,7 @@ function adoptLinkTuning(tuning) {
 
 function renderDevPanel() {
   $('dev-enabled').checked = dev.enabled;
+  $('dev-skyline').checked = !!dev.skyline;
   $('dev-form').hidden = !dev.enabled;
   const preset = DIFFICULTIES[$('difficulty').value] || DIFFICULTIES.medium;
   $('dev-difficulty').textContent = preset.label;
@@ -719,6 +732,11 @@ $('dev-form').addEventListener('submit', (e) => {
   dev.values = readDevForm();
   saveDev();
   load({ seed: $('seed').value.trim(), variant: state.quiz?.variant || 0 });
+});
+$('dev-skyline').addEventListener('change', () => {
+  dev.skyline = $('dev-skyline').checked;
+  saveDev();
+  if (state.quiz) renderScene(currentCamera());
 });
 $('dev-reset').addEventListener('click', () => {
   dev.values = {};

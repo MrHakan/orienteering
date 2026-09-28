@@ -132,6 +132,9 @@ void main() {
   gl_FragColor = vec4(c, 1.0);
 }`;
 
+/** [near, far] view-depth ranges, drawn in order (see render()). */
+const RANGES = [[250, 16000], [1.5, 260]];
+
 function compile(gl, type, src) {
   const s = gl.createShader(type);
   gl.shaderSource(s, src);
@@ -167,7 +170,7 @@ function lookDir(eye, fwd) {
 export class TerrainRenderer {
   constructor(canvas) {
     this.canvas = canvas;
-    const opts = { antialias: true, preserveDrawingBuffer: true };
+    const opts = { antialias: true, preserveDrawingBuffer: true, depth: true };
     const gl = canvas.getContext('webgl2', opts) || canvas.getContext('webgl', opts);
     if (!gl) throw new Error('WebGL is not available');
     this.gl = gl;
@@ -306,13 +309,11 @@ export class TerrainRenderer {
     gl.disableVertexAttribArray(sp);
 
     gl.enable(gl.DEPTH_TEST);
-    gl.clear(gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.CULL_FACE);
     gl.cullFace(gl.BACK);
     gl.frontFace(gl.CCW);
     const p = this.prog;
     gl.useProgram(p);
-    gl.uniformMatrix4fv(gl.getUniformLocation(p, 'uProj'), false, perspective(vfov, aspect, 0.5, 16000));
     gl.uniformMatrix4fv(gl.getUniformLocation(p, 'uView'), false, lookDir(eye, fwd));
     gl.uniform3fv(gl.getUniformLocation(p, 'uEye'), eye);
     // Low sun from the side of the view direction: cross-lighting reveals slopes.
@@ -327,14 +328,25 @@ export class TerrainRenderer {
     gl.uniform2fv(gl.getUniformLocation(p, 'uWind'), wind);
     gl.uniform1f(gl.getUniformLocation(p, 'uWet'), wet);
     const aPos = gl.getAttribLocation(p, 'aPos'), aNor = gl.getAttribLocation(p, 'aNormal');
-    for (const mesh of this.meshes) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vbo);
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.ibo);
-      gl.enableVertexAttribArray(aPos);
-      gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 24, 0);
-      gl.enableVertexAttribArray(aNor);
-      gl.vertexAttribPointer(aNor, 3, gl.FLOAT, false, 24, 12);
-      gl.drawElements(gl.TRIANGLES, mesh.count, mesh.type, 0);
+    const uProj = gl.getUniformLocation(p, 'uProj');
+    // Two depth ranges, far first. A single 0.5 m - 16 km frustum needs a
+    // 24-bit depth buffer; some mobile GPUs give 16 bits, where the error at
+    // 1 km reaches ~30 m and distant ground bleeds through nearer hills (a
+    // wrong skyline). Splitting keeps the error below ~1 m even with 16 bits.
+    // Anything drawn in the near pass is closer than everything left from the
+    // far pass on the same pixel, so clearing depth in between is exact.
+    for (const [near, far] of RANGES) {
+      gl.clear(gl.DEPTH_BUFFER_BIT);
+      gl.uniformMatrix4fv(uProj, false, perspective(vfov, aspect, near, far));
+      for (const mesh of this.meshes) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vbo);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.ibo);
+        gl.enableVertexAttribArray(aPos);
+        gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 24, 0);
+        gl.enableVertexAttribArray(aNor);
+        gl.vertexAttribPointer(aNor, 3, gl.FLOAT, false, 24, 12);
+        gl.drawElements(gl.TRIANGLES, mesh.count, mesh.type, 0);
+      }
     }
   }
 }

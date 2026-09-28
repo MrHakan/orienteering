@@ -130,7 +130,7 @@ The **Developer** panel (sidebar) overrides the difficulty's thresholds without 
 - Master's visible-cue minimum and the number of viewpoints it searches;
 - "Which way?" direction margins.
 
-Empty fields show the current default in grey. **Apply & regenerate** rebuilds the question on the same terrain. Overrides go into the link as `&dev=minTrue:900,minSep:700`, and opening such a link switches developer mode on. Engine API: `generate({ ..., tuning: { minTrue: 900 } })`. The keys are defined in `TUNABLES` in `src/engine/difficulty.js`.
+**Show computed skyline** draws the engine's ray-marched horizon, the one the quiz is validated against, as a dashed line over the 3D view. On a correctly rendering device it sits exactly on the rendered skyline. Empty fields show the current default in grey. **Apply & regenerate** rebuilds the question on the same terrain. Overrides go into the link as `&dev=minTrue:900,minSep:700`, and opening such a link switches developer mode on. Engine API: `generate({ ..., tuning: { minTrue: 900 } })`. The keys are defined in `TUNABLES` in `src/engine/difficulty.js`.
 
 ## Map conventions
 
