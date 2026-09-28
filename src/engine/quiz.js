@@ -7,7 +7,7 @@ import { TerrainModel } from './terrainModel.js';
 import { ViewpointGenerator } from './viewpoints.js';
 import { QuizCandidateGenerator } from './quizCandidates.js';
 import { QuizValidator } from './validator.js';
-import { getDifficulty } from './difficulty.js';
+import { getDifficulty, applyTuning } from './difficulty.js';
 import { formatHeading } from './heading.js';
 import { clamp } from './grid.js';
 
@@ -41,11 +41,12 @@ export async function generate(opts) {
  * `variant` keeps the terrain of (seed, difficulty) but draws a new observer
  * position, heading and distractors. Variant 0 is the original question.
  * `headingMode` overrides the difficulty's heading style
- * ('cardinal' | 'intercardinal' | 'exact').
+ * ('cardinal' | 'intercardinal' | 'exact'). `tuning` holds developer-mode
+ * overrides (see TUNABLES in difficulty.js).
  */
-export function generateQuiz({ seed, difficulty = 'medium', variant = 0, headingMode = null, size = DEFAULT_SIZE, n = DEFAULT_RES, maxTerrainAttempts = 4, maxViewTries = 8, onProgress = () => {} }) {
+export function generateQuiz({ seed, difficulty = 'medium', variant = 0, headingMode = null, tuning = null, size = DEFAULT_SIZE, n = DEFAULT_RES, maxTerrainAttempts = 4, maxViewTries = 8, onProgress = () => {} }) {
   const t0 = now();
-  const base = getDifficulty(difficulty);
+  const base = applyTuning(getDifficulty(difficulty), tuning);
   const override = HEADING_MODES.includes(headingMode) && headingMode !== base.heading ? headingMode : null;
   const preset = override ? { ...base, heading: override } : base;
   const seeds = new SeedManager(`${seed}#${difficulty}`);

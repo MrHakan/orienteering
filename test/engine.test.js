@@ -220,3 +220,20 @@ test('options are spread out: distance rules and no two on the same landform', a
     }
   }
 });
+
+test('developer tuning overrides thresholds and reaches the generator', async () => {
+  const { applyTuning, decodeTuning, encodeTuning } = await import('../src/engine/difficulty.js');
+  const base = getDifficulty('master');
+  const t = applyTuning(base, { minTrue: '800', bandMax: 99, sameLandform: 'false', nonsense: 1 });
+  assert.equal(t.minTrueDistance, 800);
+  assert.equal(t.band.max, 30, 'clamped to range');
+  assert.equal(t.rejectSameLandform, false);
+  assert.equal(base.minTrueDistance, 500, 'defaults untouched');
+  assert.deepEqual(decodeTuning(encodeTuning({ minTrue: 800, cue: 2 })), { minTrue: '800', cue: '2' });
+
+  const q = generateQuiz({ seed: 'tune', difficulty: 'hard', tuning: { minTrue: 900, minSep: 700 } });
+  const c = q.options.find((o) => o.correct);
+  const others = q.options.filter((o) => !o.correct);
+  for (const o of others) assert.ok(Math.hypot(o.x - c.x, o.y - c.y) >= 899);
+  if (others.length === 2) assert.ok(Math.hypot(others[0].x - others[1].x, others[0].y - others[1].y) >= 699);
+});

@@ -3,7 +3,7 @@
 import { TerrainModel } from '../engine/terrainModel.js';
 import { SeedManager } from '../engine/rng.js';
 import { scrambleLabels } from '../engine/scramble.js';
-import { DIFFICULTIES } from '../engine/difficulty.js';
+import { DIFFICULTIES, TUNABLES, tunableValue, encodeTuning, decodeTuning } from '../engine/difficulty.js';
 import { TerrainRenderer } from '../render/webglTerrain.js';
 import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
@@ -53,14 +53,14 @@ function getWorker() {
   return worker;
 }
 
-function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode }) {
+function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, tuning }) {
   const id = ++state.requestId;
   return new Promise((resolve, reject) => {
     const w = getWorker();
     if (!w) {
       // Fallback: generate on the main thread.
       import('../engine/quiz.js').then(({ generate }) => {
-        setTimeout(() => generate({ seed, difficulty, variant, mode, headingMode }).then(resolve, reject), 30);
+        setTimeout(() => generate({ seed, difficulty, variant, mode, headingMode, tuning }).then(resolve, reject), 30);
       }, reject);
       return;
     }
@@ -72,7 +72,7 @@ function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode }) {
       else reject(new Error(e.data.message));
     };
     w.addEventListener('message', onMessage);
-    w.postMessage({ id, seed, difficulty, variant, mode, headingMode });
+    w.postMessage({ id, seed, difficulty, variant, mode, headingMode, tuning });
   });
 }
 
@@ -88,6 +88,7 @@ async function load(req) {
     scramble: req.scramble || 0,
     mode: req.mode || $('mode').value,
     headingMode: req.headingMode || $('heading-mode').value,
+    tuning: req.tuning || activeTuning(),
   };
   $('seed').value = r.seed;
   $('difficulty').value = r.difficulty;
@@ -107,6 +108,7 @@ async function load(req) {
   }
   if (myId !== state.requestId) return; // superseded by a newer request
   quiz.headingChoice = r.headingMode;
+  quiz.tuning = r.tuning;
   state.baseQuiz = quiz;
   show(r.scramble && quiz.mode !== 'facing' ? scrambleLabels(quiz, r.scramble) : quiz);
   updateHash();
@@ -119,6 +121,7 @@ function updateHash() {
   if (q.mode === 'facing') parts.push('m=facing');
   else if (q.headingChoice && q.headingChoice !== 'auto') parts.push(`h=${q.headingChoice}`);
   if (q.variant) parts.push(`v=${q.variant}`);
+  if (q.tuning && Object.keys(q.tuning).length) parts.push(`dev=${encodeURIComponent(encodeTuning(q.tuning))}`);
   if (q.scramble) parts.push(`s=${q.scramble}`);
   history.replaceState(null, '', `#${parts.join('&')}`);
 }
@@ -128,6 +131,7 @@ function syncControls() {
   const facing = $('mode').value === 'facing';
   $('heading-field').hidden = facing;
   $('scramble').hidden = facing;
+  if (typeof dev !== 'undefined') renderDevPanel();
 }
 
 function show(quiz) {
@@ -329,6 +333,7 @@ function renderFacts() {
     ['Terrain', q.terrain.archetypes.map((a) => a.replace(/([A-Z])/g, ' $1').toLowerCase()).join(', ')],
     ['Confidence', `${Math.round(q.validation.confidence * 100)}%${q.lowConfidence ? ' (below threshold)' : ''}`],
     ['Hardness', `${Math.round(q.hardness * 100)}%${q.stats.questionsCompared ? ` (hardest of ${q.stats.questionsCompared} valid questions)` : ''}`],
+    ...(q.tuning && Object.keys(q.tuning).length ? [['Tuning', `developer overrides: ${Object.entries(q.tuning).map(([k, v]) => `${k}=${v}`).join(', ')}`]] : []),
     ['Generated', `${q.stats.ms} ms · ${q.stats.viewpointsEvaluated} views scored`],
   ];
   $('facts').innerHTML = facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
@@ -640,6 +645,7 @@ function parseHash() {
     seed: p.get('seed'), difficulty: d && DIFFICULTIES[d] ? d : null, variant: v, scramble: sc,
     mode: p.get('m') === 'facing' ? 'facing' : 'where-am-i',
     headingMode: ['exact', 'intercardinal', 'cardinal'].includes(h) ? h : 'auto',
+    tuning: p.has('dev') ? decodeTuning(p.get('dev')) : null,
   };
 }
 
@@ -647,11 +653,85 @@ window.addEventListener('hashchange', () => {
   const h = parseHash();
   const q = state.quiz;
   if (h.seed && (h.seed !== q?.seed || h.difficulty !== q?.difficulty || h.variant !== (q?.variant || 0) || h.scramble !== (q?.scramble || 0)
-    || h.mode !== q?.mode || h.headingMode !== (q?.headingChoice || 'auto'))) load({ ...h, difficulty: h.difficulty || 'medium' });
+    || h.mode !== q?.mode || h.headingMode !== (q?.headingChoice || 'auto')
+    || encodeTuning(h.tuning || {}) !== encodeTuning(q?.tuning || {}))) { adoptLinkTuning(h.tuning); load({ ...h, difficulty: h.difficulty || 'medium' }); }
 });
+
+// ---------------------------------------------------------------- developer mode
+
+const dev = store.get('otq.dev', { enabled: false, values: {} });
+
+/** Overrides to send with a request (none unless developer mode is on). */
+function activeTuning() {
+  if (!dev.enabled) return {};
+  return Object.fromEntries(Object.entries(dev.values).filter(([, v]) => v !== '' && v !== null && v !== undefined));
+}
+
+function saveDev() { store.set('otq.dev', dev); }
+
+/** A link carrying &dev= switches developer mode on with those values. */
+function adoptLinkTuning(tuning) {
+  if (!tuning || !Object.keys(tuning).length) return;
+  dev.enabled = true;
+  dev.values = { ...tuning };
+  saveDev();
+  renderDevPanel();
+}
+
+function renderDevPanel() {
+  $('dev-enabled').checked = dev.enabled;
+  $('dev-form').hidden = !dev.enabled;
+  const preset = DIFFICULTIES[$('difficulty').value] || DIFFICULTIES.medium;
+  $('dev-difficulty').textContent = preset.label;
+  const mode = $('mode').value;
+  $('dev-fields').innerHTML = TUNABLES.map((t) => {
+    const def = tunableValue(preset, t);
+    const applies = def !== undefined && (!t.key.startsWith('facing') || mode === 'facing') && !(mode === 'facing' && ['minTrue', 'minSep', 'sameLandform', 'bandMin', 'bandTarget', 'bandMax', 'distractors', 'minConfidence'].includes(t.key));
+    const v = dev.values[t.key];
+    const label = `${t.label}${t.unit ? ` (${t.unit})` : ''}`;
+    if (t.type === 'bool') {
+      const checked = v === undefined || v === '' ? def : v === true || v === 'true';
+      return `<label class="dev-field${applies ? '' : ' na'}"><span>${label}</span><input type="checkbox" data-key="${t.key}" ${checked ? 'checked' : ''}></label>`;
+    }
+    return `<label class="dev-field${applies ? '' : ' na'}" title="${applies ? '' : 'Not used by this difficulty / mode'}"><span>${label}</span><input type="number" data-key="${t.key}" min="${t.min}" max="${t.max}" step="${t.step}" placeholder="${def ?? '—'}" value="${v ?? ''}"></label>`;
+  }).join('');
+}
+
+function readDevForm() {
+  const preset = DIFFICULTIES[$('difficulty').value] || DIFFICULTIES.medium;
+  const values = {};
+  $('dev-fields').querySelectorAll('[data-key]').forEach((el) => {
+    const t = TUNABLES.find((x) => x.key === el.dataset.key);
+    if (t.type === 'bool') { if (el.checked !== tunableValue(preset, t)) values[t.key] = el.checked; }
+    else if (el.value !== '') values[t.key] = el.value;
+  });
+  return values;
+}
+
+$('dev-enabled').addEventListener('change', () => {
+  dev.enabled = $('dev-enabled').checked;
+  saveDev();
+  renderDevPanel();
+  if (Object.keys(dev.values).length) load({ seed: $('seed').value.trim() });
+});
+$('dev-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  dev.values = readDevForm();
+  saveDev();
+  load({ seed: $('seed').value.trim(), variant: state.quiz?.variant || 0 });
+});
+$('dev-reset').addEventListener('click', () => {
+  dev.values = {};
+  saveDev();
+  renderDevPanel();
+  load({ seed: $('seed').value.trim(), variant: state.quiz?.variant || 0 });
+});
+for (const id of ['difficulty', 'mode']) $(id).addEventListener('change', renderDevPanel);
 
 renderScore();
 const initial = parseHash();
+adoptLinkTuning(initial.tuning);
+renderDevPanel();
 if (initial.seed) load({ ...initial, difficulty: initial.difficulty || store.get('otq.difficulty', 'medium') });
 else load({ difficulty: store.get('otq.difficulty', 'medium'), mode: store.get('otq.mode', 'where-am-i') });
 $('difficulty').addEventListener('change', () => store.set('otq.difficulty', $('difficulty').value));

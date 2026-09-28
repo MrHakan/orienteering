@@ -122,6 +122,19 @@
         </div>
       </section>
 
+      <section class="box dev">
+        <h2>Developer</h2>
+        <label class="toggle"><input type="checkbox" id="dev-enabled"> Developer mode <small>(override thresholds)</small></label>
+        <form id="dev-form" hidden>
+          <p class="dev-note">Empty fields use the <span id="dev-difficulty">difficulty</span> default shown in grey. Changes apply on regenerate and go into the link.</p>
+          <div id="dev-fields" class="dev-fields"></div>
+          <div class="row-btns">
+            <button type="submit" class="btn primary small">Apply &amp; regenerate</button>
+            <button type="button" class="btn ghost small" id="dev-reset">Reset to defaults</button>
+          </div>
+        </form>
+      </section>
+
       <section class="box about">
         <h2>How it works</h2>
         <p>One seeded elevation model is generated from landform primitives (ridges, spurs, re-entrants, valleys, saddles, knolls), fractal noise and a drainage/erosion pass. The 3D view and the contour map are both drawn from it.</p>

@@ -112,3 +112,73 @@ export const DIFFICULTIES = {
 export function getDifficulty(name) {
   return DIFFICULTIES[name] || DIFFICULTIES.medium;
 }
+
+/**
+ * Developer-mode tunables. Each maps a short key (used in links: &dev=key:value)
+ * to a path in a difficulty preset. Unset keys keep the preset's value.
+ */
+export const TUNABLES = [
+  { key: 'minTrue', label: 'Min distance, true point to distractor', unit: 'm', path: ['minTrueDistance'], min: 0, max: 1500, step: 10 },
+  { key: 'minSep', label: 'Min distance between options', unit: 'm', path: ['minSeparation'], min: 0, max: 1500, step: 10 },
+  { key: 'sameLandform', label: 'Reject options on the same landform', type: 'bool', path: ['rejectSameLandform'], fallback: true },
+  { key: 'bandMin', label: 'View difference: min (ambiguity limit)', unit: '°', path: ['band', 'min'], min: 0, max: 20, step: 0.1 },
+  { key: 'bandTarget', label: 'View difference: target', unit: '°', path: ['band', 'target'], min: 0, max: 20, step: 0.1 },
+  { key: 'bandMax', label: 'View difference: max (plausibility limit)', unit: '°', path: ['band', 'max'], min: 0, max: 30, step: 0.1 },
+  { key: 'distractors', label: 'Distractors', path: ['distractors'], min: 1, max: 4, step: 1 },
+  { key: 'minQuality', label: 'Min view quality', path: ['minQuality'], min: 0, max: 1, step: 0.05 },
+  { key: 'minConfidence', label: 'Min confidence', path: ['minConfidence'], min: 0, max: 1, step: 0.05 },
+  { key: 'cue', label: 'Min visible skyline cue (Master)', unit: '°', path: ['search', 'cue'], min: 0, max: 10, step: 0.1 },
+  { key: 'viewTries', label: 'Viewpoints searched (Master)', path: ['search', 'viewTries'], min: 4, max: 120, step: 1 },
+  { key: 'facingMinD', label: '"Which way?": min difference to other directions', unit: '°', path: ['facing', 'minD'], min: 0, max: 20, step: 0.1 },
+  { key: 'facingMaxD', label: '"Which way?": prefer views below', unit: '°', path: ['facing', 'maxD'], min: 0, max: 30, step: 0.1 },
+];
+
+const getPath = (obj, path) => path.reduce((o, k) => (o == null ? undefined : o[k]), obj);
+
+/** Current (default) value of a tunable for a preset. */
+export function tunableValue(preset, t) {
+  const v = getPath(preset, t.path);
+  return v === undefined ? t.fallback : v;
+}
+
+/**
+ * Returns a copy of `preset` with developer overrides applied. Values are
+ * clamped to each tunable's range; unknown keys are ignored. Paths into
+ * objects the preset lacks (e.g. search on non-Master presets) are skipped.
+ */
+export function applyTuning(preset, tuning) {
+  if (!tuning || !Object.keys(tuning).length) return preset;
+  const out = structuredClone(preset);
+  for (const t of TUNABLES) {
+    if (!(t.key in tuning)) continue;
+    let v = tuning[t.key];
+    if (t.type === 'bool') v = v === true || v === 'true' || v === 1 || v === '1';
+    else {
+      v = Number(v);
+      if (!Number.isFinite(v)) continue;
+      v = Math.min(t.max, Math.max(t.min, v));
+    }
+    let o = out;
+    for (let i = 0; i < t.path.length - 1; i++) {
+      if (o[t.path[i]] == null) { o = null; break; }
+      o = o[t.path[i]];
+    }
+    if (o) o[t.path[t.path.length - 1]] = v;
+  }
+  if (out.band.min > out.band.max) out.band.max = out.band.min;
+  out.band.target = Math.min(out.band.max, Math.max(out.band.min, out.band.target));
+  return out;
+}
+
+/** "key:value,key:value" <-> object, for links. */
+export function encodeTuning(tuning) {
+  return Object.entries(tuning || {}).map(([k, v]) => `${k}:${v}`).join(',');
+}
+export function decodeTuning(str) {
+  const out = {};
+  for (const part of String(str || '').split(',')) {
+    const [k, v] = part.split(':');
+    if (k && v !== undefined && TUNABLES.some((t) => t.key === k)) out[k] = v;
+  }
+  return out;
+}

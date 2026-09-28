@@ -76,6 +76,7 @@ export class QuizCandidateGenerator {
     // always look alike, so without these rules the "most similar" options
     // simply line up on the same slope as the true position.
     const minTrue = preset.minTrueDistance ?? preset.minSeparation;
+    const sameLandform = preset.rejectSameLandform !== false;
     const candidates = [];
     let considered = 0;
     for (const p of grid) {
@@ -94,7 +95,7 @@ export class QuizCandidateGenerator {
     const spread = 0.5 * (band.max - band.min);
     const kept = [];
     for (const c of candidates) {
-      if (analyzer.sameFeature(view.x, view.y, c.x, c.y)) continue; // same hillside / valley floor
+      if (sameLandform && analyzer.sameFeature(view.x, view.y, c.x, c.y)) continue; // same hillside / valley floor
       c.signature = this.signature(c, view.eyeHeight);
       c.sigDist = TerrainAnalyzer.signatureDistance(correctSig, c.signature, relief);
       // Visual similarity of the view in the given heading.
@@ -117,7 +118,7 @@ export class QuizCandidateGenerator {
       const c = rng.weighted(pool, (p) => p.score ** power);
       pool.splice(pool.indexOf(c), 1);
       if (chosen.some((q) => Math.hypot(q.x - c.x, q.y - c.y) < preset.minSeparation)) continue;
-      if (chosen.some((q) => analyzer.sameFeature(q.x, q.y, c.x, c.y))) continue;
+      if (sameLandform && chosen.some((q) => analyzer.sameFeature(q.x, q.y, c.x, c.y))) continue;
       if (chosen.some((q) => descriptorDistance(q.desc, c.desc) < band.min * 0.8)) continue;
       chosen.push(c);
     }

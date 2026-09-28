@@ -119,6 +119,19 @@ The terrain stays the same; only the chosen viewpoint and heading change.
 
 A rotated map is only a display transform. The north arrow always shows true north and the coordinates never rotate. Every preset lives in `src/engine/difficulty.js`.
 
+## Developer mode
+
+The **Developer** panel (sidebar) overrides the difficulty's thresholds without touching the defaults. The overrides are:
+- distances: true point to distractor, and between options;
+- the same-landform rejection;
+- the view-difference band (min / target / max);
+- the number of distractors;
+- minimum view quality and minimum confidence;
+- Master's visible-cue minimum and the number of viewpoints it searches;
+- "Which way?" direction margins.
+
+Empty fields show the current default in grey. **Apply & regenerate** rebuilds the question on the same terrain. Overrides go into the link as `&dev=minTrue:900,minSep:700`, and opening such a link switches developer mode on. Engine API: `generate({ ..., tuning: { minTrue: 900 } })`. The keys are defined in `TUNABLES` in `src/engine/difficulty.js`.
+
 ## Map conventions
 
 Contours are extracted from the final heightmap. Every fifth contour is an index contour and gets elevation labels, with the top of each number facing uphill. Closed depressions get tick marks pointing downhill. Because the segments are oriented, a clockwise closed loop is a depression.

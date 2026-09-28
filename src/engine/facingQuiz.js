@@ -6,7 +6,7 @@
 import { SeedManager } from './rng.js';
 import { ViewpointGenerator } from './viewpoints.js';
 import { QuizValidator } from './validator.js';
-import { getDifficulty } from './difficulty.js';
+import { getDifficulty, applyTuning } from './difficulty.js';
 import { descriptorDistance } from './skyline.js';
 import { distinguishingCue, VIEW_COLUMNS } from './quizCandidates.js';
 import { buildTerrain, now, landmarkSummary, terrainSummary, framingPitch } from './quiz.js';
@@ -20,9 +20,9 @@ export const DIRECTIONS = [
 /**
  * @param {{seed:string, difficulty?:string, variant?:number, maxTerrainAttempts?:number, onProgress?:(msg:string)=>void}} opts
  */
-export function generateFacingQuiz({ seed, difficulty = 'medium', variant = 0, size, n, maxTerrainAttempts = 4, onProgress = () => {} }) {
+export function generateFacingQuiz({ seed, difficulty = 'medium', variant = 0, tuning = null, size, n, maxTerrainAttempts = 4, onProgress = () => {} }) {
   const t0 = now();
-  const base = getDifficulty(difficulty);
+  const base = applyTuning(getDifficulty(difficulty), tuning);
   const preset = { ...base, heading: 'intercardinal' };
   const rule = base.facing;
   const seeds = new SeedManager(`${seed}#${difficulty}`);
