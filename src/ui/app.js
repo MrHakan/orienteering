@@ -52,7 +52,7 @@ function getWorker() {
   return worker;
 }
 
-function requestQuiz(seed, difficulty) {
+function requestQuiz(seed, difficulty, variant = 0) {
   const id = ++state.requestId;
   return new Promise((resolve, reject) => {
     const w = getWorker();
@@ -60,7 +60,7 @@ function requestQuiz(seed, difficulty) {
       // Fallback: generate on the main thread.
       import('../engine/quiz.js').then(({ generateQuiz }) => {
         setTimeout(() => {
-          try { resolve(generateQuiz({ seed, difficulty })); } catch (e) { reject(e); }
+          try { resolve(generateQuiz({ seed, difficulty, variant })); } catch (e) { reject(e); }
         }, 30);
       }, reject);
       return;
@@ -73,19 +73,19 @@ function requestQuiz(seed, difficulty) {
       else reject(new Error(e.data.message));
     };
     w.addEventListener('message', onMessage);
-    w.postMessage({ id, seed, difficulty });
+    w.postMessage({ id, seed, difficulty, variant });
   });
 }
 
-async function load(seed, difficulty) {
+async function load(seed, difficulty, variant = 0) {
   $('seed').value = seed;
   $('difficulty').value = difficulty;
-  setLoading(true, 'Generating terrain…');
+  setLoading(true, difficulty === 'master' ? 'Searching for a devious question…' : 'Generating terrain…');
   setAnswersEnabled(false);
   const myId = state.requestId + 1;
   let quiz;
   try {
-    quiz = await requestQuiz(seed, difficulty);
+    quiz = await requestQuiz(seed, difficulty, variant);
   } catch (err) {
     console.error(err);
     setLoading(true, `Generation failed: ${err.message}`);
@@ -93,7 +93,7 @@ async function load(seed, difficulty) {
   }
   if (myId !== state.requestId) return; // superseded by a newer request
   show(quiz);
-  history.replaceState(null, '', `#seed=${encodeURIComponent(seed)}&d=${difficulty}`);
+  history.replaceState(null, '', `#seed=${encodeURIComponent(seed)}&d=${difficulty}${variant ? `&v=${variant}` : ''}`);
 }
 
 function show(quiz) {
@@ -106,7 +106,7 @@ function show(quiz) {
 
   $('facing-text').textContent = quiz.heading.text;
   $('facing-arrow').textContent = quiz.heading.mode === 'exact' ? '' : quiz.heading.arrow;
-  $('credit').textContent = `seed ${quiz.seed} · ${DIFFICULTIES[quiz.difficulty].label.toLowerCase()} · ${Math.round(t.size / 1000 * 10) / 10} km × ${Math.round(t.size / 1000 * 10) / 10} km`;
+  $('credit').textContent = `seed ${quiz.seed}${quiz.variant ? ` · positions #${quiz.variant}` : ''} · ${DIFFICULTIES[quiz.difficulty].label.toLowerCase()} · ${Math.round(t.size / 1000 * 10) / 10} km × ${Math.round(t.size / 1000 * 10) / 10} km`;
   $('viewing-badge').hidden = true;
   $('result').hidden = true;
   $('prompt').hidden = false;
@@ -173,11 +173,13 @@ function answer(label) {
   res.hidden = false;
   const verdict = right ? `<div class="verdict good">Correct — you were at ${quiz.correctLabel}.</div>`
     : `<div class="verdict bad">Not quite — you were at ${quiz.correctLabel}.</div>`;
-  const rows = quiz.options.map((o) => `<tr><td><strong>${o.label}</strong>${o.correct ? ' ✓' : ''}</td><td>${o.landform}</td><td>${Math.round(o.z)} m</td><td>${o.correct ? '—' : `${o.D.toFixed(1)}°`}</td></tr>`).join('');
+  const cue = (o) => (o.cue ? `${String(o.cue.bearing).padStart(3, '0')}°: skyline ${Math.abs(o.cue.delta).toFixed(1)}° ${o.cue.delta > 0 ? 'higher' : 'lower'}` : '—');
+  const rows = quiz.options.map((o) => `<tr><td><strong>${o.label}</strong>${o.correct ? ' ✓' : ''}</td><td>${o.landform}</td><td>${Math.round(o.z)} m</td><td>${o.correct ? '—' : `${o.D.toFixed(1)}°`}</td><td>${o.correct ? 'what you saw' : cue(o)}</td></tr>`).join('');
   res.innerHTML = `${verdict}
     <p>Compare the views: the dashed wedge on the map shows what each position looks at.</p>
     <div class="views">${quiz.options.map((o) => `<button type="button" class="btn ghost" data-view="${o.label}">View from ${o.label}${o.correct ? ' (true)' : ''}</button>`).join('')}</div>
-    <table><tr><th>Point</th><th>Landform</th><th>Elevation</th><th>View difference</th></tr>${rows}</table>
+    <table><tr><th>Point</th><th>Landform</th><th>Elevation</th><th>View diff.</th><th>Key difference</th></tr>${rows}</table>
+    <p class="note">Key difference: the bearing where that point's skyline would differ most from the view you were shown.</p>
     <button type="button" class="btn primary" id="next">Next quiz (N)</button>`;
   res.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => viewFrom(b.dataset.view)));
   $('next').addEventListener('click', newQuiz);
@@ -218,6 +220,7 @@ function renderFacts() {
     ['Map', q.mapRotation && !state.settings.northUp ? `rotated ${q.mapRotation}° (see N arrow)` : 'north-up'],
     ['Terrain', q.terrain.archetypes.map((a) => a.replace(/([A-Z])/g, ' $1').toLowerCase()).join(', ')],
     ['Confidence', `${Math.round(q.validation.confidence * 100)}%${q.lowConfidence ? ' (below threshold)' : ''}`],
+    ['Hardness', `${Math.round(q.hardness * 100)}%${q.stats.questionsCompared ? ` (hardest of ${q.stats.questionsCompared} valid questions)` : ''}`],
     ['Generated', `${q.stats.ms} ms · ${q.stats.viewpointsEvaluated} views scored`],
   ];
   $('facts').innerHTML = facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
@@ -253,12 +256,22 @@ function newQuiz() {
   load(SeedManager.randomSeed(), $('difficulty').value);
 }
 
+/** Same seed and terrain, next set of observer/answer positions. */
+function newPositions() {
+  if (!state.quiz) return;
+  const q = state.quiz;
+  const difficulty = $('difficulty').value;
+  const sameTerrain = difficulty === q.difficulty && $('seed').value.trim() === q.seed;
+  load(q.seed, difficulty, sameTerrain ? (q.variant || 0) + 1 : 0);
+}
+
 $('controls').addEventListener('submit', (e) => {
   e.preventDefault();
   const seed = $('seed').value.trim() || SeedManager.randomSeed();
   load(seed, $('difficulty').value);
 });
 $('new-quiz').addEventListener('click', newQuiz);
+$('new-positions').addEventListener('click', newPositions);
 $('difficulty').addEventListener('change', () => load($('seed').value.trim() || SeedManager.randomSeed(), $('difficulty').value));
 $('copy-link').addEventListener('click', async () => {
   const btn = $('copy-link');
@@ -307,6 +320,7 @@ document.addEventListener('keydown', (e) => {
   if (e.target.matches('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key.toUpperCase();
   if (k === 'N') newQuiz();
+  else if (k === 'P') newPositions();
   else if (/^[A-E]$/.test(k)) {
     if (state.answered) { if (state.quiz.options.some((o) => o.label === k)) viewFrom(k); }
     else answer(k);
@@ -485,15 +499,16 @@ $('export-share').addEventListener('click', async () => {
 function parseHash() {
   const p = new URLSearchParams(location.hash.slice(1));
   const d = p.get('d');
-  return { seed: p.get('seed'), difficulty: d && DIFFICULTIES[d] ? d : null };
+  const v = Math.max(0, Math.floor(+p.get('v') || 0));
+  return { seed: p.get('seed'), difficulty: d && DIFFICULTIES[d] ? d : null, variant: v };
 }
 
 window.addEventListener('hashchange', () => {
-  const { seed, difficulty } = parseHash();
-  if (seed && (seed !== state.quiz?.seed || difficulty !== state.quiz?.difficulty)) load(seed, difficulty || 'medium');
+  const { seed, difficulty, variant } = parseHash();
+  if (seed && (seed !== state.quiz?.seed || difficulty !== state.quiz?.difficulty || variant !== (state.quiz?.variant || 0))) load(seed, difficulty || 'medium', variant);
 });
 
 renderScore();
 const initial = parseHash();
-load(initial.seed || SeedManager.randomSeed(), initial.difficulty || store.get('otq.difficulty', 'medium'));
+load(initial.seed || SeedManager.randomSeed(), initial.difficulty || store.get('otq.difficulty', 'medium'), initial.seed ? initial.variant : 0);
 $('difficulty').addEventListener('change', () => store.set('otq.difficulty', $('difficulty').value));

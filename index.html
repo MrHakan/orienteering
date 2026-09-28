@@ -21,6 +21,7 @@
           <option value="medium" selected>Medium</option>
           <option value="hard">Hard</option>
           <option value="expert">Expert</option>
+          <option value="master">Master (brain-burner)</option>
         </select>
       </label>
       <label class="field seed-field">
@@ -28,6 +29,7 @@
         <input id="seed" type="text" spellcheck="false" autocomplete="off" maxlength="40">
       </label>
       <button type="submit" class="btn ghost" id="load-seed" title="Generate the quiz for this seed">Load</button>
+      <button type="button" class="btn ghost" id="new-positions" title="Same terrain, new observer and answer positions (P)">New positions</button>
       <button type="button" class="btn primary" id="new-quiz" title="New random quiz (N)">New quiz</button>
     </form>
   </header>
@@ -102,7 +104,8 @@
         <h2>How it works</h2>
         <p>One seeded elevation model is generated from landform primitives (ridges, spurs, re-entrants, valleys, saddles, knolls), fractal noise and a drainage/erosion pass. The 3D view and the contour map are both drawn from it.</p>
         <p>Observer positions are scored on skyline, landmarks and occlusion. Distractors are picked from spots whose view, facing the same way, looks similar but can still be told apart.</p>
-        <p class="keys">Keys: <kbd>A</kbd>–<kbd>D</kbd> answer · <kbd>N</kbd> new quiz</p>
+        <p>Master mode fully evaluates dozens of viewpoints and keeps the question whose distractors are hardest to rule out. Every distractor still differs visibly somewhere in the scene, and the answer screen shows where.</p>
+        <p class="keys">Keys: <kbd>A</kbd>–<kbd>D</kbd> answer · <kbd>P</kbd> new positions · <kbd>N</kbd> new quiz</p>
       </section>
     </aside>
   </main>

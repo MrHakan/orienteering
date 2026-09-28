@@ -59,6 +59,29 @@ export const DIFFICULTIES = {
     minConfidence: 0.4,
     mapRotation: true,
   },
+  // Brain-burner: many viewpoints are fully evaluated and the question whose
+  // distractors are hardest to rule out - while each still differs visibly
+  // somewhere in the scene - is kept.
+  master: {
+    label: 'Master',
+    terrain: { archetypes: [4, 5], relief: 1.4, complexity: 1.0, noiseShare: [0.24, 0.3] },
+    heading: 'exact',
+    distractors: 3,
+    fov: [58, 66],
+    minSeparation: 240,
+    band: { min: 0.8, target: 1.05, max: 2.4 },
+    signatureWeight: 0.35,
+    quality: { landmark: 1.1, occlusion: 1.1 },
+    minQuality: 0.55,
+    minConfidence: 0.35,
+    mapRotation: true,
+    search: {
+      viewTries: 36,   // viewpoints fully evaluated per terrain
+      cue: 1.6,        // every distractor needs a visible skyline difference of at least this (deg)
+      shortlist: 3,    // final pick is random among the N hardest valid questions
+      pickPower: 6,    // sharper preference for the closest-looking distractors
+    },
+  },
 };
 
 export function getDifficulty(name) {

@@ -133,3 +133,24 @@ test('MP4 muxer writes a well-formed fast-start file', async () => {
   assert.equal(dv.getUint32(stss + 8), 2);
   assert.ok(text.includes('avcC'));
 });
+
+test('variants keep the terrain but move the positions', () => {
+  const a = generateQuiz({ seed: 'variant', difficulty: 'easy' });
+  const b = generateQuiz({ seed: 'variant', difficulty: 'easy', variant: 1 });
+  const a2 = generateQuiz({ seed: 'variant', difficulty: 'easy', variant: 0 });
+  assert.deepEqual(a.camera, a2.camera, 'variant 0 is the original question');
+  if (a.stats.terrainAttempt === b.stats.terrainAttempt) assert.equal(hash(a.terrain.heights), hash(b.terrain.heights));
+  assert.ok(a.camera.x !== b.camera.x || a.camera.y !== b.camera.y || a.camera.heading !== b.camera.heading);
+});
+
+test('master questions are hard but every distractor has a visible cue', () => {
+  const q = generateQuiz({ seed: 'master-t', difficulty: 'master' });
+  const p = getDifficulty('master');
+  assert.equal(q.options.length, 4);
+  assert.ok(!q.lowConfidence);
+  for (const o of q.options.filter((o) => !o.correct)) {
+    assert.ok(o.D >= p.band.min && o.D <= p.band.max);
+    assert.ok(Math.abs(o.cue.delta) >= p.search.cue, 'distinguishing skyline feature');
+  }
+  assert.ok(q.hardness > 0 && q.hardness <= 1);
+});

@@ -85,6 +85,18 @@ The view comparison (`descriptorDistance`) uses only what's inside the field of 
 | Hard | exact bearing | 4 | highly plausible | more spurs/re-entrants | may be rotated |
 | Expert | exact bearing | 4 | subtle | 4–5 systems, more drainage, occlusion allowed | may be rotated |
 
+| **Master** | exact bearing | 4 | hardest valid of ~36 fully evaluated questions | 4–5 systems, max complexity | may be rotated |
+
+**Master (brain-burner)** does not stop at the first valid question. It fully evaluates about 36 viewpoints on the terrain (candidate view descriptors are cached per heading, so this takes only ~2–3 s) and scores each valid question for *puzzle hardness*:
+- distractor views close to the ambiguity limit;
+- similar terrain signatures and landform types;
+- similar elevations;
+- options spread across the map, so "the one in the middle" gives nothing away.
+
+Solvability is enforced: every distractor must differ from the true view by at least 1.6° somewhere on the skyline. The answer screen names that **key difference** ("088°: skyline 2.1° lower"). The final question is drawn at random from the three hardest.
+
+**New positions** (`P`, or `&v=N` in the link) keeps the seed's terrain and draws a new observer position, heading and set of options. `v=0` is always the original question.
+
 A rotated map is only a display transform. The north arrow always shows true north and the coordinates never rotate. Every preset lives in `src/engine/difficulty.js`.
 
 ## Map conventions

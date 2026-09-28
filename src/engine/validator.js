@@ -54,6 +54,11 @@ export class QuizValidator {
     if (ds.length && minD < band.min) issues.push('correct location visually ambiguous with a distractor');
     if (ds.some((d) => d > band.max)) issues.push('a distractor is obviously impossible');
 
+    if (preset.search) {
+      const weak = distractors.filter((d) => d.cue.magnitude < preset.search.cue);
+      if (weak.length) issues.push(`${weak.length} distractor(s) without a visible distinguishing feature`);
+    }
+
     const uniqueness = ds.length ? saturate((minD - 0.6 * band.min) / (band.target - 0.6 * band.min)) : 0;
     const plausibility = ds.length ? ds.reduce((a, d) => a + saturate(1 - Math.abs(d - band.target) / (band.max - band.min)), 0) / ds.length : 0;
     const confidence = saturate(0.45 * uniqueness + 0.35 * quality.total / 0.8 + 0.1 * plausibility + 0.1 * (1 - correct.desc.blockedFrac));

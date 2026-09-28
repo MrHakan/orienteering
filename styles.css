@@ -99,6 +99,8 @@ body {
 .result table { margin: 6px auto 12px; border-collapse: collapse; font-size: 13px; color: #cfd3d6; }
 .result td, .result th { padding: 3px 10px; border-bottom: 1px solid var(--line); text-align: left; }
 .result th { color: var(--muted); font-weight: 600; }
+.result .note { font-size: 12px; color: var(--muted); margin-top: -4px; }
+.result { overflow-x: auto; }
 
 .credit { text-align: center; color: #6f7982; font-size: 12px; margin: 16px 0 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
