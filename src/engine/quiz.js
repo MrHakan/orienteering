@@ -27,8 +27,12 @@ export function buildTerrain({ seed, difficulty, attempt, preset, seeds, size = 
   return { model, interval, terrainCheck };
 }
 
-/** Dispatch on quiz mode: 'where-am-i' (default) or 'facing'. */
+/** Dispatch on quiz mode; existing location quizzes retain their defaults. */
 export async function generate(opts) {
+  if (opts.mode === 'lookalike') {
+    const { generateLookalikeQuiz } = await import('./lookalikeQuiz.js');
+    return generateLookalikeQuiz(opts);
+  }
   if (opts.mode === 'facing') {
     const { generateFacingQuiz } = await import('./facingQuiz.js');
     return generateFacingQuiz(opts);
@@ -164,7 +168,7 @@ export function framingPitch(horizon) {
   return +clamp(mean * 0.6 - 1.5, -4, 6).toFixed(2);
 }
 
-function assemble(e, { seed, difficulty, variant = 0, preset, seeds, vt = [], log, t0, lowConfidence = false, searched = 0 }) {
+export function assemble(e, { seed, difficulty, variant = 0, preset, seeds, vt = [], log, t0, lowConfidence = false, searched = 0, mode = 'where-am-i' }) {
   const { model, view, quality, candidates, validation } = e;
   const rng = seeds.stream('labels', e.attempt, e.try, ...vt);
   const points = [
@@ -180,7 +184,7 @@ function assemble(e, { seed, difficulty, variant = 0, preset, seeds, vt = [], lo
 
   return {
     version: 1,
-    mode: 'where-am-i',
+    mode,
     seed, difficulty, variant,
     headingMode: preset.heading,
     lowConfidence,

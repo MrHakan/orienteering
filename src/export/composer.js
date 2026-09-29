@@ -165,7 +165,7 @@ export class ExportComposer {
     ctx.font = `800 ${L.title.size}px ${FONT}`;
     if ('letterSpacing' in ctx) ctx.letterSpacing = `${Math.round(L.title.size * 0.06)}px`;
     const facingMode = q.mode === 'facing';
-    ctx.fillText(facingMode ? 'WHICH WAY?' : 'WHERE ARE YOU?', W / 2, L.title.y);
+    ctx.fillText(facingMode ? 'WHICH WAY?' : q.mode === 'lookalike' ? 'LOOK-ALIKES' : 'WHERE ARE YOU?', W / 2, L.title.y);
     if ('letterSpacing' in ctx) ctx.letterSpacing = `${Math.round(L.facing.size * 0.08)}px`;
     ctx.font = `500 ${L.facing.size}px ${FONT}`;
     ctx.fillStyle = '#cfd3d6';

@@ -4,6 +4,7 @@ import { TerrainModel } from '../engine/terrainModel.js';
 import { SeedManager } from '../engine/rng.js';
 import { scrambleLabels } from '../engine/scramble.js';
 import { DIFFICULTIES, TUNABLES, tunableValue, encodeTuning, decodeTuning } from '../engine/difficulty.js';
+import { getLookalikePreset, DIRECTIONS } from '../engine/lookalikeQuiz.js';
 import { TerrainRenderer } from '../render/webglTerrain.js';
 import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
@@ -55,14 +56,14 @@ function getWorker() {
   return worker;
 }
 
-function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, tuning }) {
+function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, direction, tuning }) {
   const id = ++state.requestId;
   return new Promise((resolve, reject) => {
     const w = getWorker();
     if (!w) {
       // Fallback: generate on the main thread.
       import('../engine/quiz.js').then(({ generate }) => {
-        setTimeout(() => generate({ seed, difficulty, variant, mode, headingMode, tuning }).then(resolve, reject), 30);
+        setTimeout(() => generate({ seed, difficulty, variant, mode, headingMode, direction, tuning }).then(resolve, reject), 30);
       }, reject);
       return;
     }
@@ -74,7 +75,7 @@ function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, tuning 
       else reject(new Error(e.data.message));
     };
     w.addEventListener('message', onMessage);
-    w.postMessage({ id, seed, difficulty, variant, mode, headingMode, tuning });
+    w.postMessage({ id, seed, difficulty, variant, mode, headingMode, direction, tuning });
   });
 }
 
@@ -90,14 +91,17 @@ async function load(req) {
     scramble: req.scramble || 0,
     mode: req.mode || $('mode').value,
     headingMode: req.headingMode || $('heading-mode').value,
+    direction: req.direction || $('lookalike-direction').value,
     tuning: req.tuning || activeTuning(),
   };
+  if (r.mode === 'lookalike') r.headingMode = 'auto';
   $('seed').value = r.seed;
   $('difficulty').value = r.difficulty;
   $('mode').value = r.mode;
   $('heading-mode').value = r.headingMode;
+  $('lookalike-direction').value = r.direction;
   syncControls();
-  setLoading(true, r.difficulty === 'master' ? 'Searching for a devious question…' : 'Generating terrain…');
+  setLoading(true, r.mode === 'lookalike' ? 'Searching for matching A/B/C views…' : r.difficulty === 'master' ? 'Searching for a devious question…' : 'Generating terrain…');
   setAnswersEnabled(false);
   const myId = state.requestId + 1;
   let quiz;
@@ -121,6 +125,10 @@ function updateHash() {
   if (!q) return;
   const parts = [`seed=${encodeURIComponent(q.seed)}`, `d=${q.difficulty}`];
   if (q.mode === 'facing') parts.push('m=facing');
+  else if (q.mode === 'lookalike') {
+    parts.push('m=lookalike');
+    if (q.directionChoice !== 'auto') parts.push(`dir=${q.directionChoice}`);
+  }
   else if (q.headingChoice && q.headingChoice !== 'auto') parts.push(`h=${q.headingChoice}`);
   if (q.variant) parts.push(`v=${q.variant}`);
   if (q.tuning && Object.keys(q.tuning).length) parts.push(`dev=${encodeURIComponent(encodeTuning(q.tuning))}`);
@@ -131,7 +139,9 @@ function updateHash() {
 /** Show only the controls that apply to the selected mode. */
 function syncControls() {
   const facing = $('mode').value === 'facing';
-  $('heading-field').hidden = facing;
+  const lookalike = $('mode').value === 'lookalike';
+  $('heading-field').hidden = facing || lookalike;
+  $('direction-field').hidden = !lookalike;
   $('scramble').hidden = facing;
   if (typeof dev !== 'undefined') renderDevPanel();
 }
@@ -145,11 +155,13 @@ function show(quiz) {
   state.model = new TerrainModel({ size: t.size, n: t.n, heights: t.heights, seed: t.modelSeed });
 
   const facing = quiz.mode === 'facing';
-  $('quiz-title').textContent = facing ? 'WHICH WAY ARE YOU FACING?' : 'WHERE ARE YOU?';
+  const lookalike = quiz.mode === 'lookalike';
+  $('quiz-title').textContent = facing ? 'WHICH WAY ARE YOU FACING?' : lookalike ? 'LOOK-ALIKES' : 'WHERE ARE YOU?';
   $('quiz-title').classList.toggle('long', facing);
   $('facing-text').textContent = facing ? 'YOU ARE AT THE MARKED POINT' : quiz.heading.text;
   $('facing-arrow').textContent = facing || quiz.heading.mode === 'exact' ? '' : quiz.heading.arrow;
   $('prompt').textContent = facing ? 'You stand at the marked point. Which of the 8 directions are you looking in?'
+    : lookalike ? 'A, B and C have similar views in this direction. Match the ridge shapes and foreground to find your point.'
     : 'You are at one of the marked points, facing the direction shown. Which one?';
   $('credit').textContent = `seed ${quiz.seed}${quiz.variant ? ` · positions #${quiz.variant}` : ''} · ${DIFFICULTIES[quiz.difficulty].label.toLowerCase()} · ${Math.round(t.size / 1000 * 10) / 10} km × ${Math.round(t.size / 1000 * 10) / 10} km`;
   $('viewing-badge').hidden = true;
@@ -337,7 +349,7 @@ function renderScore() {
 function renderFacts() {
   const q = state.quiz;
   const facts = [
-    ['Mode', q.mode === 'facing' ? 'Which way are you facing?' : 'Where are you?'],
+    ['Mode', q.mode === 'facing' ? 'Which way are you facing?' : q.mode === 'lookalike' ? 'Look-alikes (A / B / C)' : 'Where are you?'],
     ['Heading', q.mode === 'facing' && !state.answered ? 'hidden until you answer' : `${String(Math.round(q.camera.heading)).padStart(3, '0')}° (${q.mode === 'facing' ? 'one of 8 directions' : q.heading.mode})`],
     ['Field of view', `${q.camera.fov}° · eye ${q.camera.eyeHeight} m`],
     ['Relief', `${Math.round(q.terrain.min)}–${Math.round(q.terrain.max)} m`],
@@ -346,6 +358,11 @@ function renderFacts() {
     ['Terrain', q.terrain.archetypes.map((a) => a.replace(/([A-Z])/g, ' $1').toLowerCase()).join(', ')],
     ['Confidence', `${Math.round(q.validation.confidence * 100)}%${q.lowConfidence ? ' (below threshold)' : ''}`],
     ['Hardness', `${Math.round(q.hardness * 100)}%${q.stats.questionsCompared ? ` (hardest of ${q.stats.questionsCompared} valid questions)` : ''}`],
+    ...(q.matching ? [
+      ['All three views', `${Math.min(...q.matching.pairs.map((p) => p.D)).toFixed(2)}–${Math.max(...q.matching.pairs.map((p) => p.D)).toFixed(2)}° pairwise difference`],
+      ['Option spacing', `at least ${Math.round(q.matching.minSeparation)} m`],
+      ['Directions searched', `${q.stats.directions.length} · facing ${q.matching.direction}`],
+    ] : []),
     ...(q.tuning && Object.keys(q.tuning).length ? [['Tuning', `developer overrides: ${Object.entries(q.tuning).map(([k, v]) => `${k}=${v}`).join(', ')}`]] : []),
     ['Generated', `${q.stats.ms} ms · ${q.stats.viewpointsEvaluated} views scored`],
   ];
@@ -364,6 +381,7 @@ function renderFacts() {
   $('quality').innerHTML = comp.map(([k, v]) => `<div class="bar"><span>${k}</span><span class="track"><span class="fill${v < 0 ? ' neg' : ''}" style="width:${Math.min(100, Math.abs(v) * 100).toFixed(0)}%"></span></span><span class="v">${v.toFixed(2)}</span></div>`).join('');
   $('gen-log').textContent = q.log.map((l) => l.stage === 'terrain'
     ? `terrain #${l.attempt}: rejected — ${l.issues.join('; ')}`
+    : l.stage === 'matching' ? `terrain #${l.attempt} ${l.direction}: ${l.coarse} coarse triples, ${l.refined} refined, ${l.valid} accepted`
     : `terrain #${l.attempt} view ${l.try}: ${l.ok ? 'accepted' : 'rejected'} (confidence ${l.confidence})${l.issues.length ? ' — ' + l.issues.join('; ') : ''}`).join('\n');
 }
 
@@ -405,7 +423,8 @@ function newPositions() {
   if (!state.quiz) return;
   const q = state.quiz;
   const same = $('difficulty').value === q.difficulty && $('seed').value.trim() === q.seed
-    && $('mode').value === q.mode && $('heading-mode').value === (q.headingChoice || 'auto');
+    && $('mode').value === q.mode && $('heading-mode').value === (q.headingChoice || 'auto')
+    && (q.mode !== 'lookalike' || $('lookalike-direction').value === q.directionChoice);
   load({ seed: q.seed, variant: same ? (q.variant || 0) + 1 : 0 });
 }
 
@@ -417,7 +436,7 @@ $('new-quiz').addEventListener('click', newQuiz);
 $('new-positions').addEventListener('click', newPositions);
 $('scramble').addEventListener('click', scrambleOptions);
 // Changing mode, difficulty or heading style keeps the seed, so the terrain carries over.
-for (const id of ['difficulty', 'mode', 'heading-mode']) {
+for (const id of ['difficulty', 'mode', 'heading-mode', 'lookalike-direction']) {
   $(id).addEventListener('change', () => { syncControls(); load({ seed: $('seed').value.trim() }); });
 }
 $('copy-link').addEventListener('click', async () => {
@@ -694,7 +713,8 @@ function parseHash() {
   const h = p.get('h');
   return {
     seed: p.get('seed'), difficulty: d && DIFFICULTIES[d] ? d : null, variant: v, scramble: sc,
-    mode: p.get('m') === 'facing' ? 'facing' : 'where-am-i',
+    mode: ['facing', 'lookalike'].includes(p.get('m')) ? p.get('m') : 'where-am-i',
+    direction: DIRECTIONS.some((d) => d.label === p.get('dir')) ? p.get('dir') : 'auto',
     headingMode: ['exact', 'intercardinal', 'cardinal'].includes(h) ? h : 'auto',
     tuning: p.has('dev') ? decodeTuning(p.get('dev')) : null,
   };
@@ -705,6 +725,7 @@ window.addEventListener('hashchange', () => {
   const q = state.quiz;
   if (h.seed && (h.seed !== q?.seed || h.difficulty !== q?.difficulty || h.variant !== (q?.variant || 0) || h.scramble !== (q?.scramble || 0)
     || h.mode !== q?.mode || h.headingMode !== (q?.headingChoice || 'auto')
+    || (h.mode === 'lookalike' && h.direction !== q?.directionChoice)
     || encodeTuning(h.tuning || {}) !== encodeTuning(q?.tuning || {}))) { adoptLinkTuning(h.tuning); load({ ...h, difficulty: h.difficulty || 'medium' }); }
 });
 
@@ -733,26 +754,29 @@ function renderDevPanel() {
   $('dev-enabled').checked = dev.enabled;
   $('dev-skyline').checked = !!dev.skyline;
   $('dev-form').hidden = !dev.enabled;
-  const preset = DIFFICULTIES[$('difficulty').value] || DIFFICULTIES.medium;
+  const preset = $('mode').value === 'lookalike' ? getLookalikePreset($('difficulty').value) : DIFFICULTIES[$('difficulty').value] || DIFFICULTIES.medium;
   $('dev-difficulty').textContent = preset.label;
   const mode = $('mode').value;
   $('dev-fields').innerHTML = TUNABLES.map((t) => {
     const def = tunableValue(preset, t);
-    const applies = def !== undefined && (!t.key.startsWith('facing') || mode === 'facing') && !(mode === 'facing' && ['minTrue', 'minSep', 'sameLandform', 'bandMin', 'bandTarget', 'bandMax', 'distractors', 'minConfidence'].includes(t.key));
+    const applies = def !== undefined && (!t.key.startsWith('facing') || mode === 'facing')
+      && !(mode === 'facing' && ['minTrue', 'minSep', 'sameLandform', 'bandMin', 'bandTarget', 'bandMax', 'distractors', 'minConfidence'].includes(t.key))
+      && !(mode === 'lookalike' && ['distractors', 'viewTries'].includes(t.key));
     const v = dev.values[t.key];
     const label = `${t.label}${t.unit ? ` (${t.unit})` : ''}`;
     if (t.type === 'bool') {
       const checked = v === undefined || v === '' ? def : v === true || v === 'true';
-      return `<label class="dev-field${applies ? '' : ' na'}"><span>${label}</span><input type="checkbox" data-key="${t.key}" ${checked ? 'checked' : ''}></label>`;
+      return `<label class="dev-field${applies ? '' : ' na'}"><span>${label}</span><input type="checkbox" data-key="${t.key}" ${checked ? 'checked' : ''} ${applies ? '' : 'disabled'}></label>`;
     }
-    return `<label class="dev-field${applies ? '' : ' na'}" title="${applies ? '' : 'Not used by this difficulty / mode'}"><span>${label}</span><input type="number" data-key="${t.key}" min="${t.min}" max="${t.max}" step="${t.step}" placeholder="${def ?? '—'}" value="${v ?? ''}"></label>`;
+    return `<label class="dev-field${applies ? '' : ' na'}" title="${applies ? '' : 'Not used by this difficulty / mode'}"><span>${label}</span><input type="number" data-key="${t.key}" min="${t.min}" max="${t.max}" step="${t.step}" placeholder="${def ?? '—'}" value="${v ?? ''}" ${applies ? '' : 'disabled'}></label>`;
   }).join('');
 }
 
 function readDevForm() {
-  const preset = DIFFICULTIES[$('difficulty').value] || DIFFICULTIES.medium;
+  const preset = $('mode').value === 'lookalike' ? getLookalikePreset($('difficulty').value) : DIFFICULTIES[$('difficulty').value] || DIFFICULTIES.medium;
   const values = {};
   $('dev-fields').querySelectorAll('[data-key]').forEach((el) => {
+    if (el.disabled) return;
     const t = TUNABLES.find((x) => x.key === el.dataset.key);
     if (t.type === 'bool') { if (el.checked !== tunableValue(preset, t)) values[t.key] = el.checked; }
     else if (el.value !== '') values[t.key] = el.value;

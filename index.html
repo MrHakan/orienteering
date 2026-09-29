@@ -19,6 +19,7 @@
         <select id="mode">
           <option value="where-am-i" selected>Where are you?</option>
           <option value="facing">Which way are you facing?</option>
+          <option value="lookalike">Look-alikes (A / B / C)</option>
         </select>
       </label>
       <label class="field">
@@ -38,6 +39,20 @@
           <option value="exact">Exact bearing (067°)</option>
           <option value="intercardinal">8 directions (NE…)</option>
           <option value="cardinal">4 directions (N/E/S/W)</option>
+        </select>
+      </label>
+      <label class="field" id="direction-field" hidden>
+        <span>Facing direction</span>
+        <select id="lookalike-direction">
+          <option value="auto" selected>Automatic (8 directions)</option>
+          <option value="N">North</option>
+          <option value="NE">North-east</option>
+          <option value="E">East</option>
+          <option value="SE">South-east</option>
+          <option value="S">South</option>
+          <option value="SW">South-west</option>
+          <option value="W">West</option>
+          <option value="NW">North-west</option>
         </select>
       </label>
       <label class="field seed-field">

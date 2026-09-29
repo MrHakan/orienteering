@@ -147,6 +147,14 @@ The terrain stays the same; only the chosen viewpoint and heading change.
 
 `Mode → Which way are you facing?` (`&m=facing`) marks where you stand on the map and hides the heading. You pick one of 8 compass directions from a rose (keys `Q W E / A D / Z X C`). For each candidate point the generator renders the view descriptor in all 8 directions. The point is accepted only if the most similar wrong direction still differs by a difficulty-dependent margin: from 3.2° on Easy down to 1.0° on Master. On Master that nearest wrong direction must also differ visibly somewhere in the frame, and the hardest of ~40 evaluated points is chosen. The bearing tape stays hidden until you answer, and the sun always lights the scene from the same side relative to the view, so neither gives the heading away. The same seed gives the same terrain in both modes, and exports switch to a "WHICH WAY?" frame.
 
+### Look-alikes (A / B / C)
+
+`Mode → Look-alikes` (`&m=lookalike`) finds three distant map positions whose views **all resemble each other**. It compares A–B, A–C and B–C using skyline shape, foreground terrain and depth; the worst pair drives the selection. Each pair must still have a visible distinguishing detail. The points occupy separate landforms and form a spread-out triangle. Exactly three options are used at every difficulty.
+
+Choose **Facing direction** to fix N, NE, E, SE, S, SW, W or NW (`&dir=NW`), or leave it automatic. **New positions** visits every compass direction once per eight automatic variants. Each search evaluates all eight headings, reusing 360° sweeps to shortlist matches and re-casting finalists at full resolution. The direction and all three points reproduce from a shared link. Scrambling, answer comparison views and image/video exports also work in this mode.
+
+The view-difference limit ranges from 3.8° on Easy to 2.3° on Master. If eight terrain attempts cannot find a fair triple, generation asks for another seed instead of returning an ambiguous question. [Selection plan and validation](docs/lookalike-mode.md) describe the algorithm and its limits. CLI example: `node scripts/generate.mjs coverage master lookalike NW`.
+
 **Scramble letters** (`S`, or `&s=N` in the link) leaves every point where it is and moves only the letters. Each press is a derangement, so every point gets a new letter, and it is reproducible from the seed. It works before answering and carries into exports.
 
 **New positions** (`P`, or `&v=N` in the link) keeps the seed's terrain and draws a new observer position, heading and set of options. `v=0` is always the original question.
