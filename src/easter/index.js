@@ -11,7 +11,7 @@ import { createWinter } from './winter.js';
 import { createMay4 } from './may4.js';
 
 export { EASTER_CONFIG, EGG_DURATION } from './config.js';
-export { resolveEasterEgg, selectEvent, parsePreview, isoDateInZone, isValidDate } from './schedule.js';
+export { resolveEasterEgg, selectEvent, parsePreview, isoDateInZone, isValidDate, planForChoice, describePlan, EASTER_CHOICES } from './schedule.js';
 
 /**
  * Global envelope: fades in over the first 0.8 s and out by 14.9 s, exactly 0

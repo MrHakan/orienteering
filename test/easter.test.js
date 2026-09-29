@@ -468,3 +468,39 @@ test('both formats and a very low sky still produce a scene that fits', () => {
     if (plan.key === 'may4') assert.ok(tiny.scene.ds.r >= 22, 'Death Star shrinks rather than overlapping');
   }
 });
+
+// --------------------------------------------------------------- export dialog choice
+
+import { planForChoice, describePlan, EASTER_CHOICES } from '../src/easter/index.js';
+
+test('dialog choice: automatic follows the date and the preview link', () => {
+  assert.equal(planForChoice('auto', { now: at('2026-09-29') }), null);
+  assert.equal(planForChoice('auto', { now: at('2026-12-24') }).santa, true);
+  assert.equal(planForChoice('auto', { now: at('2027-05-04') }).key, 'may4');
+  assert.equal(planForChoice('auto', { now: at('2026-09-29'), search: '?easterEgg=may4' }).key, 'may4');
+  assert.equal(planForChoice('anything-else', { now: at('2026-12-24') }).key, 'winter', 'unknown behaves like auto');
+});
+
+test('dialog choice: none, and forced events on any date', () => {
+  const now = at('2026-09-29');
+  assert.equal(planForChoice('off', { now: at('2026-12-24') }), null, 'off wins on an event day');
+  assert.deepEqual([planForChoice('winter', { now }).key, planForChoice('winter', { now }).santa], ['winter', false]);
+  const santa = planForChoice('santa', { now });
+  assert.deepEqual([santa.key, santa.santa, santa.date], ['winter', true, '2026-12-24']);
+  assert.deepEqual([planForChoice('may4', { now }).key, planForChoice('may4', { now }).date], ['may4', '2026-05-04']);
+});
+
+test('dialog choice: a forced event ignores the link event but keeps reduced motion', () => {
+  const now = at('2026-09-29');
+  assert.equal(planForChoice('may4', { now, search: '?easterEgg=winter&easterDate=2026-12-24' }).key, 'may4');
+  assert.equal(planForChoice('winter', { now, search: '?easterEgg=santa' }).santa, false);
+  assert.equal(planForChoice('may4', { now, reducedMotion: true }).reducedMotion, true, 'system preference');
+  assert.equal(planForChoice('may4', { now, reducedMotion: true, search: '?reducedMotion=0' }).reducedMotion, false, 'link override');
+});
+
+test('dialog choices are the five documented ones, and plans are described for the dialog', () => {
+  assert.deepEqual(EASTER_CHOICES.map((c) => c.value), ['auto', 'off', 'winter', 'santa', 'may4']);
+  assert.equal(describePlan(null), 'No event on this date');
+  assert.match(describePlan(planForChoice('santa', { now: at('2026-09-29') })), /Santa.*2026-12-24/);
+  assert.match(describePlan(planForChoice('may4', { now: at('2026-09-29'), reducedMotion: true })), /May the Fourth.*reduced motion/);
+});

@@ -9,7 +9,7 @@ import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
 import { drawSkylineOverlay } from '../render/skylineOverlay.js';
 import { ExportComposer } from '../export/composer.js';
-import { resolveEasterEgg } from '../easter/index.js';
+import { planForChoice, describePlan, EASTER_CHOICES } from '../easter/index.js';
 import { encodeCanvasVideo, pickVideoPath } from '../export/recorder.js';
 
 const $ = (id) => document.getElementById(id);
@@ -491,7 +491,7 @@ window.addEventListener('resize', () => {
 
 // ---------------------------------------------------------------- export
 
-const exportUi = { composer: null, raf: 0, start: 0, busy: false, last: null };
+const exportUi = { composer: null, raf: 0, start: 0, busy: false, last: null, now: null };
 
 function exportOptions() {
   const form = $('export-form');
@@ -504,7 +504,31 @@ function exportOptions() {
     reveal: $('export-reveal').checked,
     northUp: state.settings.northUp,
     duration: 15,
+    easter: $('export-easter').value,
   };
+}
+
+/**
+ * The seasonal plan for the dialog's choice. `now` was read once when the
+ * dialog opened, so the event cannot change between captured frames.
+ */
+function easterPlan() {
+  return planForChoice($('export-easter').value, {
+    now: exportUi.now,
+    search: location.search,
+    reducedMotion: !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches),
+  });
+}
+
+function updateEasterNote(plan) {
+  const auto = $('export-easter').value === 'auto';
+  $('export-easter-note').textContent = `${auto ? 'Automatic: ' : ''}${describePlan(plan)}`;
+}
+
+/** Only "None" is remembered: a forced Santa or Death Star should not outlive the session. */
+function persistableExportOptions(opts) {
+  const { easter, ...rest } = opts;
+  return { ...rest, easter: easter === 'off' ? 'off' : 'auto' };
 }
 
 function restoreExportOptions() {
@@ -518,6 +542,7 @@ function restoreExportOptions() {
   $('export-caption').checked = saved.caption !== false;
   $('export-tape').checked = saved.tape !== false;
   $('export-reveal').checked = saved.reveal !== false;
+  $('export-easter').value = saved.easter === 'off' ? 'off' : 'auto';
 }
 
 function previewLoop() {
@@ -540,16 +565,17 @@ function stopPreview() { cancelAnimationFrame(exportUi.raf); }
 
 function openExport() {
   if (!state.quiz || !renderer) return;
+  exportUi.now = new Date();
+  $('export-easter').innerHTML = EASTER_CHOICES.map((c) => `<option value="${c.value}">${c.label}</option>`).join('');
+  $('export-easter').value = 'auto';
   restoreExportOptions();
   exportUi.composer?.dispose();
-  // The seasonal layer is decided once per dialog session (the clock is never read per frame),
-  // so every captured frame of the video uses the same event.
-  const easterEgg = resolveEasterEgg({
-    now: new Date(),
-    search: location.search,
-    reducedMotion: !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches),
-  });
-  exportUi.composer = new ExportComposer(state.quiz, state.model, { ...exportOptions(), easterEgg, canvas: $('export-canvas') });
+  // The seasonal layer follows the dialog's choice; the date was read once above.
+  const { easter, ...composerOptions } = exportOptions();
+  void easter;
+  const plan = easterPlan();
+  updateEasterNote(plan);
+  exportUi.composer = new ExportComposer(state.quiz, state.model, { ...composerOptions, easterEgg: plan, canvas: $('export-canvas') });
   exportUi.last = null;
   $('export-share').hidden = true;
   $('export-dialog').showModal();
@@ -594,7 +620,8 @@ function download(blob, name) {
 function setExportBusy(on) {
   exportUi.busy = on;
   for (const id of ['export-png', 'export-answer-png', 'export-video', 'export-close']) $(id).disabled = on || (id === 'export-video' && !exportUi.videoPath);
-  $('export-form').querySelectorAll('input').forEach((el) => { el.disabled = on; });
+  // Includes the Easter egg select: changing the event mid-recording would mix two events in one video.
+  $('export-form').querySelectorAll('input, select').forEach((el) => { el.disabled = on; });
 }
 
 async function exportImage(reveal) {
@@ -636,13 +663,17 @@ $('export-close').addEventListener('click', closeExport);
 $('export-dialog').addEventListener('cancel', (e) => { e.preventDefault(); closeExport(); });
 $('export-form').addEventListener('change', () => {
   const opts = exportOptions();
-  store.set('otq.export', opts);
-  exportUi.composer?.setOptions(opts);
+  store.set('otq.export', persistableExportOptions(opts));
+  const { easter, ...composerOptions } = opts;
+  void easter;
+  const plan = easterPlan();
+  updateEasterNote(plan);
+  exportUi.composer?.setOptions({ ...composerOptions, easterEgg: plan });
   startPreview();
 });
 $('export-handle').addEventListener('input', () => {
   const opts = exportOptions();
-  store.set('otq.export', opts);
+  store.set('otq.export', persistableExportOptions(opts));
   exportUi.composer?.setOptions({ handle: opts.handle });
 });
 $('export-png').addEventListener('click', () => exportImage(false));

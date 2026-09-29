@@ -49,7 +49,9 @@ The Death Star is a shaded sphere with a superlaser dish, an equatorial trench a
 
 **Configuration** (`src/easter/config.js`): the winter window, the Santa days, the May 4 date and `timeZone` (an IANA zone such as `Europe/Istanbul`; `null` uses the local zone of whoever renders). The project had no publishing time zone before, so this is where it is set. The day is decided **once per render**, when the export dialog opens, and never per frame.
 
-**Preview any event on any date** with query parameters (before the `#`):
+**Choosing it in the export dialog.** **Export for Instagram → Easter egg → Seasonal animation** offers *Automatic (by date)*, *None*, *Winter snow*, *Winter + Santa's sleigh* and *May the Fourth*. The preview updates at once and a line under the menu says what will be rendered. *Automatic* is the default and follows the date (or a preview link). A forced choice applies whatever the date is. Only *None* is remembered between visits; a forced event is not, so a Santa video cannot sneak into a July export. The menu is locked while a video is being recorded, so one video never mixes two events.
+
+**Preview any event on any date** with query parameters (before the `#`), which *Automatic* honours:
 
 ```
 ?easterEgg=winter                     snow, on any date

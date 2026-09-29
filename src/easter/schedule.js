@@ -86,3 +86,36 @@ export function resolveEasterEgg({ now = new Date(), search = '', config = EASTE
   const ev = selectEvent(date, config);
   return ev ? { key: ev.key, date, santa: ev.santa, preview: !!pv.date, reducedMotion: rm } : null;
 }
+
+/** Choices offered in the export dialog. */
+export const EASTER_CHOICES = [
+  { value: 'auto', label: 'Automatic (by date)' },
+  { value: 'off', label: 'None' },
+  { value: 'winter', label: 'Winter snow' },
+  { value: 'santa', label: "Winter + Santa's sleigh" },
+  { value: 'may4', label: 'May the Fourth' },
+];
+
+/**
+ * Turns the export dialog's choice into a plan.
+ *  auto   - what the date (or the ?easterEgg / ?easterDate preview link) says
+ *  off    - nothing
+ *  winter | santa | may4 - that event, whatever the date
+ * A forced choice ignores the link's ?easterEgg and ?easterDate but keeps
+ * ?reducedMotion. Unknown values behave like auto.
+ */
+export function planForChoice(choice, { now = new Date(), search = '', config = EASTER_CONFIG, reducedMotion = false } = {}) {
+  if (choice === 'off') return null;
+  if (choice === 'winter' || choice === 'santa' || choice === 'may4') {
+    const rm = new URLSearchParams(search).get('reducedMotion');
+    return resolveEasterEgg({ now, search: `?easterEgg=${choice}${rm !== null ? `&reducedMotion=${encodeURIComponent(rm)}` : ''}`, config, reducedMotion });
+  }
+  return resolveEasterEgg({ now, search, config, reducedMotion });
+}
+
+/** One-line description of a plan for the dialog ("Winter, Dec 24, with Santa"). */
+export function describePlan(plan) {
+  if (!plan) return 'No event on this date';
+  const name = plan.key === 'may4' ? 'May the Fourth' : plan.santa ? "Winter with Santa's sleigh" : 'Winter snow';
+  return `${name} (${plan.date}${plan.reducedMotion ? ', reduced motion' : ''})`;
+}
