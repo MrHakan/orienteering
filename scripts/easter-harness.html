@@ -1,0 +1,78 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Easter egg frame harness (dev)</title>
+<style>body{margin:0;background:#0d1115;color:#9aa3ab;font:13px system-ui}canvas{width:540px;display:block;margin:8px}</style>
+<p style="margin:8px">Open with <code>?easterEgg=winter|santa|may4[&amp;easterDate=YYYY-MM-DD][&amp;reducedMotion=1][&amp;seed=…][&amp;d=medium][&amp;format=reels|post][&amp;t=11.4]</code></p>
+<canvas id="out"></canvas>
+<script type="module">
+  // Renders one export frame with the real ExportComposer, at an explicit
+  // elapsed time. window.harness.frame(t) is what scripts/render-easter-frames.mjs drives.
+  import { generate } from '../src/engine/quiz.js';
+  import { TerrainModel } from '../src/engine/terrainModel.js';
+  import { ExportComposer } from '../src/export/composer.js';
+  import { resolveEasterEgg } from '../src/easter/index.js';
+
+  const q = new URLSearchParams(location.search);
+  const quiz = await generate({ seed: q.get('seed') || 'eg1', difficulty: q.get('d') || 'medium' });
+  const t = quiz.terrain;
+  const model = new TerrainModel({ size: t.size, n: t.n, heights: t.heights, seed: t.modelSeed });
+  // A fixed "now" (never the machine clock) so the harness is reproducible.
+  const plan = resolveEasterEgg({ now: new Date('2026-09-29T12:00:00'), search: location.search });
+  const out = document.getElementById('out');
+  const composer = new ExportComposer(quiz, model, {
+    canvas: out, format: q.get('format') || 'reels', handle: '@topoguess', reveal: true, weather: (q.get('weather') || '').split(',').filter(Boolean), easterEgg: plan,
+  });
+  composer.animated = true;
+
+  window.harness = {
+    plan, quiz: { seed: quiz.seed, correctLabel: quiz.correctLabel, options: quiz.options.map((o) => [o.label, o.x, o.y]) },
+    layout: composer.layout,
+    /** PNG data URL of the frame at `t`; egg:false draws the same frame without the layer. */
+    frame(time, { egg = true, reveal = time >= 12 } = {}) {
+      composer.setOptions({ easterEgg: egg ? plan : null });
+      composer.drawFrame(time, { reveal });
+      return out.toDataURL('image/png');
+    },
+    /**
+     * Pixel audit of what the layer itself changes at time t. Draws the frame
+     * without the layer, snapshots it, draws the layer on top and diffs. (Two
+     * separately rendered frames can differ by +-2 levels in already-drawn text
+     * whenever the canvas op list differs at all, even by an unrelated 3x3 fill;
+     * that rasteriser jitter is not the layer.) Counts changed pixels inside
+     * protected rectangles, over the terrain (below the computed skyline) and
+     * in the sky.
+     */
+    audit(time, { reveal = time >= 12 } = {}) {
+      composer.setOptions({ easterEgg: null });
+      composer.drawFrame(time, { reveal });
+      const W = out.width, H = out.height, cx = out.getContext('2d', { willReadFrequently: true });
+      const before = cx.getImageData(0, 0, W, H).data.slice();
+      composer.setOptions({ easterEgg: plan });
+      const st = composer.easter.stage;
+      composer.easter.draw(cx, time);
+      const A = cx.getImageData(0, 0, W, H).data;
+      const inRect = (x, y, r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
+      const S = st.scene;
+      const skyAt = (x) => { const i = Math.min(st.skyRawY.length - 1, Math.max(0, Math.round((x - S.x) / (S.w / (st.skyRawY.length - 1))))); return st.skyRawY[i]; };
+      const out2 = { changed: 0, protectedRects: {}, terrain: 0, terrainPixels: 0, sky: 0, free: 0, maxDelta: 0 };
+      for (const r of st.rects) out2.protectedRects[r.name] = 0;
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const k = (y * W + x) * 4;
+        const inScene = x >= S.x && x < S.x + S.w && y >= S.y && y < S.y + S.h;
+        const isTerrain = inScene && y > skyAt(x) + 0.5;
+        if (isTerrain) out2.terrainPixels++;
+        const d = Math.abs(A[k] - before[k]) + Math.abs(A[k + 1] - before[k + 1]) + Math.abs(A[k + 2] - before[k + 2]);
+        if (d === 0) continue;
+        out2.changed++;
+        out2.maxDelta = Math.max(out2.maxDelta, d);
+        let hit = false;
+        for (const r of st.rects) if (inRect(x, y, r)) { out2.protectedRects[r.name]++; hit = true; }
+        if (isTerrain) out2.terrain++; else if (inScene) out2.sky++; else if (!hit) out2.free++;
+      }
+      return out2;
+    },
+    stage: () => composer.easter && { top: composer.easter.stage.top, ds: composer.easter.scene.ds || null, sleigh: composer.easter.scene.sleigh || null },
+  };
+  if (q.has('t')) window.harness.frame(+q.get('t'));
+  window.ready = true;
+</script>

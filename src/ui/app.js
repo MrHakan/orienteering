@@ -9,6 +9,7 @@ import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
 import { drawSkylineOverlay } from '../render/skylineOverlay.js';
 import { ExportComposer } from '../export/composer.js';
+import { resolveEasterEgg } from '../easter/index.js';
 import { encodeCanvasVideo, pickVideoPath } from '../export/recorder.js';
 
 const $ = (id) => document.getElementById(id);
@@ -541,7 +542,14 @@ function openExport() {
   if (!state.quiz || !renderer) return;
   restoreExportOptions();
   exportUi.composer?.dispose();
-  exportUi.composer = new ExportComposer(state.quiz, state.model, { ...exportOptions(), canvas: $('export-canvas') });
+  // The seasonal layer is decided once per dialog session (the clock is never read per frame),
+  // so every captured frame of the video uses the same event.
+  const easterEgg = resolveEasterEgg({
+    now: new Date(),
+    search: location.search,
+    reducedMotion: !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches),
+  });
+  exportUi.composer = new ExportComposer(state.quiz, state.model, { ...exportOptions(), easterEgg, canvas: $('export-canvas') });
   exportUi.last = null;
   $('export-share').hidden = true;
   $('export-dialog').showModal();

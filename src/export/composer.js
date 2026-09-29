@@ -6,6 +6,8 @@
 import { TerrainRenderer } from '../render/webglTerrain.js';
 import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
+import { skylineScreenPoints } from '../render/skylineOverlay.js';
+import { createEasterEgg } from '../easter/index.js';
 import { Random } from '../engine/rng.js';
 
 export const FORMATS = {
@@ -47,7 +49,9 @@ export class ExportComposer {
   /**
    * @param {object} quiz generated quiz
    * @param {import('../engine/terrainModel.js').TerrainModel} model
-   * @param {{canvas?:HTMLCanvasElement, format?:string, weather?:string[], handle?:string, caption?:boolean, reveal?:boolean, tape?:boolean, northUp?:boolean, duration?:number}} options
+   * `easterEgg` is a plan from resolveEasterEgg() (or null): a decorative
+   * seasonal layer chosen once per render, never per frame.
+   * @param {{canvas?:HTMLCanvasElement, easterEgg?:object|null, format?:string, weather?:string[], handle?:string, caption?:boolean, reveal?:boolean, tape?:boolean, northUp?:boolean, duration?:number}} options
    */
   constructor(quiz, model, options = {}) {
     this.quiz = quiz;
@@ -77,6 +81,24 @@ export class ExportComposer {
     }
     if (formatChanged || prev.northUp !== o.northUp) this.buildMaps();
     this.weather = weatherParams(o.weather, this.quiz.camera.heading);
+    if (formatChanged || 'easterEgg' in rest) this.buildEasterEgg();
+  }
+
+  /**
+   * The seasonal layer only receives the plan, the quiz seed, the layout and the
+   * engine's skyline, so it cannot alter or reveal the quiz.
+   */
+  buildEasterEgg() {
+    const plan = this.options.easterEgg || null;
+    if (!plan) { this.easter = null; return; }
+    const S = this.layout.scene;
+    this.easter = createEasterEgg(plan, {
+      seed: this.quiz.seed,
+      layout: this.layout,
+      frame: { width: this.canvas.width, height: this.canvas.height },
+      skyline: skylineScreenPoints(this.quiz.camera, this.model, S.w, S.h),
+      duration: this.options.duration,
+    });
   }
 
   computeLayout({ width: W, height: H }) {
@@ -190,6 +212,9 @@ export class ExportComposer {
       ctx.fillStyle = 'rgba(207, 211, 214, 0.7)';
       ctx.fillText(this.options.handle, W / 2, L.handle.y);
     }
+    // Seasonal Easter egg: last, clipped away from every protected element.
+    // Inactive (and untouched) outside an event and after the fade-out.
+    if (this.easter) this.easter.draw(ctx, t);
     ctx.restore();
   }
 

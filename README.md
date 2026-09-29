@@ -36,6 +36,38 @@ Weather is purely visual. It never changes the terrain, and the camera stays fix
 
 Videos are encoded frame by frame with WebCodecs and muxed into MP4 by a small built-in muxer (`src/export/mp4.js`). The output is always exactly 30 fps and 15.0 s, however fast the machine renders. In Chrome, Edge and Safari the codec is **H.264**, which is what Instagram expects. Browsers without an H.264 encoder fall back to VP9 (or real-time MediaRecorder WebM), and the dialog warns that the file needs converting before upload. On phones, the **Share…** button hands the file to the system share sheet, which includes Instagram.
 
+## Seasonal Easter eggs
+
+Two decorative, code-drawn animations are layered onto **exported** frames (the Instagram video, the PNGs, the export preview). The normal page, the quiz, the seed, the options, the answer and everything saved are untouched: the layer only receives the plan, the quiz seed, the export layout and the engine's skyline.
+
+| Event | When | What |
+|---|---|---|
+| **Winter** | Dec 21 – Jan 6 | Subtle layered snowfall for the whole render. On **Dec 24–25** Santa's sleigh with eight reindeer flies across the sky from 10.0 s to 14.4 s and is gone before the last frame. |
+| **May the Fourth** | May 4 | Starfield, Star Destroyers, a TIE patrol, and a Death Star whose superlaser charges from 6.4 s and explodes at 11.0 s (one brief flash). TIE fighters fly out of the blast. Everything fades before the end. |
+
+The Death Star is a shaded sphere with a superlaser dish, an equatorial trench and restrained surface detail; each Star Destroyer is a wedge with a bridge tower; each TIE fighter has a cockpit, struts and twin hexagonal wings. The sleigh has Santa, a gift sack, reins, runners and antlers. All of it is drawn with Canvas 2D in `src/easter/models/`; there are no assets, downloads, CDNs, API calls or audio.
+
+**Configuration** (`src/easter/config.js`): the winter window, the Santa days, the May 4 date and `timeZone` (an IANA zone such as `Europe/Istanbul`; `null` uses the local zone of whoever renders). The project had no publishing time zone before, so this is where it is set. The day is decided **once per render**, when the export dialog opens, and never per frame.
+
+**Preview any event on any date** with query parameters (before the `#`):
+
+```
+?easterEgg=winter                     snow, on any date
+?easterEgg=santa                      winter with the sleigh (Dec 24)
+?easterEgg=may4
+?easterEgg=off                        disable, even on an event day
+?easterDate=2026-12-25                pick the event by date (also combinable with easterEgg)
+?reducedMotion=1                      force the reduced-motion version (0 forces it off)
+```
+
+Open **Export for Instagram**; the dialog previews the 15 s loop with the event. `scripts/easter-models.html` shows every model at large size. `scripts/easter-harness.html` renders any single frame at an explicit time (`?easterEgg=may4&t=11.4`), and `scripts/render-easter-frames.mjs` renders sample frames and audits them (needs Playwright; it fails if the layer changes any pixel of protected content, or of the terrain on May 4, or if the first/last frame differs from the ordinary render).
+
+**Where it may draw.** Sky objects (sleigh, ships, stars, flash) are clipped to the part of the 3D view above the engine's computed skyline (5 px margin) and below the compass tape, so they can disappear behind hills but never cover the terrain clue. Snow is clipped to unprotected areas: it never falls on the title, tape, countdown bar, map and markers, caption or handle. It does fall, faintly, on the terrain image (under 1.1 % of its pixels at 30–50 % opacity) and outside the scene. Pixel audits confirm this (see below).
+
+**Timing and determinism.** Every frame is an analytic function of `elapsedSeconds`, the seeded generator (`quiz seed # event # date`) and the layout, so a frame can be reproduced exactly (and video is encoded frame by frame). There is no `Math.random`, `Date.now` or network use in the drawing code, and a test enforces it. A global envelope fades the layer in over 0.8 s and out by 14.9 s, is exactly zero on the first and last frame, and the layer then issues no draw calls at all: the last frame equals the ordinary render pixel for pixel. With **reduced motion** (the system setting, or `?reducedMotion=1`) snow is frozen, Santa or the fleet appear as a still fade, and there is no explosion or flash. The flash is a single pulse (peak 0.6, about 0.4 s), well below the 3-per-second guideline.
+
+**Answer.** The layer never receives the options or the answer and draws the same picture for a scrambled quiz. It adds nothing that points at a choice. (The export's existing "Reveal answer in the last 3 s" option is unchanged and still applies.)
+
 ## Core principle
 
 There is exactly **one** elevation model per quiz (`TerrainModel`). The WebGL scene, the contour map, the skyline analysis and the distractor search all read `getElevation()` from that model. Even the lowland beyond the map edge is part of the model, so the analysis sees what the renderer draws.
@@ -147,6 +179,7 @@ src/engine/   terrain engine (no DOM, runs in Node and in a Web Worker)
 src/render/   webglTerrain.js (first-person scene), mapRenderer.js, compassTape.js
 src/ui/       app.js (controller), worker.js
 src/export/   composer.js (social frame + weather), recorder.js (WebCodecs/MediaRecorder), mp4.js (muxer)
+src/easter/   seasonal Easter eggs: config, schedule (dates/preview), stage (allowed areas), winter, may4, models/
 scripts/      dev server, CLI generator, batch stats, debug PNG
 test/         node:test suite
 ```
