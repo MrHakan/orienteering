@@ -40,7 +40,7 @@ Every pair must satisfy bounds on:
 - skyline depth;
 - a visible, timed skyline cue.
 
-Starts are at least 240 m apart and must form a spread-out triangle. The map crop encloses all three full routes and does not depend on which is correct. Every anchor must meet the difficulty's existing minimum view quality. A correct route is selected uniformly from the accepted triple; letters are shuffled independently.
+Starts are at least 240 m apart and must form a spread-out triangle. The complete contour map includes distant ridges that supply the skyline clues; framing does not depend on which is correct. Every anchor must meet the difficulty's existing minimum view quality. A correct route is selected uniformly from the accepted triple; letters are shuffled independently.
 
 | Difficulty | RMS difference | Cue minimum | Ground-profile RMS maximum |
 |---|---:|---:|---:|
@@ -50,7 +50,7 @@ Starts are at least 240 m apart and must form a spread-out triangle. The map cro
 | Expert | 0.8–4.0° | 1.0° | 4 m |
 | Master | 0.7–3.5° | 0.9° | 3.4 m |
 
-The clue must occur before 12 seconds and outside either automatic inspect window. It uses the central 9° of the scene; even its three-column coarse footprint lies in the centre strip left open by every idle hand/knife model. Its skyline position must fit both export aspect ratios. These constraints ensure there is a usable terrain difference; they do not guarantee a human difficulty rating. If no validated triple is found, generation explicitly asks for another seed or a lower difficulty.
+The clue must occur before 12 seconds and outside either automatic inspect window. It uses the central 9° of the scene; even its three-column coarse footprint lies in the centre strip left open by every idle hand/knife model. Its skyline position must fit both export aspect ratios. Cue angles also account for each route's small landing pitch, so camera punch cannot cancel the claimed difference. These constraints ensure there is a usable terrain difference; they do not guarantee a human difficulty rating. If no validated triple is found, generation explicitly asks for another seed or a lower difficulty.
 
 ## Answer and export
 

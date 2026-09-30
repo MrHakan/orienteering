@@ -15,6 +15,7 @@ for (const difficulty of ['easy','medium','hard','expert','master']) for (const 
     const q=await generate({seed:'bhop-demo',mode:'trail',difficulty,movement});
     const model=new TerrainModel({...q.terrain,seed:q.terrain.modelSeed});
     assert.equal(q.mode,'trail');assert.equal(q.validation.ok,true);
+    assert.deepEqual(q.mapExtent,{x:model.size/2,y:model.size/2,size:model.size});
     assert.equal(q.trail.movement,movement);assert.equal(q.options.length,3);
     assert.equal(q.options.filter(o=>o.correct).length,1);
     assert.equal(q.correctLabel,q.options.find(o=>o.correct).label);
@@ -88,8 +89,9 @@ test('pairwise terrain differences are symmetric and contain a timed visible cue
   const model=new TerrainModel({...q.terrain,seed:q.terrain.modelSeed});
   const described=q.options.map(route=>({...route,views:q.trail.times.map(t=>{
     const {camera}=trailFrame(q,t,route.label,model);
-    return model.skyline.viewDescriptor(camera.x,camera.y,camera.heading,camera.fov,{
+    const descriptor=model.skyline.viewDescriptor(camera.x,camera.y,camera.heading,camera.fov,{
       eyeHeight:camera.z-model.getElevation(camera.x,camera.y),columns:33});
+    return {...descriptor,pitchOffset:camera.pitch-q.camera.pitch};
   })}));
   const band={min:.7,max:3.5,cue:.9,profile:3.4};
   for(let i=0;i<3;i++)for(let j=i+1;j<3;j++) {
@@ -100,6 +102,11 @@ test('pairwise terrain differences are symmetric and contain a timed visible cue
     assert.ok(Math.abs(ab.cue.delta+ba.cue.delta)<1e-12);
     assert.ok(ab.cue.t<12);
   }
+  // Equal screen angles are not a clue, even if world skyline angles differ.
+  const a=described[0],b={...a,views:a.views.map(d=>({...d,
+    horizon:Float32Array.from(d.horizon,h=>h+.4),pitchOffset:(d.pitchOffset||0)+.4}))};
+  const cancelled=compareTrailViews(a,b,{min:.01,max:10,cue:.1,profile:10},q.trail.times);
+  assert.ok(cancelled.cue.magnitude<1e-5);assert.equal(cancelled.ok,false);
 });
 
 test('trail segment hit testing respects rotated and cropped maps',()=>{

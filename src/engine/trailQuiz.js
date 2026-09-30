@@ -8,7 +8,7 @@ import { descriptorDistance } from './skyline.js';
 import { depthDifference } from './quizCandidates.js';
 import { rankLookalikeTriples, triangleSpread } from './lookalikeQuiz.js';
 import { buildTerrain, terrainSummary, landmarkSummary, framingPitch, now } from './quiz.js';
-import { createTrailPlan, simulateTrail, planAt, normaliseMovement } from './trailMotion.js';
+import { createTrailPlan, simulateTrail, planAt, normaliseMovement, landingPulse } from './trailMotion.js';
 import { surfaceElevation } from './terrainSurface.js';
 import { saturate, wrap360 } from './grid.js';
 
@@ -28,9 +28,10 @@ export function getTrailPreset(difficulty = 'medium', tuning = null) {
 function describeRoute(model, route, plan, fov, times, columns) {
   return times.map((t) => {
     const p = planAt(plan, t), x = route.x + p.x, y = route.y + p.y;
-    return model.skyline.viewDescriptor(x, y, wrap360(p.heading + Math.sin(t * Math.PI / 0.32) * 1.1), fov, {
+    const descriptor = model.skyline.viewDescriptor(x, y, wrap360(p.heading + Math.sin(t * Math.PI / 0.32) * 1.1), fov, {
       eyeHeight: route.feet[p.index] + 1.7 - model.getElevation(x, y), columns,
     });
+    return { ...descriptor, pitchOffset: -landingPulse(route, t) * 0.45 };
   });
 }
 
@@ -46,7 +47,7 @@ function routeCue(a, b, times) {
       const offset = a[k].fov * c / (n - 1) - a[k].fov / 2;
       if (Math.abs(offset) > a[k].fov * .05) continue;
       let delta = 0;
-      for (let j = -1; j <= 1; j++) delta += (b[k].horizon[c + j] - a[k].horizon[c + j]) / 3;
+      for (let j = -1; j <= 1; j++) delta += ((b[k].horizon[c + j] - (b[k].pitchOffset || 0)) - (a[k].horizon[c + j] - (a[k].pitchOffset || 0))) / 3;
       if (Math.abs(delta) > best.magnitude) best = { magnitude: Math.abs(delta), delta,
         bearing: Math.round(wrap360(a[k].heading + offset)), t };
     }
@@ -74,12 +75,10 @@ export function compareTrailViews(a, b, band, times, { coarse = false } = {}) {
   return { ok, D, cost, profile, depth, cue, maxFrame };
 }
 
-export function trailMapExtent(model, options) {
-  const pts = options.flatMap((o) => o.points), xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
-  const span = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
-  const size = Math.min(model.size, Math.max(650, span + 150));
-  const centre = (values) => Math.max(size / 2, Math.min(model.size - size / 2, (Math.max(...values) + Math.min(...values)) / 2));
-  return { x: centre(xs), y: centre(ys), size };
+// Keep the complete contour map: a crop around the tracks can hide the
+// distant ridge that supplies their distinguishing skyline cue.
+export function trailMapExtent(model) {
+  return { x: model.size / 2, y: model.size / 2, size: model.size };
 }
 
 export function generateTrailQuiz({ seed, difficulty = 'medium', variant = 0, headingMode = null, movement = 'go',
@@ -134,7 +133,7 @@ export function generateTrailQuiz({ seed, difficulty = 'medium', variant = 0, he
           const a = points[[0, 0, 1][k]], index = fullTimes.indexOf(p.cue.t), d = a.views[index];
           const offset = wrap360(p.cue.bearing - d.heading + 180) - 180;
           const c = Math.max(0, Math.min(32, Math.round((offset + fov / 2) / fov * 32)));
-          return Math.abs(d.horizon[c] - pitch) < 25;
+          return Math.abs(d.horizon[c] - pitch - (d.pitchOffset || 0)) < 25;
         });
         if (!cueVisible) continue;
         accepted++;
@@ -163,7 +162,7 @@ export function generateTrailQuiz({ seed, difficulty = 'medium', variant = 0, he
         terrain: terrainSummary(model, interval, terrainCheck), camera,
         trail: { plan, movement: physics, duration: plan.duration, pairs: triple.pairs, times: fullTimes },
         options, correctLabel, heading: { degrees: heading, ...formatHeading(heading, headingStyle), mode: headingStyle },
-        mapExtent: trailMapExtent(model, options), mapRotation: preset.mapRotation ? rng.fork('rotation').pick([0, 90, 180, 270]) : 0,
+        mapExtent: trailMapExtent(model), mapRotation: preset.mapRotation ? rng.fork('rotation').pick([0, 90, 180, 270]) : 0,
         landmarks: landmarkSummary(model), hardness: saturate(1 - triple.cost),
         quality: { total: chosen.quality.total, ...chosen.quality.components, blockedFrac: chosen.quality.blockedFrac,
           edgeFrac: chosen.quality.edgeFrac, landmarksInView: chosen.quality.landmarksInView },

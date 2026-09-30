@@ -85,6 +85,13 @@ export function simulateTrail(model, start, plan, movement = 'go') {
   return { x: start.x, y: start.y, feet, ground, vertical, landings, points, maxSlope };
 }
 
+/** Shared landing punch for both the rendered camera and clue validation. */
+export function landingPulse(route, seconds) {
+  const recent = route.landings.findLast((l) => l.t <= seconds);
+  const since = recent ? seconds - recent.t : Infinity;
+  return since < 0.13 ? Math.exp(-since / 0.035) * Math.min(1, recent.impact / 9) : 0;
+}
+
 /** Random-access sampler used by live playback, comparisons and encoded frames. */
 export function trailFrame(quiz, seconds, label = quiz.correctLabel, model = null) {
   const route = quiz.options.find((p) => p.label === label) || quiz.options.find((p) => p.correct);
@@ -92,9 +99,7 @@ export function trailFrame(quiz, seconds, label = quiz.correctLabel, model = nul
   const x = route.x + p.x, y = route.y + p.y;
   const ground = model ? surfaceElevation(model, x, y) : lerp(route.ground[i], route.ground[j], f);
   const foot = Math.max(ground, lerp(route.feet[i], route.feet[j], f));
-  const recent = route.landings.findLast((l) => l.t <= p.t);
-  const sinceLanding = recent ? p.t - recent.t : Infinity;
-  const landing = sinceLanding < 0.13 ? Math.exp(-sinceLanding / 0.035) * Math.min(1, recent.impact / 9) : 0;
+  const landing = landingPulse(route, p.t);
   const look = Math.sin(p.t * Math.PI / 0.32) * 1.1;
   return {
     camera: { ...quiz.camera, x, y, z: foot + quiz.camera.eyeHeight, heading: wrap360(p.heading + look),
