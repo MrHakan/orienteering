@@ -31,6 +31,12 @@ jobs:
         run: |
           mkdir -p _site
           cp -r index.html styles.css src _site/
+          # Keep each page's entire module/worker graph on one release. A soft
+          # refresh must not combine new controls with cached old quiz code.
+          asset_dir="_site/assets/${GITHUB_SHA}"
+          mkdir -p "$asset_dir"
+          cp -r styles.css src "$asset_dir/"
+          sed -i "s|href=\"styles.css\"|href=\"assets/${GITHUB_SHA}/styles.css\"|;s|src=\"src/ui/app.js\"|src=\"assets/${GITHUB_SHA}/src/ui/app.js\"|" _site/index.html
           touch _site/.nojekyll
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
