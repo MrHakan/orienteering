@@ -40,6 +40,15 @@ for (const difficulty of ['easy','medium','hard','expert','master']) for (const 
         assert.ok(o.cue.magnitude>=q.validation.minCue);
         assert.ok(o.cue.t<12);
         assert.ok(!(o.cue.t>=1.2 && o.cue.t<=4) && !(o.cue.t>=7.4 && o.cue.t<=10.2));
+        for(const label of [q.correctLabel,o.label]) {
+          const {camera}=trailFrame(q,o.cue.t,label,model);
+          const view=model.skyline.viewDescriptor(camera.x,camera.y,camera.heading,camera.fov,{
+            eyeHeight:camera.z-model.getElevation(camera.x,camera.y),columns:33});
+          const offset=((o.cue.bearing-camera.heading+540)%360)-180;
+          const column=Math.round((offset+45)/90*32);
+          assert.ok(Math.abs(offset)<=5);
+          assert.ok(Math.abs(view.horizon[column]-camera.pitch)<25);
+        }
       }
     }
   });

@@ -133,7 +133,10 @@ export function generateTrailQuiz({ seed, difficulty = 'medium', variant = 0, he
           const a = points[[0, 0, 1][k]], index = fullTimes.indexOf(p.cue.t), d = a.views[index];
           const offset = wrap360(p.cue.bearing - d.heading + 180) - 180;
           const c = Math.max(0, Math.min(32, Math.round((offset + fov / 2) / fov * 32)));
-          return Math.abs(d.horizon[c] - pitch - (d.pitchOffset || 0)) < 25;
+          return [[0, 1], [0, 2], [1, 2]][k].every((i) => {
+            const view = points[i].views[index];
+            return Math.abs(view.horizon[c] - pitch - (view.pitchOffset || 0)) < 25;
+          });
         });
         if (!cueVisible) continue;
         accepted++;
