@@ -1,13 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generate } from '../src/engine/quiz.js';
-import { FRIEND_HEIGHT, personSight } from '../src/engine/friendQuiz.js';
+import { FRIEND_HEIGHT, personSight, friendObserver, friendOptionCamera } from '../src/engine/friendQuiz.js';
 import { surfaceElevation, surfaceLineOfSight } from '../src/engine/terrainSurface.js';
 import { TerrainModel } from '../src/engine/terrainModel.js';
 import { MapRenderer, quizMarkers } from '../src/render/mapRenderer.js';
 import { personVertices } from '../src/render/personMesh.js';
 import { captionText } from '../src/export/composer.js';
 import { scrambleLabels } from '../src/engine/scramble.js';
+import { descriptorDistance } from '../src/engine/skyline.js';
+import { ExportComposer } from '../src/export/composer.js';
 
 for (const difficulty of ['easy','medium','hard','expert','master']) for (const friendChallenge of ['standard','depth-trap']) {
   test(`${difficulty} ${friendChallenge} locates a visible person from a separate observer`, async () => {
@@ -24,7 +26,8 @@ for (const difficulty of ['easy','medium','hard','expert','master']) for (const 
     assert.equal(q.friend.z,surfaceElevation(model,q.friend.x,q.friend.y));
     assert.ok(q.validation.minDistance >= q.validation.minRequiredDistance);
     for (const p of q.options) {
-      const sight = personSight(model,q.camera,p);
+      const observer = friendOptionCamera(q,p);
+      const sight = personSight(model,observer,p);
       assert.equal(sight.visible,true); assert.ok(sight.distance>=65 && sight.distance<=230);
       assert.ok(model.getSlope(p.x,p.y)<=26);
       assert.ok(Math.abs(p.x-q.mapExtent.x)<q.mapExtent.size/2-45);
@@ -34,7 +37,24 @@ for (const difficulty of ['easy','medium','hard','expert','master']) for (const 
       assert.ok(Math.max(...q.options.map(p=>p.bearing))-Math.min(...q.options.map(p=>p.bearing))<1e-8);
     }
     assert.equal(quizMarkers(q),q.options);
-    assert.match(captionText(q),/From YOU, locate your friend/);
+    assert.equal(friendObserver(q),difficulty==='easy'?q.camera:null);
+    assert.equal(q.friend.observerHidden,difficulty!=='easy');
+    assert.match(captionText(q),difficulty==='easy'?/From YOU, locate your friend/:/Find your friend.*Read the terrain/);
+    if(difficulty!=='easy') {
+      assert.deepEqual(q.mapExtent,{x:q.terrain.size/2,y:q.terrain.size/2,size:q.terrain.size});
+      assert.deepEqual(correct.observer,q.camera);
+      assert.ok(q.validation.rangeSpread<1e-8);
+      assert.ok(q.stats.questionsCompared>=1);
+      for(const p of q.options) {
+        assert.ok(Math.abs(p.distance-correct.distance)<1e-8);
+        assert.ok(Math.abs(p.angularHeight-correct.angularHeight)<.015);
+        assert.ok(Math.abs(p.elevation-correct.elevation)<=q.validation.elevationTolerance);
+        if(!p.correct) {
+          assert.ok(p.cue.magnitude>=q.validation.minCue);
+          assert.ok(p.D>=q.validation.minRequiredDistance);
+        }
+      }
+    }
   });
 }
 
@@ -89,6 +109,77 @@ test('human mesh is a physical 1.80 m object with an orange torso and two legs',
   assert.ok(Math.abs(Math.max(...heights)-51.8)<1e-5);
   assert.ok(Math.abs(Math.min(...heights)-50.015)<1e-5);
   assert.ok(orange>=36);
+});
+
+
+test('15-question session defeats the near/middle/far shortcut and keeps visible terrain clues', async () => {
+  for(let i=0;i<15;i++) {
+    const difficulty=['medium','hard','expert','master'][i%4];
+    const friendChallenge=i%2?'depth-trap':'standard';
+    const q=await generate({seed:`friend-distance-audit-${i}`,mode:'friend',difficulty,friendChallenge});
+    const model=new TerrainModel({...q.terrain,seed:q.terrain.modelSeed});
+    const describe=(c)=>model.skyline.viewDescriptor(c.x,c.y,c.heading,c.fov,{
+      eyeHeight:c.z-model.getElevation(c.x,c.y),columns:33,
+    });
+    const actual=describe(q.camera),correct=q.options.find(p=>p.correct);
+    assert.equal(friendObserver(q),null);
+    assert.equal(q.validation.ok,true);
+    for(const p of q.options) {
+      // Every letter admits a real, walkable observer with indistinguishable
+      // range/bearing/body size. Inspecting distance alone cannot remove one.
+      const sight=personSight(model,p.observer,p);
+      assert.equal(sight.visible,true);
+      assert.ok(model.getSlope(p.observer.x,p.observer.y)<=26);
+      assert.ok(Math.abs(sight.distance-correct.distance)<1e-8);
+      assert.ok(Math.abs(sight.bearing-correct.bearing)<1e-8);
+      assert.ok(Math.abs(sight.angularHeight-correct.angularHeight)/correct.angularHeight<.01);
+      assert.ok(Math.abs(sight.elevation-correct.elevation)<=q.validation.elevationTolerance);
+      if(!p.correct) {
+        const D=descriptorDistance(actual,describe(p.observer));
+        assert.ok(D>=q.validation.minRequiredDistance);
+        assert.ok(Math.abs(D-p.D)<1e-8);
+        assert.ok(p.cue.magnitude>=q.validation.minCue);
+      }
+    }
+    assert.ok(q.validation.minSeparation>=280);
+    // No map pan/scale reveals which of the possible observers is the real one.
+    assert.deepEqual(q.mapExtent,{x:model.size/2,y:model.size/2,size:model.size});
+  }
+});
+
+test('friend map reveals the observer only on the answer or a comparison',()=>{
+  const camera={x:100,y:200},other={x:800,y:900};
+  const mr=Object.create(MapRenderer.prototype);
+  mr.data={friendMode:true,observer:null};mr.reveal=null;mr.viewing=null;
+  assert.equal(mr.currentObserver(),null);
+  mr.reveal={camera};assert.equal(mr.currentObserver(),camera);
+  mr.viewing=other;assert.equal(mr.currentObserver(),other);
+  mr.data={friendMode:true,observer:camera};mr.reveal=null;mr.viewing=null;
+  assert.equal(mr.currentObserver(),camera);
+  mr.data={friendMode:false,observer:null};mr.reveal={camera};
+  assert.equal(mr.currentObserver(),null);
+});
+
+test('friend question exports hide YOU, while answer images reveal YOU',()=>{
+  const context=new Proxy({measureText:()=>({width:20})},{
+    get:(target,key)=>target[key]??(()=>{}),set:(target,key,value)=>{target[key]=value;return true;},
+  });
+  const canvases=[];
+  const previous=globalThis.document;
+  globalThis.document={createElement:()=>{const texts=[];const ctx=new Proxy(context,{
+    get:(target,key)=>key==='fillText'?(text)=>texts.push(text):target[key],
+  });const canvas={getContext:()=>ctx,texts};canvases.push(canvas);return canvas;}};
+  try {
+    for(const observerHidden of [true,false]) {
+      const c=Object.create(ExportComposer.prototype);
+      c.quiz={mode:'friend',friend:{observerHidden},camera:{x:200,y:200,heading:0,fov:50},
+        terrain:{contourInterval:5},options:[],mapExtent:{x:500,y:500,size:1000},landmarks:null};
+      c.model={size:1000,getContours:()=>[]};c.layout={map:{s:400}};c.options={northUp:true};
+      c.buildMaps();
+      assert.equal(c.mapCanvas.texts.includes('YOU'),!observerHidden);
+      assert.equal(c.mapRevealCanvas.texts.includes('YOU'),true);
+    }
+  } finally {globalThis.document=previous;}
 });
 
 test('friend mode refuses unvalidated terrain',async()=>{

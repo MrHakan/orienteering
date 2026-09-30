@@ -6,7 +6,7 @@ import { scrambleLabels } from '../engine/scramble.js';
 import { DIFFICULTIES, TUNABLES, tunableValue, encodeTuning, decodeTuning } from '../engine/difficulty.js';
 import { getLookalikePreset, DIRECTIONS } from '../engine/lookalikeQuiz.js';
 import { normaliseGridSize, normaliseGridChallenge, parseCell, headingHidden } from '../engine/gridQuiz.js';
-import { normaliseFriendChallenge } from '../engine/friendQuiz.js';
+import { normaliseFriendChallenge, friendObserver, friendOptionCamera } from '../engine/friendQuiz.js';
 import { TerrainRenderer } from '../render/webglTerrain.js';
 import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
@@ -186,6 +186,9 @@ function show(quiz) {
   state.viewing = null;
   state.friendZoom = false;
   $('friend-tools').hidden = quiz.mode !== 'friend';
+  $('friend-status').textContent = quiz.friend?.observerHidden
+    ? 'Orange jacket · 1.80 m tall · locate him using the terrain'
+    : 'Orange jacket · 1.80 m tall · your viewpoint stays fixed';
   $('friend-zoom').textContent = 'Zoom 3×';
   $('friend-zoom').setAttribute('aria-pressed', 'false');
   const t = quiz.terrain;
@@ -201,7 +204,9 @@ function show(quiz) {
   $('prompt').textContent = facing ? 'You stand at the marked point. Which of the 8 directions are you looking in?'
     : lookalike ? 'A, B and C have similar views in this direction. Match the ridge shapes and foreground to find your point.'
     : grid ? `You stand at a cell centre.${headingHidden(quiz) ? ' Your heading is one of 8 directions, hidden until you answer.' : ''} Tap your cell or type its code, then check your answer. Rows start at north; columns start at west.`
-    : quiz.mode === 'friend' ? `You stand at YOU. Where is the person in the orange jacket: A, B or C?${quiz.friend.challenge === 'depth-trap' ? ' All three spots share a bearing — compare distance, apparent size and slope.' : ' Match his position to the surrounding terrain.'}`
+    : quiz.mode === 'friend' ? quiz.friend.observerHidden
+      ? `Where is the person in the orange jacket: A, B or C? Your position is unmarked. All three spots fit his distance and apparent size; use the skyline, slopes and hollows to locate him.${quiz.friend.challenge === 'depth-trap' ? ' Depth trap also matches his vertical angle more closely.' : ''}`
+      : `You stand at YOU. Where is the person in the orange jacket: A, B or C?${quiz.friend.challenge === 'depth-trap' ? ' All three spots share a bearing — compare distance, apparent size and slope.' : ' Match his position to the surrounding terrain.'}`
     : 'You are at one of the marked points, facing the direction shown. Which one?';
   $('credit').textContent = `seed ${quiz.seed}${quiz.variant ? ` · positions #${quiz.variant}` : ''} · ${DIFFICULTIES[quiz.difficulty].label.toLowerCase()} · ${Math.round(t.size / 1000 * 10) / 10} km × ${Math.round(t.size / 1000 * 10) / 10} km`;
   $('viewing-badge').hidden = true;
@@ -222,7 +227,7 @@ function show(quiz) {
     landmarks: quiz.landmarks,
     grid: grid ? { ...quiz.grid, correctLabel: quiz.correctLabel } : null,
     extent: quiz.mapExtent || null,
-    observer: quiz.mode === 'friend' ? quiz.camera : null,
+    observer: friendObserver(quiz), friendMode: quiz.mode === 'friend',
   });
   map.setOverlays(state.settings);
 
@@ -285,7 +290,7 @@ function renderScene(camera) {
   if (state.quiz.mode === 'friend') {
     const o = state.quiz.options.find((p) => p.label === state.viewing);
     renderer.setPerson(o ? { ...state.quiz.friend, x: o.x, y: o.y, z: o.z, heading: (o.bearing + 180) % 360 } : state.quiz.friend);
-    if (state.friendZoom) camera = { ...camera, fov: camera.fov / 3 };
+    if (state.friendZoom) camera = { ...camera, fov: 2 * Math.atan(Math.tan(camera.fov * Math.PI / 360) / 3) * 180 / Math.PI };
   }
   renderer.render(camera);
   // In "Which way?" the bearing tape would give the answer away.
@@ -388,14 +393,23 @@ function answer(label) {
 }
 
 function showFriendResult(label, right) {
-  const q = state.quiz, res = $('result');
+  const q = state.quiz, res = $('result'), hidden = q.friend.observerHidden;
+  const cue = (o) => {
+    if (o.correct) return 'Matches the view';
+    if (!o.cue) return '—';
+    const rel = ((o.cue.bearing - q.camera.heading + 540) % 360) - 180;
+    const side = rel < -q.camera.fov / 6 ? 'Left' : rel > q.camera.fov / 6 ? 'Right' : 'Centre';
+    return `${side}: skyline ${Math.abs(o.cue.delta).toFixed(1)}° ${o.cue.delta > 0 ? 'higher' : 'lower'}`;
+  };
   res.hidden = false;
   res.innerHTML = `<div class="verdict ${right ? 'good' : 'bad'}">${right ? 'Correct' : 'Not quite'} — your friend was at ${q.correctLabel}.</div>
-    <p>Compare the person at each spot. You keep looking from YOU; the terrain and camera stay fixed.</p>
+    <p>${hidden ? 'Your position is now marked YOU. Compare the terrain from the possible observation point for each answer; the person stays at the same range. These are observer views, looking towards your friend.'
+      : 'Compare the person at each spot. You keep looking from YOU; the terrain and camera stay fixed.'}</p>
     <div class="views">${q.options.map((o) => `<button type="button" class="btn ghost" data-view="${o.label}">Friend at ${o.label}${o.correct ? ' (true)' : ''}</button>`).join('')}</div>
-    <table><tr><th>Spot</th><th>Distance</th><th>Elevation</th><th>Apparent height</th></tr>
-    ${q.options.map((o) => `<tr><td><strong>${o.label}</strong></td><td>${Math.round(o.distance)} m</td><td>${Math.round(o.z)} m</td><td>${o.angularHeight.toFixed(2)}°</td></tr>`).join('')}</table>
-    <p class="note">A 1.80 m person appears smaller farther away. Match his height in the view to the contours and slopes around the candidate spot.</p>
+    <table><tr><th>Spot</th><th>Range</th><th>Apparent height</th><th>${hidden ? 'Terrain clue' : 'Elevation'}</th></tr>
+    ${q.options.map((o) => `<tr><td><strong>${o.label}</strong></td><td>${Math.round(o.distance)} m</td><td>${o.angularHeight.toFixed(2)}°</td><td>${hidden ? cue(o) : `${Math.round(o.z)} m`}</td></tr>`).join('')}</table>
+    <p class="note">${hidden ? 'The range and apparent height fit all three answers. The skyline and the slopes between the observer and the person distinguish the true spot. On comparisons, YOU marks the possible observation point.'
+      : 'A 1.80 m person appears smaller farther away. Match his height in the view to the contours and slopes around the candidate spot.'}</p>
     <button type="button" class="btn primary" id="next">Next quiz (N)</button>`;
   res.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => viewFrom(b.dataset.view)));
   $('next').addEventListener('click', newQuiz);
@@ -456,7 +470,7 @@ function showFacingResult(label, right) {
 function optionCamera(label) {
   const quiz = state.quiz;
   const o = quiz.options.find((p) => p.label === label);
-  if (quiz.mode === 'friend') return { cam: quiz.camera, o };
+  if (quiz.mode === 'friend') return { cam: friendOptionCamera(quiz, o), o };
   if (quiz.mode === 'facing') return { cam: { ...quiz.camera, heading: o.heading }, o };
   return { cam: { ...quiz.camera, heading: o.heading ?? quiz.camera.heading, x: o.x, y: o.y, z: state.model.getElevation(o.x, o.y) + quiz.camera.eyeHeight }, o };
 }
@@ -469,7 +483,7 @@ function viewFrom(label) {
   map.setViewing({ ...cam, color: o.correct ? '#5fd08a' : '#ff9f5e' });
   const badge = $('viewing-badge');
   badge.hidden = false;
-  badge.textContent = quiz.mode === 'friend' ? `Friend at ${label}${o.correct ? ' — true spot' : ' — comparison'} · your viewpoint` : quiz.mode === 'facing' ? `Facing ${label}${o.correct ? ' — true direction' : ''}`
+  badge.textContent = quiz.mode === 'friend' ? `Friend at ${label}${o.correct ? ' — true spot' : ' — comparison'} · ${quiz.friend.observerHidden && !o.correct ? 'possible observer' : 'your viewpoint'}` : quiz.mode === 'facing' ? `Facing ${label}${o.correct ? ' — true direction' : ''}`
     : `Viewing from ${label}${o.correct ? ' — true position' : ' — distractor'}`;
   highlightView(label);
 }
@@ -492,7 +506,7 @@ function renderFacts() {
     ['Mode', q.mode === 'friend' ? `Where is your friend?${q.friend.challenge === 'depth-trap' ? ' · Depth trap' : ''}` : q.mode === 'facing' ? 'Which way are you facing?' : q.mode === 'lookalike' ? 'Look-alikes (A / B / C)' : q.mode === 'grid' ? `Grid ${q.grid.size} × ${q.grid.size}${headingHidden(q) ? ' · Lost compass' : ''}` : 'Where are you?'],
     ['Heading', headingHidden(q) && !state.answered ? 'hidden until you answer' : `${String(Math.round(q.camera.heading)).padStart(3, '0')}° (${q.mode === 'facing' ? 'one of 8 directions' : q.heading.mode})`],
     ...(q.mode === 'grid' ? [['Cells', `${q.options.length} · ${Math.round(q.grid.cellMetres)} m per side · observer at centre`]] : []),
-    ...(q.mode === 'friend' ? [['Person', 'orange jacket · 1.80 m tall'], ['Viewpoint', 'YOU · fixed observer'], ['Map area', `${Math.round(q.mapExtent.size)} m × ${Math.round(q.mapExtent.size)} m`]] : []),
+    ...(q.mode === 'friend' ? [['Person', 'orange jacket · 1.80 m tall'], ['Viewpoint', q.friend.observerHidden && !state.answered ? 'unmarked · infer from terrain' : 'YOU · observer position'], ['Map area', `${Math.round(q.mapExtent.size)} m × ${Math.round(q.mapExtent.size)} m`]] : []),
     ['Field of view', `${q.camera.fov}° · eye ${q.camera.eyeHeight} m`],
     ['Relief', `${Math.round(q.terrain.min)}–${Math.round(q.terrain.max)} m`],
     ['Contours', `${q.terrain.contourInterval} m (index every ${q.terrain.contourInterval * 5} m)`],

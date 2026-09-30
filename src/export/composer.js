@@ -11,6 +11,7 @@ import { createEasterEgg } from '../easter/index.js';
 import { Random } from '../engine/rng.js';
 import { headingHidden } from '../engine/gridQuiz.js';
 import { exportCamera } from './friendZoom.js';
+import { friendObserver } from '../engine/friendQuiz.js';
 
 export const FORMATS = {
   reels: { label: 'Reels / Story 9:16', width: 1080, height: 1920 },
@@ -45,7 +46,8 @@ export function captionText(quiz) {
   if (quiz.mode === 'grid') return `Find your cell: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size}.`;
   const labels = quiz.options.map((o) => o.label);
   const list = labels.length > 1 ? `${labels.slice(0, -1).join(', ')} or ${labels[labels.length - 1]}` : labels[0];
-  if (quiz.mode === 'friend') return `From YOU, locate your friend: ${list}.`;
+  if (quiz.mode === 'friend') return quiz.friend.observerHidden
+    ? `Find your friend: ${list}. Read the terrain.` : `From YOU, locate your friend: ${list}.`;
   return `You are at ${list}, ${quiz.heading.text.toLowerCase()}.`;
 }
 
@@ -141,7 +143,7 @@ export class ExportComposer {
       const mr = new MapRenderer(c, { fixedSize: { width: s / 2, height: s / 2, dpr: 2 } });
       mr.setData({ model: this.model, interval: q.terrain.contourInterval, options: quizMarkers(q), rotation: this.options.northUp ? 0 : q.mapRotation, landmarks: q.landmarks,
         grid: q.mode === 'grid' ? { ...q.grid, correctLabel: q.correctLabel } : null,
-        extent: q.mapExtent || null, observer: q.mode === 'friend' ? q.camera : null });
+        extent: q.mapExtent || null, observer: friendObserver(q), friendMode: q.mode === 'friend' });
       if (reveal) mr.setReveal({ chosen: null, camera: q.camera });
       return c;
     };
@@ -179,7 +181,7 @@ export class ExportComposer {
     ctx.font = `500 ${L.facing.size}px ${FONT}`;
     ctx.fillStyle = '#cfd3d6';
     const facing = facingMode ? 'YOU ARE AT THE MARKED POINT' : headingHidden(q) && !reveal ? 'LOST COMPASS · FIND YOUR CELL' : q.heading.mode === 'exact' ? q.heading.text : `${q.heading.text} ${q.heading.arrow}`;
-    ctx.fillText(q.mode === 'friend' ? `FROM YOU · ${facing}` : facing, W / 2, L.facing.y);
+    ctx.fillText(q.mode === 'friend' ? `${q.friend.observerHidden && !reveal ? 'READ THE TERRAIN' : 'FROM YOU'} · ${facing}` : facing, W / 2, L.facing.y);
     if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
 
     // Scene.

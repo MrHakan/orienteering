@@ -217,7 +217,7 @@ export class MapRenderer {
     this.drawScaleBar();
     if (this.data.grid) this.drawGridLabels();
     else this.drawMarkers(); // last, so nothing ever hides an answer option
-    if (this.data.observer) this.drawObserver();
+    if (this.currentObserver()) this.drawObserver();
   }
 
   gridPolygon(label) {
@@ -523,8 +523,14 @@ export class MapRenderer {
     }
   }
 
+  currentObserver() {
+    // A hidden friend observer is revealed only after an answer. Comparison
+    // views show the hypothetical observer, never the target's own POV.
+    return this.data.friendMode ? this.viewing || this.reveal?.camera || this.data.observer : this.data.observer;
+  }
+
   drawObserver() {
-    const { ctx } = this, o = this.data.observer, [x, y] = this.toCanvas(o.x, o.y);
+    const { ctx } = this, o = this.currentObserver(), [x, y] = this.toCanvas(o.x, o.y);
     ctx.fillStyle = '#ffd666'; ctx.strokeStyle = COLORS.bg; ctx.lineWidth = 3;
     ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.stroke(); ctx.fill();
     ctx.font = '800 11px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';

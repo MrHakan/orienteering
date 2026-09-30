@@ -76,7 +76,7 @@
         <span>Friend challenge</span>
         <select id="friend-challenge" aria-label="Friend challenge">
           <option value="standard">Terrain spotting</option>
-          <option value="depth-trap">Depth trap — same bearing</option>
+          <option value="depth-trap">Depth trap — matched sightlines</option>
         </select>
       </label>
       <label class="field seed-field">
@@ -106,7 +106,7 @@
       </div>
 
       <div id="friend-tools" class="friend-tools" hidden>
-        <span>Orange jacket · 1.80 m tall · your viewpoint stays fixed</span>
+        <span id="friend-status">Orange jacket · 1.80 m tall · locate him using the terrain</span>
         <button type="button" class="btn ghost small" id="friend-zoom" aria-pressed="false">Zoom 3×</button>
       </div>
       <div class="rule"></div>
@@ -194,7 +194,7 @@
         <p>Master mode fully evaluates dozens of viewpoints and keeps the question whose distractors are hardest to rule out. Every distractor still differs visibly somewhere in the scene, and the answer screen shows where.</p>
         <p>"Which way are you facing?" marks where you stand and hides the heading. Pick the one of 8 directions whose view matches, which works best by comparing the skyline with the contours around the point.</p>
         <p>Grid method divides the map into 4 × 4, 8 × 8 or 16 × 16 cells. Rows A–P run from north to south; columns 1–16 run from west to east. You stand at a cell centre. Tap that cell or enter its code, then check your answer. Lost compass hides the heading, so you must work out the view's direction from the terrain too.</p>
-        <p>Where is your friend? You stand at YOU on the local contour map and see an orange-jacketed, 1.80 m person from a distance. Choose his position at A, B or C. Zoom helps you inspect him. Depth trap aligns all three spots on the same bearing: use apparent size, elevation and the terrain between you. After answering, compare the person at each spot from your fixed viewpoint.</p>
+        <p>Where is your friend? See an orange-jacketed, 1.80 m person from your own viewpoint and choose his position at A, B or C. Easy marks where you stand as YOU. Medium and above leave your position unmarked and match the three answers for range, bearing and apparent size: read the skyline, slopes and hollows to locate him. Higher levels select more similar terrain; Depth trap also matches the person’s elevation angle more closely. After answering, YOU is revealed and you can compare the possible observer view for each answer. Zoom helps inspect the person without changing your position.</p>
         <p class="keys">Keys: <kbd>A</kbd>–<kbd>D</kbd> answer · <kbd>S</kbd> scramble letters · <kbd>P</kbd> new positions · <kbd>N</kbd> new quiz · "Which way?": <kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd> / <kbd>A</kbd><kbd>D</kbd> / <kbd>Z</kbd><kbd>X</kbd><kbd>C</kbd> as a compass rose</p>
       </section>
     </aside>
