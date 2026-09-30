@@ -2,6 +2,35 @@
 // so the 3D scene is by construction the same surface the map is drawn from.
 //
 // GL axes: X = east, Y = up, Z = -north.
+import { personVertices } from './personMesh.js';
+
+const PERSON_VERT = `
+attribute vec3 aPos;
+attribute vec3 aNormal;
+attribute vec3 aColor;
+uniform mat4 uProj;
+uniform mat4 uView;
+varying vec3 vWorld;
+varying vec3 vNormal;
+varying vec3 vColor;
+void main() {
+  vWorld = aPos; vNormal = aNormal; vColor = aColor;
+  gl_Position = uProj * uView * vec4(aPos, 1.0);
+}`;
+const PERSON_FRAG = `
+precision highp float;
+varying vec3 vWorld;
+varying vec3 vNormal;
+varying vec3 vColor;
+uniform vec3 uEye;
+uniform vec3 uSunDir;
+uniform vec3 uFogColor;
+uniform float uFogDensity;
+void main() {
+  float light = 0.72 + 0.28 * max(0.0, dot(normalize(vNormal), uSunDir));
+  float fog = 1.0 - exp(-pow(length(vWorld - uEye) * uFogDensity, 1.35));
+  gl_FragColor = vec4(mix(vColor * light, uFogColor, clamp(fog, 0.0, 1.0)), 1.0);
+}`;
 
 const VERT = `
 attribute vec3 aPos;
@@ -177,10 +206,42 @@ export class TerrainRenderer {
     this.uint32 = typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext ? true : !!gl.getExtension('OES_element_index_uint');
     this.prog = program(gl, VERT, FRAG);
     this.sky = program(gl, SKY_VERT, SKY_FRAG);
+    this.personProg = program(gl, PERSON_VERT, PERSON_FRAG);
+    this.personBuf = gl.createBuffer();
     this.skyBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.skyBuf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
     this.meshes = [];
+  }
+
+  setPerson(person = null) {
+    this.person = person;
+    if (!person) { this.personCount = 0; return; }
+    const vertices = personVertices(person), gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.personBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+    this.personCount = vertices.length / 9;
+  }
+
+  drawPerson(projection, view, eye, sun, horizon, fogDensity) {
+    if (!this.personCount) return;
+    const gl = this.gl, p = this.personProg;
+    gl.useProgram(p);
+    gl.uniformMatrix4fv(gl.getUniformLocation(p, 'uProj'), false, projection);
+    gl.uniformMatrix4fv(gl.getUniformLocation(p, 'uView'), false, view);
+    gl.uniform3fv(gl.getUniformLocation(p, 'uEye'), eye);
+    gl.uniform3fv(gl.getUniformLocation(p, 'uSunDir'), sun);
+    gl.uniform3fv(gl.getUniformLocation(p, 'uFogColor'), horizon);
+    gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), fogDensity);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.personBuf);
+    const attrs = ['aPos', 'aNormal', 'aColor'].map((name) => gl.getAttribLocation(p, name));
+    attrs.forEach((a, i) => { gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, 3, gl.FLOAT, false, 36, i * 12); });
+    // Bodies use the same depth buffer and projection as the terrain in BOTH
+    // passes, so a near ridge can cover a more distant friend correctly.
+    gl.disable(gl.CULL_FACE);
+    gl.drawArrays(gl.TRIANGLES, 0, this.personCount);
+    gl.enable(gl.CULL_FACE);
+    attrs.forEach((a) => gl.disableVertexAttribArray(a));
   }
 
   /** @param {import('../engine/terrainModel.js').TerrainModel} model */
@@ -314,15 +375,18 @@ export class TerrainRenderer {
     gl.frontFace(gl.CCW);
     const p = this.prog;
     gl.useProgram(p);
-    gl.uniformMatrix4fv(gl.getUniformLocation(p, 'uView'), false, lookDir(eye, fwd));
+    const view = lookDir(eye, fwd);
+    gl.uniformMatrix4fv(gl.getUniformLocation(p, 'uView'), false, view);
     gl.uniform3fv(gl.getUniformLocation(p, 'uEye'), eye);
     // Low sun from the side of the view direction: cross-lighting reveals slopes.
     const sunAz = ((camera.heading + 125) * Math.PI) / 180, sunEl = (27 * Math.PI) / 180;
-    gl.uniform3fv(gl.getUniformLocation(p, 'uSunDir'), [Math.sin(sunAz) * Math.cos(sunEl), Math.sin(sunEl), -Math.cos(sunAz) * Math.cos(sunEl)]);
+    const sun = [Math.sin(sunAz) * Math.cos(sunEl), Math.sin(sunEl), -Math.cos(sunAz) * Math.cos(sunEl)];
+    gl.uniform3fv(gl.getUniformLocation(p, 'uSunDir'), sun);
     gl.uniform2fv(gl.getUniformLocation(p, 'uHeightRange'), [m.min, m.max]);
     gl.uniform3fv(gl.getUniformLocation(p, 'uFogColor'), horizon);
     // Fog shortens visibility to ~1.5 km but keeps the near and middle distance readable.
-    gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), 1 / Math.max(1400, 5200 - 3700 * fog - 1200 * wet));
+    const fogDensity = 1 / Math.max(1400, 5200 - 3700 * fog - 1200 * wet);
+    gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), fogDensity);
     gl.uniform1f(gl.getUniformLocation(p, 'uTime'), time);
     gl.uniform1f(gl.getUniformLocation(p, 'uCloud'), Math.max(cloud, wet * 0.6));
     gl.uniform2fv(gl.getUniformLocation(p, 'uWind'), wind);
@@ -337,7 +401,9 @@ export class TerrainRenderer {
     // far pass on the same pixel, so clearing depth in between is exact.
     for (const [near, far] of RANGES) {
       gl.clear(gl.DEPTH_BUFFER_BIT);
-      gl.uniformMatrix4fv(uProj, false, perspective(vfov, aspect, near, far));
+      const projection = perspective(vfov, aspect, near, far);
+      gl.useProgram(p);
+      gl.uniformMatrix4fv(uProj, false, projection);
       for (const mesh of this.meshes) {
         gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vbo);
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.ibo);
@@ -347,6 +413,9 @@ export class TerrainRenderer {
         gl.vertexAttribPointer(aNor, 3, gl.FLOAT, false, 24, 12);
         gl.drawElements(gl.TRIANGLES, mesh.count, mesh.type, 0);
       }
+      gl.disableVertexAttribArray(aPos);
+      gl.disableVertexAttribArray(aNor);
+      this.drawPerson(projection, view, eye, sun, horizon, fogDensity);
     }
   }
 }

@@ -104,17 +104,17 @@ export class MapRenderer {
 
   /** World metres -> CSS pixels. Map rotation is a pure display transform. */
   toCanvas(x, y) {
-    const L = this.data.model.size;
-    const u = x / L - 0.5, v = 0.5 - y / L;
+    const L = this.data.extent?.size || this.data.model.size;
+    const u = (x - (this.data.extent?.x ?? L / 2)) / L, v = ((this.data.extent?.y ?? L / 2) - y) / L;
     return [this.cx + (u * this.cos - v * this.sin) * this.S, this.cy + (u * this.sin + v * this.cos) * this.S];
   }
 
   /** CSS pixels -> world metres (inverse of toCanvas). */
   toWorld(px, py) {
-    const L = this.data.model.size;
+    const L = this.data.extent?.size || this.data.model.size;
     const a = (px - this.cx) / this.S, b = (py - this.cy) / this.S;
     const u = a * this.cos + b * this.sin, v = -a * this.sin + b * this.cos;
-    return [(u + 0.5) * L, (0.5 - v) * L];
+    return [u * L + (this.data.extent?.x ?? L / 2), (this.data.extent?.y ?? L / 2) - v * L];
   }
 
   hit(e) {
@@ -145,7 +145,10 @@ export class MapRenderer {
     ctx.fillStyle = COLORS.bg;
     ctx.fillRect(0, 0, w, h);
 
-    const corners = [[0, 0], [this.data.model.size, 0], [this.data.model.size, this.data.model.size], [0, this.data.model.size]].map(([x, y]) => this.toCanvas(x, y));
+    const extent = this.data.extent || { x: this.data.model.size / 2, y: this.data.model.size / 2, size: this.data.model.size };
+    const left = extent.x - extent.size / 2, right = extent.x + extent.size / 2;
+    const bottom = extent.y - extent.size / 2, top = extent.y + extent.size / 2;
+    const corners = [[left, bottom], [right, bottom], [right, top], [left, top]].map(([x, y]) => this.toCanvas(x, y));
     ctx.save();
     ctx.beginPath();
     corners.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
@@ -214,6 +217,7 @@ export class MapRenderer {
     this.drawScaleBar();
     if (this.data.grid) this.drawGridLabels();
     else this.drawMarkers(); // last, so nothing ever hides an answer option
+    if (this.data.observer) this.drawObserver();
   }
 
   gridPolygon(label) {
@@ -414,7 +418,9 @@ export class MapRenderer {
     ctx.globalAlpha = 0.4;
     ctx.translate(this.cx, this.cy);
     ctx.rotate(Math.atan2(this.sin, this.cos));
-    ctx.drawImage(this._hillshade, -this.S / 2, -this.S / 2, this.S, this.S);
+    const L = model.size, extent = this.data.extent || { x: L / 2, y: L / 2, size: L };
+    const scale = this.S / extent.size;
+    ctx.drawImage(this._hillshade, -extent.x * scale, (extent.y - L) * scale, L * scale, L * scale);
     ctx.restore();
   }
 
@@ -461,10 +467,10 @@ export class MapRenderer {
   }
 
   drawCone() {
-    const v = this.viewing || (this.reveal && this.reveal.camera ? { ...this.reveal.camera, color: COLORS.coneLine } : null);
+    const v = this.viewing || (this.reveal && this.reveal.camera ? { ...this.reveal.camera, color: COLORS.coneLine } : this.data.observer);
     if (!v) return;
     const { ctx } = this;
-    const len = 750;
+    const len = this.data.extent ? this.data.extent.size * 0.8 : 750;
     const a0 = ((v.heading - v.fov / 2) * Math.PI) / 180, a1 = ((v.heading + v.fov / 2) * Math.PI) / 180;
     const [ox, oy] = this.toCanvas(v.x, v.y);
     ctx.beginPath();
@@ -517,6 +523,14 @@ export class MapRenderer {
     }
   }
 
+  drawObserver() {
+    const { ctx } = this, o = this.data.observer, [x, y] = this.toCanvas(o.x, o.y);
+    ctx.fillStyle = '#ffd666'; ctx.strokeStyle = COLORS.bg; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.stroke(); ctx.fill();
+    ctx.font = '800 11px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.strokeText('YOU', x, y + 17); ctx.fillText('YOU', x, y + 17);
+  }
+
   drawNorthArrow() {
     const { ctx } = this;
     if (this.data.grid) {
@@ -557,9 +571,10 @@ export class MapRenderer {
       ctx.fillText(`${Math.round(this.data.model.size / this.data.grid.size)} m per cell · ${this.data.interval} m contours`, this.cx, this.cssH - 4);
       return;
     }
-    const L = this.data.model.size;
+    const L = this.data.extent?.size || this.data.model.size;
     const pxPerM = this.S / L;
-    const metres = pxPerM * 500 > 140 ? 250 : 500;
+    const metres = this.data.extent ? [25, 50, 100, 250, 500].filter((m) => m * pxPerM <= 140).at(-1) || 25
+      : pxPerM * 500 > 140 ? 250 : 500;
     const len = metres * pxPerM;
     const x = 22, y = this.cssH - 20;
     ctx.fillStyle = 'rgba(21, 26, 32, 0.75)';

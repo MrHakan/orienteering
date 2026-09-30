@@ -44,6 +44,7 @@ export function captionText(quiz) {
   if (quiz.mode === 'grid') return `Find your cell: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size}.`;
   const labels = quiz.options.map((o) => o.label);
   const list = labels.length > 1 ? `${labels.slice(0, -1).join(', ')} or ${labels[labels.length - 1]}` : labels[0];
+  if (quiz.mode === 'friend') return `From YOU, locate your friend: ${list}.`;
   return `You are at ${list}, ${quiz.heading.text.toLowerCase()}.`;
 }
 
@@ -63,6 +64,7 @@ export class ExportComposer {
     this.glCanvas = document.createElement('canvas');
     this.renderer = new TerrainRenderer(this.glCanvas);
     this.renderer.setTerrain(model);
+    this.renderer.setPerson(quiz.friend || null);
     this.setOptions(options);
   }
 
@@ -136,7 +138,8 @@ export class ExportComposer {
       const c = document.createElement('canvas');
       const mr = new MapRenderer(c, { fixedSize: { width: s / 2, height: s / 2, dpr: 2 } });
       mr.setData({ model: this.model, interval: q.terrain.contourInterval, options: quizMarkers(q), rotation: this.options.northUp ? 0 : q.mapRotation, landmarks: q.landmarks,
-        grid: q.mode === 'grid' ? { ...q.grid, correctLabel: q.correctLabel } : null });
+        grid: q.mode === 'grid' ? { ...q.grid, correctLabel: q.correctLabel } : null,
+        extent: q.mapExtent || null, observer: q.mode === 'friend' ? q.camera : null });
       if (reveal) mr.setReveal({ chosen: null, camera: q.camera });
       return c;
     };
@@ -168,12 +171,12 @@ export class ExportComposer {
     ctx.font = `800 ${L.title.size}px ${FONT}`;
     if ('letterSpacing' in ctx) ctx.letterSpacing = `${Math.round(L.title.size * 0.06)}px`;
     const facingMode = q.mode === 'facing';
-    ctx.fillText(facingMode ? 'WHICH WAY?' : q.mode === 'lookalike' ? 'LOOK-ALIKES' : q.mode === 'grid' ? `${q.grid.size} × ${q.grid.size} GRID` : 'WHERE ARE YOU?', W / 2, L.title.y);
+    ctx.fillText(q.mode === 'friend' ? 'FIND YOUR FRIEND' : facingMode ? 'WHICH WAY?' : q.mode === 'lookalike' ? 'LOOK-ALIKES' : q.mode === 'grid' ? `${q.grid.size} × ${q.grid.size} GRID` : 'WHERE ARE YOU?', W / 2, L.title.y);
     if ('letterSpacing' in ctx) ctx.letterSpacing = `${Math.round(L.facing.size * 0.08)}px`;
     ctx.font = `500 ${L.facing.size}px ${FONT}`;
     ctx.fillStyle = '#cfd3d6';
     const facing = facingMode ? 'YOU ARE AT THE MARKED POINT' : headingHidden(q) && !reveal ? 'LOST COMPASS · FIND YOUR CELL' : q.heading.mode === 'exact' ? q.heading.text : `${q.heading.text} ${q.heading.arrow}`;
-    ctx.fillText(facing, W / 2, L.facing.y);
+    ctx.fillText(q.mode === 'friend' ? `FROM YOU · ${facing}` : facing, W / 2, L.facing.y);
     if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
 
     // Scene.

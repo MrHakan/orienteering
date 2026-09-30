@@ -70,6 +70,10 @@ Open **Export for Instagram**; the dialog previews the 15 s loop with the event.
 
 **Answer.** The layer never receives the options or the answer and draws the same picture for a scrambled quiz. It adds nothing that points at a choice. (The export's existing "Reveal answer in the last 3 s" option is unchanged and still applies.)
 
+## Friend location mode
+
+**Where is your friend?** shows a small 3D person from your own fixed viewpoint. YOU marks the observer; A/B/C are candidate positions for the friend. Use the surrounding contours, apparent size and elevation to locate him. **Depth trap** aligns the candidates on one bearing, and **Zoom 3×** helps inspect the sighting. Answer comparisons move the friend while the observer stays fixed. See [the friend mode guide](docs/friend-mode.md).
+
 ## Core principle
 
 There is exactly **one** elevation model per quiz (`TerrainModel`). The WebGL scene, the contour map, the skyline analysis and the distractor search all read `getElevation()` from that model. Even the lowland beyond the map edge is part of the model, so the analysis sees what the renderer draws.

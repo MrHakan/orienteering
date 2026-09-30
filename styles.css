@@ -192,3 +192,8 @@ kbd { background: #0f1419; border: 1px solid var(--line); border-radius: 4px; pa
   .seed-field input { width: 110px; }
   .answer { width: 52px; height: 52px; }
 }
+
+.friend-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+.friend-tools .btn { margin: 0; flex-shrink: 0; }
+.friend-tools .btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.scene-error { position: absolute; inset: 0; display: grid; place-content: center; margin: 0; padding: 24px; text-align: center; background: var(--card); color: var(--muted); }
