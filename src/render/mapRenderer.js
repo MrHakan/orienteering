@@ -3,6 +3,7 @@
 
 import { ContourGenerator } from '../engine/contours.js';
 import { cellAt, parseCell } from '../engine/gridQuiz.js';
+import { TRAIL_COLORS } from '../engine/trailQuiz.js';
 
 const COLORS = {
   bg: '#151a20',
@@ -126,6 +127,20 @@ export class MapRenderer {
       const label = cellAt(x, y, this.data.model.size, this.data.grid.size);
       return label ? { label } : null;
     }
+    if (this.data.trails) {
+      let best = null, nearest = 18;
+      for (const route of this.data.options) {
+        for (let i = 1; i < route.points.length; i++) {
+          const a = this.toCanvas(route.points[i - 1].x, route.points[i - 1].y);
+          const b = this.toCanvas(route.points[i].x, route.points[i].y);
+          const dx = b[0] - a[0], dy = b[1] - a[1], length2 = dx * dx + dy * dy;
+          const t = length2 ? Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy) / length2)) : 0;
+          const d = Math.hypot(px - a[0] - t * dx, py - a[1] - t * dy);
+          if (d < nearest) { nearest = d; best = route; }
+        }
+      }
+      return best;
+    }
     let best = null, bd = 22;
     for (const o of this.data.options) {
       const [x, y] = this.toCanvas(o.x, o.y);
@@ -203,7 +218,8 @@ export class MapRenderer {
     if (this.overlays.drainage) this.drawDrainage();
     if (this.overlays.landforms) this.drawLandforms();
     if (this.data.grid) this.drawGrid();
-    this.drawCone();
+    if (this.data.trails) this.drawTrails();
+    if (!this.data.trails) this.drawCone();
     ctx.restore();
 
     ctx.strokeStyle = COLORS.frame;
@@ -216,6 +232,7 @@ export class MapRenderer {
     this.drawNorthArrow();
     this.drawScaleBar();
     if (this.data.grid) this.drawGridLabels();
+    else if (this.data.trails) this.drawTrailLabels();
     else this.drawMarkers(); // last, so nothing ever hides an answer option
     if (this.currentObserver()) this.drawObserver();
   }
@@ -463,6 +480,45 @@ export class MapRenderer {
       const [x, y] = this.toCanvas(s.x, s.y);
       ctx.fillStyle = '#7fdbff';
       tri(x, y, 5, -1); ctx.fill();
+    }
+  }
+
+  drawTrails() {
+    const { ctx } = this;
+    for (const route of this.data.options) {
+      const active = this.viewing?.label === route.label, hovered = this.pickable && this.hover === route.label;
+      ctx.globalAlpha = this.reveal && !route.correct && !active ? .5 : 1;
+      const points = route.points.map((p) => this.toCanvas(p.x, p.y));
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      const line = () => { ctx.beginPath(); points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); };
+      line(); ctx.strokeStyle = COLORS.bg; ctx.lineWidth = active || hovered ? 7 : 6; ctx.stroke();
+      line(); ctx.strokeStyle = TRAIL_COLORS[route.label]; ctx.lineWidth = active || hovered ? 3.8 : 3; ctx.stroke();
+      const end = points.at(-1), before = points[Math.max(0, points.length - 5)], az = Math.atan2(end[1] - before[1], end[0] - before[0]);
+      ctx.fillStyle = TRAIL_COLORS[route.label]; ctx.beginPath(); ctx.moveTo(end[0] + Math.cos(az) * 6, end[1] + Math.sin(az) * 6);
+      for (const a of [az + 2.5, az - 2.5]) ctx.lineTo(end[0] + Math.cos(a) * 5, end[1] + Math.sin(a) * 5);
+      ctx.closePath(); ctx.fill();
+      if (this.reveal && route.correct) {
+        line(); ctx.strokeStyle = '#fff3cf'; ctx.lineWidth = 1; ctx.setLineDash([3, 5]); ctx.stroke(); ctx.setLineDash([]);
+      }
+    }
+    ctx.globalAlpha = 1;
+    // The moving dot is answer-only; showing it earlier would give the trail away.
+    if (this.reveal && this.viewing) {
+      const [x, y] = this.toCanvas(this.viewing.x, this.viewing.y);
+      ctx.fillStyle = '#fff'; ctx.strokeStyle = COLORS.bg; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.stroke(); ctx.fill();
+    }
+  }
+
+  drawTrailLabels() {
+    const { ctx } = this;
+    for (const route of this.data.options) {
+      const [x, y] = this.toCanvas(route.x, route.y), color = TRAIL_COLORS[route.label];
+      ctx.strokeStyle = color; ctx.fillStyle = COLORS.bg; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, y, 12, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = color; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = '800 13px system-ui';
+      ctx.fillText(route.label, x, y + .5);
+      if (this.reveal && route.correct) { ctx.fillStyle = '#fff3cf'; ctx.font = '800 12px system-ui'; ctx.fillText('✓', x, y - 21); }
     }
   }
 

@@ -19,7 +19,7 @@ node scripts/batch.mjs 10                                     # pass-rate / timi
 
 ## GitHub Pages
 
-The site is fully static and uses relative paths only, so it works from a sub-path like `https://<user>.github.io/orienteering/`. `.github/workflows/pages.yml` runs the tests and deploys on every push to `main`.
+The site is fully static and uses relative paths only, so it works from a sub-path like `https://<user>.github.io/orienteering/`. `.github/workflows/pages.yml` runs the engine and browser checks on the assembled site, then deploys successful pushes to `main`.
 
 One-time setup: **Settings → Pages → Build and deployment → Source: GitHub Actions**. Alternatively pick "Deploy from a branch" → `main` / `(root)`, which also works because there is no build step.
 
@@ -32,7 +32,7 @@ One-time setup: **Settings → Pages → Build and deployment → Source: GitHub
 - **15 s video:** animated weather, any combination of **wind** (bands of grass sweeping downwind, faster clouds), **rain** (falling streaks, wet overcast light), **clouds** (a moving cloud deck and cloud shadows drifting over the terrain) and **fog** (visibility down to ~1.5 km). A countdown bar runs under the scene; optionally the last 3 s reveal the answer and the view wedge on the map.
 - **Frame:** handle/footer text, caption ("You are at A, B or C, facing north."), bearing tape.
 
-Weather is purely visual. It never changes the terrain, and the camera stays fixed, so the puzzle is identical to the one on the page.
+Weather is purely visual and never changes the terrain. Position puzzles keep their fixed viewpoint, friend videos follow the zoom sequence, and Bunny-hop trails follows the same 12-second run as the page.
 
 Videos are encoded frame by frame with WebCodecs and muxed into MP4 by a small built-in muxer (`src/export/mp4.js`). The output is always exactly 30 fps and 15.0 s, however fast the machine renders. In Chrome, Edge and Safari the codec is **H.264**, which is what Instagram expects. Browsers without an H.264 encoder fall back to VP9 (or real-time MediaRecorder WebM), and the dialog warns that the file needs converting before upload. On phones, the **Share…** button hands the file to the system share sheet, which includes Instagram.
 
@@ -73,6 +73,14 @@ Open **Export for Instagram**; the dialog previews the 15 s loop with the event.
 ## Friend location mode
 
 **Where is your friend?** shows a small 3D person from your own viewpoint. Easy marks where you stand as YOU. Medium and above hide the observer and give each A/B/C target a plausible observation point with the same range, bearing and apparent body size. Match the skyline and intervening slopes to locate him. Expert and Master also use similar target landforms; **Depth trap** tightens the elevation-angle match. **Zoom 3×** helps inspect the sighting. After answering, YOU is revealed and comparisons show each possible observer view. See [the friend mode guide](docs/friend-mode.md).
+
+## Bunny-hop trails
+
+**Mode → Bunny-hop trails** (`&m=trail`) plays a 12-second first-person run over the terrain. Choose which map trail you followed: **A red, B green or C cyan**. All three have the same shape, speed and steering; their moving terrain views are matched pairwise so the skyline and nearby slopes decide the answer. After answering, replay each route or compare the specific time and bearing that rules it out.
+
+Choose **CS 1.6 / CS:GO style** movement; classic fingerless or tactical hands; **classic, default, karambit or Huntsman/Hunter** knives; four finishes; and either hand. The meshes are original procedural models. **Space** pauses/resumes, **F** inspects, and the scrubber replays any moment. Reduced-motion preferences start the run paused. Cosmetics persist locally and travel in shared links without changing the question.
+
+Videos play the run for 12 seconds and freeze at its endpoint for the final 3-second answer reveal. Both export formats and PNGs use the same camera sampler. [The trail guide](docs/trail-mode.md) explains movement, matching and validation.
 
 ## Core principle
 

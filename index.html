@@ -22,6 +22,7 @@
           <option value="lookalike">Look-alikes (A / B / C)</option>
           <option value="grid">Grid method</option>
           <option value="friend">Where is your friend?</option>
+          <option value="trail">Bunny-hop trails</option>
         </select>
       </label>
       <label class="field">
@@ -79,6 +80,13 @@
           <option value="depth-trap">Depth trap — matched sightlines</option>
         </select>
       </label>
+      <label class="field" id="movement-field" hidden>
+        <span>Bunny hop</span>
+        <select id="movement">
+          <option value="go">CS:GO style</option>
+          <option value="classic">CS 1.6 style</option>
+        </select>
+      </label>
       <label class="field seed-field">
         <span>Seed</span>
         <input id="seed" type="text" spellcheck="false" autocomplete="off" maxlength="40">
@@ -109,12 +117,35 @@
         <span id="friend-status">Orange jacket · 1.80 m tall · locate him using the terrain</span>
         <button type="button" class="btn ghost small" id="friend-zoom" aria-pressed="false">Zoom 3×</button>
       </div>
+      <div id="trail-tools" class="trail-tools" hidden>
+        <div class="trail-playback">
+          <button type="button" class="btn ghost small" id="trail-play" aria-pressed="false">Play</button>
+          <button type="button" class="btn ghost small" id="trail-replay">Replay</button>
+          <button type="button" class="btn ghost small" id="trail-inspect">Inspect (F)</button>
+          <output id="trail-time" for="trail-scrub">0.0 / 12.0 s</output>
+        </div>
+        <label class="trail-timeline"><span class="sr-only">Playback time</span><input type="range" id="trail-scrub" min="0" max="12" value="0" step="0.02" aria-label="Bunny-hop playback time"></label>
+        <details class="trail-customise">
+          <summary>Knife &amp; character</summary>
+          <div class="trail-appearance">
+            <label class="field"><span>Knife</span><select id="trail-knife"></select></label>
+            <label class="field"><span>Character</span><select id="trail-character"></select></label>
+            <label class="field"><span>Finish</span><select id="trail-finish"></select></label>
+            <label class="field"><span>Hand</span><select id="trail-hand"><option value="right">Right</option><option value="left">Left</option></select></label>
+          </div>
+        </details>
+      </div>
       <div class="rule"></div>
 
       <div class="map-wrap">
         <canvas id="map" aria-label="Topographic contour map with candidate locations"></canvas>
       </div>
 
+      <div class="trail-legend" id="trail-legend" hidden aria-label="Trail colours">
+        <span style="--trail-color:#ff6358"><i></i>A · red</span>
+        <span style="--trail-color:#58d68b"><i></i>B · green</span>
+        <span style="--trail-color:#39d5ed"><i></i>C · cyan</span>
+      </div>
       <p class="prompt" id="prompt">You are at one of the marked points, facing the direction shown. Which one?</p>
       <div class="answer-row">
         <div class="answers" id="answers"></div>
@@ -195,6 +226,7 @@
         <p>"Which way are you facing?" marks where you stand and hides the heading. Pick the one of 8 directions whose view matches, which works best by comparing the skyline with the contours around the point.</p>
         <p>Grid method divides the map into 4 × 4, 8 × 8 or 16 × 16 cells. Rows A–P run from north to south; columns 1–16 run from west to east. You stand at a cell centre. Tap that cell or enter its code, then check your answer. Lost compass hides the heading, so you must work out the view's direction from the terrain too.</p>
         <p>Where is your friend? See an orange-jacketed, 1.80 m person from your own viewpoint and choose his position at A, B or C. Easy marks where you stand as YOU. Medium and above leave your position unmarked and match the three answers for range, bearing and apparent size: read the skyline, slopes and hollows to locate him. Higher levels select more similar terrain; Depth trap also matches the person’s elevation angle more closely. After answering, YOU is revealed and you can compare the possible observer view for each answer. Zoom helps inspect the person without changing your position.</p>
+        <p>Bunny-hop trails plays a 12-second first-person run across the terrain, with CS-inspired hands, selectable knives and inspect animations. Which path did you follow: A red, B green or C cyan? All three trails share their shape, speed and turn pattern. Match the moving skyline and nearby slopes. After answering, replay each candidate and jump to the terrain detail that rules it out. Space pauses, F inspects, and the timeline lets you replay any moment. Video exports use the same run and reveal the answer in the final 3 seconds.</p>
         <p class="keys">Keys: <kbd>A</kbd>–<kbd>D</kbd> answer · <kbd>S</kbd> scramble letters · <kbd>P</kbd> new positions · <kbd>N</kbd> new quiz · "Which way?": <kbd>Q</kbd><kbd>W</kbd><kbd>E</kbd> / <kbd>A</kbd><kbd>D</kbd> / <kbd>Z</kbd><kbd>X</kbd><kbd>C</kbd> as a compass rose</p>
       </section>
     </aside>

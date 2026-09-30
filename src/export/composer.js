@@ -12,6 +12,7 @@ import { Random } from '../engine/rng.js';
 import { headingHidden } from '../engine/gridQuiz.js';
 import { exportCamera } from './friendZoom.js';
 import { friendObserver } from '../engine/friendQuiz.js';
+import { trailFrame } from '../engine/trailMotion.js';
 
 export const FORMATS = {
   reels: { label: 'Reels / Story 9:16', width: 1080, height: 1920 },
@@ -43,6 +44,7 @@ const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 export function captionText(quiz) {
   if (quiz.mode === 'facing') return 'Which way: N, NE, E, SE, S, SW, W or NW?';
+  if (quiz.mode === 'trail') return 'Which trail: A red, B green or C cyan?';
   if (quiz.mode === 'grid') return `Find your cell: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size}.`;
   const labels = quiz.options.map((o) => o.label);
   const list = labels.length > 1 ? `${labels.slice(0, -1).join(', ')} or ${labels[labels.length - 1]}` : labels[0];
@@ -77,6 +79,7 @@ export class ExportComposer {
     const prev = this.options || {};
     this.options = { format: 'reels', weather: [], handle: '', caption: true, reveal: true, tape: true, northUp: false, duration: 15, ...prev, ...rest };
     const o = this.options;
+    this.renderer.setViewmodel?.(this.quiz.mode === 'trail' ? o.appearance || this.quiz.appearance || {} : null);
     const f = FORMATS[o.format] || FORMATS.reels;
     const formatChanged = prev.format !== o.format;
     if (formatChanged) {
@@ -97,6 +100,7 @@ export class ExportComposer {
    */
   buildEasterEgg() {
     this.easterFov = this.quiz.camera.fov;
+    this.easterCameraKey = JSON.stringify(this.quiz.camera);
     const plan = this.options.easterEgg || null;
     if (!plan) { this.easter = null; return; }
     const S = this.layout.scene;
@@ -143,8 +147,14 @@ export class ExportComposer {
       const mr = new MapRenderer(c, { fixedSize: { width: s / 2, height: s / 2, dpr: 2 } });
       mr.setData({ model: this.model, interval: q.terrain.contourInterval, options: quizMarkers(q), rotation: this.options.northUp ? 0 : q.mapRotation, landmarks: q.landmarks,
         grid: q.mode === 'grid' ? { ...q.grid, correctLabel: q.correctLabel } : null,
-        extent: q.mapExtent || null, observer: friendObserver(q), friendMode: q.mode === 'friend' });
-      if (reveal) mr.setReveal({ chosen: null, camera: q.camera });
+        extent: q.mapExtent || null, trails: q.mode === 'trail', observer: friendObserver(q), friendMode: q.mode === 'friend' });
+      if (reveal) {
+        mr.setReveal({ chosen: null, camera: q.camera });
+        if (q.mode === 'trail') {
+          mr.setViewing({ ...trailFrame(q, q.trail.duration, q.correctLabel, this.model).camera, label: q.correctLabel });
+          this.trailRevealMap = mr; this.trailRevealMapTime = q.trail.duration;
+        }
+      }
       return c;
     };
     this.mapCanvas = make(false);
@@ -163,7 +173,8 @@ export class ExportComposer {
   /** Draw one frame. t = seconds since start. */
   drawFrame(t = 0, { reveal = false } = {}) {
     const { ctx, layout: L, quiz: q } = this;
-    const camera = exportCamera(q, t, this.animated);
+    const frame = q.mode === 'trail' ? trailFrame(q, t, q.correctLabel, this.model) : null;
+    const camera = frame ? frame.camera : exportCamera(q, t, this.animated);
     const W = this.canvas.width, H = this.canvas.height;
     const duration = this.options.duration;
     ctx.save();
@@ -176,17 +187,18 @@ export class ExportComposer {
     ctx.font = `800 ${L.title.size}px ${FONT}`;
     if ('letterSpacing' in ctx) ctx.letterSpacing = `${Math.round(L.title.size * 0.06)}px`;
     const facingMode = q.mode === 'facing';
-    ctx.fillText(q.mode === 'friend' ? 'FIND YOUR FRIEND' : facingMode ? 'WHICH WAY?' : q.mode === 'lookalike' ? 'LOOK-ALIKES' : q.mode === 'grid' ? `${q.grid.size} × ${q.grid.size} GRID` : 'WHERE ARE YOU?', W / 2, L.title.y);
+    ctx.fillText(q.mode === 'trail' ? 'WHICH TRAIL?' : q.mode === 'friend' ? 'FIND YOUR FRIEND' : facingMode ? 'WHICH WAY?' : q.mode === 'lookalike' ? 'LOOK-ALIKES' : q.mode === 'grid' ? `${q.grid.size} × ${q.grid.size} GRID` : 'WHERE ARE YOU?', W / 2, L.title.y);
     if ('letterSpacing' in ctx) ctx.letterSpacing = `${Math.round(L.facing.size * 0.08)}px`;
     ctx.font = `500 ${L.facing.size}px ${FONT}`;
     ctx.fillStyle = '#cfd3d6';
-    const facing = facingMode ? 'YOU ARE AT THE MARKED POINT' : headingHidden(q) && !reveal ? 'LOST COMPASS · FIND YOUR CELL' : q.heading.mode === 'exact' ? q.heading.text : `${q.heading.text} ${q.heading.arrow}`;
+    const facing = q.mode === 'trail' ? 'BUNNY HOP · READ THE MOVING TERRAIN' : facingMode ? 'YOU ARE AT THE MARKED POINT' : headingHidden(q) && !reveal ? 'LOST COMPASS · FIND YOUR CELL' : q.heading.mode === 'exact' ? q.heading.text : `${q.heading.text} ${q.heading.arrow}`;
     ctx.fillText(q.mode === 'friend' ? `${q.friend.observerHidden && !reveal ? 'READ THE TERRAIN' : 'FROM YOU'} · ${facing}` : facing, W / 2, L.facing.y);
     if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
 
     // Scene.
     const S = L.scene;
-    this.renderer.render(camera, { weather: this.weather, time: t });
+    this.renderer.render(camera, { weather: this.weather, time: frame ? frame.motion.t : t,
+      motion: frame?.motion || {}, sunHeading: q.mode === 'trail' ? q.camera.heading : camera.heading });
     ctx.drawImage(this.glCanvas, S.x, S.y, S.w, S.h);
     ctx.save();
     ctx.beginPath(); ctx.rect(S.x, S.y, S.w, S.h); ctx.clip();
@@ -208,6 +220,10 @@ export class ExportComposer {
     ctx.fillRect(S.x, L.rule, S.w, 2);
 
     const M = L.map;
+    if (frame && reveal && this.trailRevealMap && this.trailRevealMapTime !== frame.motion.t) {
+      this.trailRevealMap.setViewing({ ...camera, label: q.correctLabel });
+      this.trailRevealMapTime = frame.motion.t;
+    }
     ctx.drawImage(reveal ? this.mapRevealCanvas : this.mapCanvas, M.x, M.y, M.s, M.s);
 
     ctx.textAlign = 'center';
@@ -227,9 +243,10 @@ export class ExportComposer {
     // Inactive (and untouched) outside an event and after the fade-out.
     if (this.easter) {
       // Sky objects must still disappear behind the terrain as the lens zooms.
-      if (this.easterFov !== camera.fov) {
+      if (this.easterFov !== camera.fov || (q.mode === 'trail' && this.easterCameraKey !== JSON.stringify(camera))) {
         this.easter.stage.setSkyline(skylineScreenPoints(camera, this.model, S.w, S.h));
         this.easterFov = camera.fov;
+        this.easterCameraKey = JSON.stringify(camera);
       }
       this.easter.draw(ctx, t);
     }

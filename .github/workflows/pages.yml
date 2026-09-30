@@ -1,8 +1,8 @@
-name: Deploy to GitHub Pages
+name: Validate and deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/bunny-hop-trails]
   workflow_dispatch:
 
 permissions:
@@ -11,22 +11,24 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  validate:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Test engine
+      - name: Test engine, movement and exports
         run: npm test
+      - name: Install browser test tools
+        run: |
+          npm install --no-save --package-lock=false playwright@1.63.0
+          npx playwright install --with-deps chromium
       - name: Assemble static site
         run: |
           mkdir -p _site
@@ -38,9 +40,33 @@ jobs:
           cp -r styles.css src "$asset_dir/"
           sed -i "s|href=\"styles.css\"|href=\"assets/${GITHUB_SHA}/styles.css\"|;s|src=\"src/ui/app.js\"|src=\"assets/${GITHUB_SHA}/src/ui/app.js\"|" _site/index.html
           touch _site/.nojekyll
+      - name: Test trail mode in Chromium
+        env:
+          CHECK_SITE: _site
+          PRINT_PREVIEW: "1"
+        run: node scripts/check-trail-browser.mjs browser-artifacts
+      - name: Test existing grid controls in Chromium
+        run: node scripts/check-grid-browser.mjs browser-artifacts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-checks
+          path: browser-artifacts
+          retention-days: 14
       - uses: actions/configure-pages@v5
+        if: github.ref == 'refs/heads/main'
       - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main'
         with:
           path: _site
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v4

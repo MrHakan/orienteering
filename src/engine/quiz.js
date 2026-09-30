@@ -29,6 +29,10 @@ export function buildTerrain({ seed, difficulty, attempt, preset, seeds, size = 
 
 /** Dispatch on quiz mode; existing location quizzes retain their defaults. */
 export async function generate(opts) {
+  if (opts.mode === 'trail') {
+    const { generateTrailQuiz } = await import('./trailQuiz.js');
+    return generateTrailQuiz(opts);
+  }
   if (opts.mode === 'friend') {
     const { generateFriendQuiz } = await import('./friendQuiz.js');
     return generateFriendQuiz(opts);

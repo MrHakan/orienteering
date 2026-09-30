@@ -3,6 +3,7 @@
 //
 // GL axes: X = east, Y = up, Z = -north.
 import { personVertices } from './personMesh.js';
+import { KnifeViewModel } from './knifeViewModel.js';
 
 const PERSON_VERT = `
 attribute vec3 aPos;
@@ -214,6 +215,13 @@ export class TerrainRenderer {
     this.meshes = [];
   }
 
+  setViewmodel(settings = null) {
+    this.viewmodelEnabled = !!settings;
+    if (!settings) return;
+    if (!this.viewmodel) this.viewmodel = new KnifeViewModel(this.gl);
+    this.viewmodel.setOptions(settings);
+  }
+
   setPerson(person = null) {
     this.person = person;
     if (!person) { this.personCount = 0; return; }
@@ -330,7 +338,7 @@ export class TerrainRenderer {
    * weather: { cloud 0..1, wind [east, north] m/s, wet 0..1, fog 0..1 }, time in seconds.
    * Weather is purely visual: it never changes the terrain geometry.
    */
-  render(camera, { weather = {}, time = 0 } = {}) {
+  render(camera, { weather = {}, time = 0, motion = {}, sunHeading = camera.heading } = {}) {
     if (!this.model) return;
     this.resize();
     const gl = this.gl, m = this.model;
@@ -379,7 +387,7 @@ export class TerrainRenderer {
     gl.uniformMatrix4fv(gl.getUniformLocation(p, 'uView'), false, view);
     gl.uniform3fv(gl.getUniformLocation(p, 'uEye'), eye);
     // Low sun from the side of the view direction: cross-lighting reveals slopes.
-    const sunAz = ((camera.heading + 125) * Math.PI) / 180, sunEl = (27 * Math.PI) / 180;
+    const sunAz = ((sunHeading + 125) * Math.PI) / 180, sunEl = (27 * Math.PI) / 180;
     const sun = [Math.sin(sunAz) * Math.cos(sunEl), Math.sin(sunEl), -Math.cos(sunAz) * Math.cos(sunEl)];
     gl.uniform3fv(gl.getUniformLocation(p, 'uSunDir'), sun);
     gl.uniform2fv(gl.getUniformLocation(p, 'uHeightRange'), [m.min, m.max]);
@@ -417,5 +425,6 @@ export class TerrainRenderer {
       gl.disableVertexAttribArray(aNor);
       this.drawPerson(projection, view, eye, sun, horizon, fogDensity);
     }
+    if (this.viewmodelEnabled) this.viewmodel.render(W, H, time, motion);
   }
 }
