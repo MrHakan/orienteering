@@ -218,8 +218,16 @@ export class TerrainRenderer {
   setViewmodel(settings = null) {
     this.viewmodelEnabled = !!settings;
     if (!settings) return;
-    if (!this.viewmodel) this.viewmodel = new KnifeViewModel(this.gl);
+    if (!this.viewmodel) this.viewmodel = new KnifeViewModel(this.gl, () => {
+      if (this.viewmodelEnabled && this.lastFrame && !this.lastFrame.options.motion.clockRunning) {
+        this.render(this.lastFrame.camera, this.lastFrame.options);
+      }
+    });
     this.viewmodel.setOptions(settings);
+  }
+
+  async prepareViewmodel(time, motion = {}) {
+    if (this.viewmodelEnabled) await this.viewmodel.prepare(time, motion);
   }
 
   setPerson(person = null) {
@@ -340,6 +348,7 @@ export class TerrainRenderer {
    */
   render(camera, { weather = {}, time = 0, motion = {}, sunHeading = camera.heading } = {}) {
     if (!this.model) return;
+    this.lastFrame = { camera, options: { weather, time, motion, sunHeading } };
     this.resize();
     const gl = this.gl, m = this.model;
     const W = this.canvas.width, H = this.canvas.height;

@@ -1,81 +1,39 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { KNIVES, FINISHES, CHARACTERS, viewmodelMeshes, normaliseAppearance } from '../src/render/viewmodelMesh.js';
-import { viewmodelPose, poseMatrix, inspectEnvelope } from '../src/render/knifeViewModel.js';
+import { stat } from 'node:fs/promises';
+import { KNIVES, normaliseAppearance, knifeClipTime, knifeOverlayRect } from '../src/render/knifeClips.js';
 import { TrailPlayback } from '../src/ui/trailPlayback.js';
 
-test('all knife, glove and finish meshes have finite geometry and unit normals',()=>{
-  for(const knife of KNIVES)for(const character of CHARACTERS)for(const finish of FINISHES) {
-    const meshes=viewmodelMeshes({knife:knife.id,character:character.id,finish:finish.id});
-    for(const vertices of Object.values(meshes)) {
-      assert.equal(vertices.length%30,0);assert.ok(vertices.length>=600);
-      for(let i=0;i<vertices.length;i+=10) {
-        assert.ok(Array.from(vertices.slice(i,i+10)).every(Number.isFinite));
-        assert.ok(Math.abs(Math.hypot(...vertices.slice(i+3,i+6))-1)<1e-5);
-        assert.ok(vertices[i+9]>=0 && vertices[i+9]<=1);
-      }
-    }
+test('every offered knife has a real local clip; unsupported old cosmetics use Classic', async () => {
+  assert.deepEqual(KNIVES.map(k => k.id), ['classic', 'default', 'butterfly']);
+  for (const clip of KNIVES) {
+    const file = new URL('../src/assets/knives/' + clip.file, import.meta.url);
+    assert.ok((await stat(file)).size > 100000);
   }
-  assert.deepEqual(normaliseAppearance({knife:'<script>',character:'missing',finish:'bad',handedness:'other'}),
-    {knife:'karambit',character:'tactical',finish:'steel',handedness:'right'});
+  assert.deepEqual(normaliseAppearance({knife:'karambit',character:'tactical',finish:'tiger',scale:9}),
+    {knife:'classic',handedness:'right',scale:1});
 });
 
-test('knives have different silhouettes, and finishes change colour without changing shape',()=>{
-  const meshes=KNIVES.map(k=>viewmodelMeshes({knife:k.id}).knife);
-  for(let i=0;i<meshes.length;i++)for(let j=i+1;j<meshes.length;j++)assert.notDeepEqual(meshes[i],meshes[j]);
-  const steel=viewmodelMeshes({knife:'huntsman',finish:'steel'}).knife,fade=viewmodelMeshes({knife:'huntsman',finish:'fade'}).knife;
-  assert.equal(steel.length,fade.length);
-  for(let i=0;i<steel.length;i+=10)assert.deepEqual(steel.slice(i,i+6),fade.slice(i,i+6));
-  assert.notDeepEqual(steel,fade);
-});
-
-test('inspect is reproducible, eased, returns to rest and mirrors hands',()=>{
-  for(const t of [-1,0,2.8,3])assert.equal(inspectEnvelope(t),0);
-  assert.ok(inspectEnvelope(.6)>.95);
-  for(const knife of KNIVES) {
-    const o={knife:knife.id};
-    for(const t of [0,1.25,2.5,4,7.8,10.2,12]) {
-      const p=viewmodelPose(t,{speed:17,vertical:3,landing:.1},o);
-      assert.deepEqual(p,viewmodelPose(t,{speed:17,vertical:3,landing:.1},o));
-      for(const id of ['left','right','knife'])assert.ok(Array.from(poseMatrix(p[id])).every(Number.isFinite));
-    }
-    const a=viewmodelPose(0,{},o),b=viewmodelPose(5,{},o);
-    for(let i=0;i<16;i++)assert.ok(Math.abs(poseMatrix(a.knife)[i]-poseMatrix(b.knife)[i])<1e-6);
-    const left=viewmodelPose(0,{}, {...o,handedness:'left'});
-    assert.equal(left.right.position[0],-a.right.position[0]);
-    const r=poseMatrix(a.knife),l=poseMatrix(left.knife);
-    for(let i=0;i<16;i++)assert.ok(Math.abs(l[i]-(i%4===0?-r[i]:r[i]))<1e-6);
+test('clip sampling stays on source frames and replays actual inspection with one clock', () => {
+  for (const clip of KNIVES) for (const t of [-1,0,1.2,2.3,4,6,7.4,8.5,10.2,12,100]) {
+    const settings = {knife:clip.id}, frame = knifeClipTime(t, {}, settings);
+    assert.equal(frame, knifeClipTime(t, {}, settings));
+    assert.ok(frame >= 0 && frame < clip.duration);
+    assert.ok(Math.abs(frame * clip.fps - Math.round(frame * clip.fps)) < 1e-5);
+    assert.equal(knifeClipTime(6, {inspectElapsed:.6}, settings), knifeClipTime(1.8, {}, settings));
+    const idle = knifeClipTime(6, {inspectElapsed:3}, settings);
+    assert.ok(idle >= clip.idle[0] - 1 / clip.fps && idle <= clip.idle[1]);
   }
 });
 
-test('knives stay inside the first-person frame during idle and inspect',()=>{
-  for(const knife of KNIVES)for(const handedness of ['left','right'])for(const aspect of [1.6,2])for(const t of [0,1.5,2.3,3.8,5,8.5]) {
-    const o={knife:knife.id,handedness},vertices=viewmodelMeshes(o).knife,m=poseMatrix(viewmodelPose(t,{},o).knife);
-    let visible=0;
-    for(let i=0;i<vertices.length;i+=10) {
-      const [x,y,z]=vertices.slice(i,i+3);
-      const X=m[0]*x+m[4]*y+m[8]*z+m[12],Y=m[1]*x+m[5]*y+m[9]*z+m[13],Z=m[2]*x+m[6]*y+m[10]*z+m[14];
-      const u=X/(-Z*Math.tan(76*Math.PI/360)),v=Y*aspect/(-Z*Math.tan(76*Math.PI/360));
-      if(Math.abs(u)<=1 && Math.abs(v)<=1 && Z<-.02)visible++;
-    }
-    assert.ok(visible/(vertices.length/10)>.75,knife.id+' '+handedness+' aspect '+aspect+' t '+t);
-  }
-});
-
-
-test('idle hands and knives leave the skyline cue strip unobstructed',()=>{
-  const strip=Math.tan(7.5*Math.PI/180);
-  for(const knife of KNIVES)for(const handedness of ['left','right'])for(const character of CHARACTERS)for(const time of [0,4.5,6,10.5,11.75]) {
-    const o={knife:knife.id,character:character.id,handedness},pose=viewmodelPose(time,{speed:17,vertical:7,landing:1},o);
-    for(const [id,vertices] of Object.entries(viewmodelMeshes(o))) {
-      const m=poseMatrix(pose[id]);
-      for(let i=0;i<vertices.length;i+=10) {
-        const [x,y,z]=vertices.slice(i,i+3);
-        const X=m[0]*x+m[4]*y+m[8]*z+m[12],Z=m[2]*x+m[6]*y+m[10]*z+m[14];
-        assert.ok(Math.abs(X/(-Z*Math.tan(76*Math.PI/360)))>strip,
-          knife.id+' '+handedness+' '+character.id+' '+id+' t '+time);
-      }
-    }
+test('overlay preserves footage aspect and mirrors without changing clip time', () => {
+  for (const clip of KNIVES) for (const aspect of [1.6,2]) for (const scale of [.8,1,1.15]) {
+    const settings = {knife:clip.id,scale}, r = knifeOverlayRect(640,640/aspect,0,{},settings);
+    assert.ok(Math.abs(r.w / r.h - clip.aspect) < 1e-6);
+    assert.equal(r.y + r.h, 640/aspect);
+    const left = {...settings,handedness:'left'};
+    assert.deepEqual(knifeOverlayRect(640,640/aspect,0,{},left), {...r,mirror:true});
+    assert.equal(knifeClipTime(2,{},settings),knifeClipTime(2,{},left));
   }
 });
 

@@ -1,6 +1,8 @@
 name: Validate and deploy to GitHub Pages
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main, codex/bunny-hop-trails]
   workflow_dispatch:

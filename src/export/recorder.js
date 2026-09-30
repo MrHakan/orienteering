@@ -57,7 +57,7 @@ async function encodeWebCodecs(canvas, drawFrame, { codec, h264 }, { duration, f
   const us = 1e6 / fps;
   for (let i = 0; i < frames; i++) {
     if (failure) throw failure;
-    drawFrame(i / fps);
+    await drawFrame(i / fps);
     const frame = new VideoFrame(canvas, { timestamp: Math.round(i * us), duration: Math.round(us) });
     encoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
     frame.close();
@@ -79,16 +79,18 @@ async function recordRealtime(canvas, drawFrame, { type, h264 }, { duration, fps
   const chunks = [];
   rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
   const stopped = new Promise((resolve) => { rec.onstop = resolve; });
-  drawFrame(0);
+  await drawFrame(0);
   rec.start(250);
   const start = performance.now();
-  await new Promise((resolve) => {
-    const tick = () => {
+  await new Promise((resolve, reject) => {
+    const tick = async () => {
+      try {
       const t = (performance.now() - start) / 1000;
-      if (t >= duration) { drawFrame(duration); resolve(); return; }
-      drawFrame(t);
+      if (t >= duration) { await drawFrame(duration); resolve(); return; }
+      await drawFrame(t);
       onProgress(t / duration);
       requestAnimationFrame(tick);
+      } catch (error) { reject(error); }
     };
     requestAnimationFrame(tick);
   });

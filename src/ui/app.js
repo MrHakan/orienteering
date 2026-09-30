@@ -9,7 +9,7 @@ import { normaliseGridSize, normaliseGridChallenge, parseCell, headingHidden } f
 import { normaliseFriendChallenge, friendObserver, friendOptionCamera } from '../engine/friendQuiz.js';
 import { normaliseMovement, trailFrame } from '../engine/trailMotion.js';
 import { TRAIL_COLORS } from '../engine/trailQuiz.js';
-import { KNIVES, CHARACTERS, FINISHES, normaliseAppearance } from '../render/viewmodelMesh.js';
+import { KNIVES, normaliseAppearance } from '../render/knifeClips.js';
 import { TrailPlayback } from './trailPlayback.js';
 import { TerrainRenderer } from '../render/webglTerrain.js';
 import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
@@ -84,16 +84,14 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && sta
 
 function syncAppearanceControls() {
   const o = state.appearance;
-  $('trail-knife').value = o.knife; $('trail-character').value = o.character;
-  $('trail-finish').value = o.finish; $('trail-hand').value = o.handedness;
+  $('trail-knife').value = o.knife; $('trail-hand').value = o.handedness;
+  $('trail-scale').value = String(o.scale);
 }
-for (const [id, choices] of [['trail-knife', KNIVES], ['trail-character', CHARACTERS], ['trail-finish', FINISHES]]) {
-  $(id).innerHTML = choices.map((o) => `<option value="${o.id}">${o.label}</option>`).join('');
-}
+$('trail-knife').innerHTML = KNIVES.map((o) => `<option value="${o.id}">${o.label}</option>`).join('');
 syncAppearanceControls();
-for (const id of ['trail-knife', 'trail-character', 'trail-finish', 'trail-hand']) $(id).addEventListener('change', () => {
-  state.appearance = normaliseAppearance({knife:$('trail-knife').value,character:$('trail-character').value,
-    finish:$('trail-finish').value,handedness:$('trail-hand').value});
+for (const id of ['trail-knife', 'trail-scale', 'trail-hand']) $(id).addEventListener('change', () => {
+  state.appearance = normaliseAppearance({knife:$('trail-knife').value,
+    scale:Number($('trail-scale').value),handedness:$('trail-hand').value});
   store.set('otq.appearance', state.appearance);
   if (state.quiz?.mode === 'trail') {
     state.quiz.appearance = {...state.appearance}; state.baseQuiz.appearance = {...state.appearance};
@@ -209,7 +207,8 @@ function updateHash() {
     parts.push('m=trail');
     if (q.trail.movement !== 'go') parts.push(`mv=${q.trail.movement}`);
     const o = normaliseAppearance(q.appearance);
-    parts.push(`k=${o.knife}`, `char=${o.character}`, `skin=${o.finish}`, `hand=${o.handedness}`);
+    parts.push(`k=${o.knife}`, `hand=${o.handedness}`);
+    if (o.scale !== 1) parts.push(`ks=${o.scale}`);
     if (q.headingChoice !== 'auto') parts.push(`h=${q.headingChoice}`);
   }
   else if (q.mode === 'friend') {
@@ -271,7 +270,7 @@ function show(quiz) {
   $('prompt').textContent = facing ? 'You stand at the marked point. Which of the 8 directions are you looking in?'
     : lookalike ? 'A, B and C have similar views in this direction. Match the ridge shapes and foreground to find your point.'
     : grid ? `You stand at a cell centre.${headingHidden(quiz) ? ' Your heading is one of 8 directions, hidden until you answer.' : ''} Tap your cell or type its code, then check your answer. Rows start at north; columns start at west.`
-    : quiz.mode === 'trail' ? 'Watch the slopes, ridges and hollows as you move. Which trail did you follow: A red, B green or C cyan? Circles mark the starts; arrows mark the ends.'
+    : quiz.mode === 'trail' ? 'Which trail did you follow: A red, B green or C cyan? All three traces advance together. Match the slopes, ridges and hollows in the moving view. Circles mark the starts; arrows mark the ends.'
     : quiz.mode === 'friend' ? quiz.friend.observerHidden
       ? `Where is the person in the orange jacket: A, B or C? Your position is unmarked. All three spots fit his distance and apparent size; use the skyline, slopes and hollows to locate him.${quiz.friend.challenge === 'depth-trap' ? ' Depth trap also matches his vertical angle more closely.' : ''}`
       : `You stand at YOU. Where is the person in the orange jacket: A, B or C?${quiz.friend.challenge === 'depth-trap' ? ' All three spots share a bearing — compare distance, apparent size and slope.' : ' Match his position to the surrounding terrain.'}`
@@ -294,7 +293,7 @@ function show(quiz) {
     rotation: state.settings.northUp ? 0 : quiz.mapRotation,
     landmarks: quiz.landmarks,
     grid: grid ? { ...quiz.grid, correctLabel: quiz.correctLabel } : null,
-    extent: quiz.mapExtent || null, trails: quiz.mode === 'trail',
+    extent: quiz.mapExtent || null, trails: quiz.mode === 'trail', trailDuration: quiz.trail?.duration,
     observer: friendObserver(quiz), friendMode: quiz.mode === 'friend',
   });
   map.setOverlays(state.settings);
@@ -369,9 +368,14 @@ function renderScene(camera, playback = {}) {
     const frame = trailFrame(state.quiz, state.trailTime, state.viewing || state.quiz.correctLabel, state.model);
     camera = frame.camera;
     renderer.setViewmodel(state.appearance);
-    renderer.render(camera, { time: state.trailTime, sunHeading: state.quiz.camera.heading, motion: { ...frame.motion, ...playback } });
-    if (state.answered && (Math.abs(state.trailTime - (state.lastTrailMapTime ?? -1)) > .08 || state.lastTrailMapLabel !== frame.route.label || state.trailTime === 0)) {
-      map.setViewing({ ...camera, label: frame.route.label }); state.lastTrailMapTime = state.trailTime; state.lastTrailMapLabel = frame.route.label;
+    renderer.render(camera, { time: state.trailTime, sunHeading: state.quiz.camera.heading,
+      motion: { ...frame.motion, ...playback, clockRunning: trailPlayer.playing || Number.isFinite(playback.inspectElapsed) } });
+    if (Math.abs(state.trailTime - (state.lastTrailMapTime ?? -1)) > .04
+      || (!trailPlayer.playing && state.trailTime !== state.lastTrailMapTime)
+      || (state.answered && map.viewing?.label !== frame.route.label)
+      || state.lastTrailMapLabel !== frame.route.label || state.trailTime === 0 || state.trailTime === state.quiz.trail.duration) {
+      map.setTrailTime(state.trailTime, state.answered ? { ...camera, label: frame.route.label } : null);
+      state.lastTrailMapTime = state.trailTime; state.lastTrailMapLabel = frame.route.label;
     }
   } else {
     renderer.setViewmodel(null); renderer.render(camera);
@@ -486,7 +490,7 @@ function showTrailResult(label, right) {
     <div class="views">${q.options.map(o => `<button type="button" class="btn ghost" data-view="${o.label}" style="border-color:${TRAIL_COLORS[o.label]}">Replay ${o.label}${o.correct ? ' (actual)' : ''}</button>`).join('')}</div>
     <table><tr><th>Trail</th><th>Terrain difference</th><th>Detail to check</th></tr>
     ${q.options.map(o => `<tr><td><strong>${o.label}</strong></td><td>${o.correct ? 'Matches' : `${o.D.toFixed(1)}°`}</td><td>${o.correct ? 'Actual run' : `At ${o.cue.t.toFixed(1)} s, skyline ${Math.abs(o.cue.delta).toFixed(1)}° ${o.cue.delta > 0 ? 'higher' : 'lower'} near ${String(o.cue.bearing).padStart(3,'0')}° <button class="btn ghost small" type="button" data-cue="${o.label}" data-actual="true">Actual here</button> <button class="btn ghost small" type="button" data-cue="${o.label}">Compare here</button>`}</td></tr>`).join('')}</table>
-    <p class="note">The dotted highlight marks the correct trail. The moving dot appears only after answering. Knife and character choices change the viewmodel, not the answer.</p>
+    <p class="note">The dotted highlight marks the correct trail; the white dot follows the replay. Before answering, all three coloured traces advance together. Knife choices do not change the answer.</p>
     <button type="button" class="btn primary" id="next">Next quiz (N)</button>`;
   res.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => viewFrom(b.dataset.view)));
   res.querySelectorAll('[data-cue]').forEach(b => b.addEventListener('click', () => {
@@ -929,10 +933,16 @@ function setExportBusy(on) {
 async function exportImage(reveal) {
   const c = exportUi.composer;
   stopPreview();
-  const blob = await c.toImage({ reveal });
-  download(blob, exportName(reveal ? '-answer' : '', 'png'));
-  setExportStatus(`Saved ${exportName(reveal ? '-answer' : '', 'png')}`);
-  startPreview();
+  setExportBusy(true);
+  try {
+    const blob = await c.toImage({ reveal });
+    download(blob, exportName(reveal ? '-answer' : '', 'png'));
+    setExportStatus(`Saved ${exportName(reveal ? '-answer' : '', 'png')}`);
+  } catch (error) {
+    setExportStatus(`Image export failed: ${error.message}`);
+  } finally {
+    setExportBusy(false); startPreview();
+  }
 }
 
 async function exportVideo() {
@@ -945,7 +955,7 @@ async function exportVideo() {
   try {
     c.animated = true;
     const d = c.options.duration;
-    const { blob, extension, h264 } = await encodeCanvasVideo(c.canvas, (t) => c.drawFrame(t, { reveal: c.options.reveal && t >= d - 3 }), {
+    const { blob, extension, h264 } = await encodeCanvasVideo(c.canvas, (t) => c.drawFrameReady(t, { reveal: c.options.reveal && t >= d - 3 }), {
       duration: d, fps: 30, onProgress: (p) => { progress.value = p; },
     });
     const name = exportName('', extension);
@@ -1001,7 +1011,7 @@ function parseHash() {
     gridChallenge: normaliseGridChallenge(p.get('gc')),
     friendChallenge: normaliseFriendChallenge(p.get('fc')),
     movement: normaliseMovement(p.get('mv')),
-    appearance: p.get('m') === 'trail' ? normaliseAppearance({ knife: p.get('k'), character: p.get('char'), finish: p.get('skin'), handedness: p.get('hand') }) : null,
+    appearance: p.get('m') === 'trail' ? normaliseAppearance({ knife: p.get('k'), scale: p.get('ks') === null ? 1 : Number(p.get('ks')), handedness: p.get('hand') }) : null,
     direction: DIRECTIONS.some((d) => d.label === p.get('dir')) ? p.get('dir') : 'auto',
     headingMode: ['exact', 'intercardinal', 'cardinal'].includes(h) ? h : 'auto',
     tuning: p.has('dev') ? decodeTuning(p.get('dev')) : null,

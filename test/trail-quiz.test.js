@@ -7,7 +7,7 @@ import { surfaceElevation } from '../src/engine/terrainSurface.js';
 import { createTrailPlan, simulateTrail, trailFrame, airAccelerate, MOVEMENT_PROFILES, METRES_PER_UNIT } from '../src/engine/trailMotion.js';
 import { TRAIL_COLORS, compareTrailViews } from '../src/engine/trailQuiz.js';
 import { scrambleLabels } from '../src/engine/scramble.js';
-import { MapRenderer } from '../src/render/mapRenderer.js';
+import { MapRenderer, trailTracePoints } from '../src/render/mapRenderer.js';
 import { ExportComposer, FORMATS } from '../src/export/composer.js';
 
 for (const difficulty of ['easy','medium','hard','expert','master']) for (const movement of ['classic','go']) {
@@ -176,4 +176,23 @@ test('both video formats share the live route sampler and freeze at the end for 
 
 test('trail generation refuses a broken or unvalidated question',async()=>{
   await assert.rejects(generate({seed:'none',mode:'trail',maxTerrainAttempts:0}),/No fair three-trail/);
+});
+
+
+test('all three question traces progress together without exposing correctness',()=>{
+  const calls=[], ctx=new Proxy({},{get:(o,k)=>o[k]??((...args)=>calls.push([k,...args])),
+    set:(o,k,v)=>{o[k]=v;calls.push([k,v]);return true;}});
+  const mr=Object.create(MapRenderer.prototype);
+  Object.assign(mr,{ctx,pickable:true,hover:null,reveal:null,viewing:null,toCanvas:(x,y)=>[x,y]});
+  const options=['A','B','C'].map((label,i)=>({label,correct:i===0,points:[{x:i*100,y:0},{x:i*100+60,y:0},{x:i*100+120,y:0}]}));
+  mr.data={options,trailDuration:12};
+  for(const time of [1.3,6,11.9]) {
+    mr.trailTime=time;calls.length=0;mr.drawTrails();const before=JSON.stringify(calls);
+    assert.equal(calls.filter(c=>c[0]==='arc').length,3);
+    mr.data.options=options.map(o=>({...o,correct:!o.correct}));calls.length=0;mr.drawTrails();
+    assert.equal(JSON.stringify(calls),before);
+    assert.deepEqual(trailTracePoints(options[0].points,time).at(-1),{x:time*10,y:0});
+  }
+  assert.deepEqual(trailTracePoints(options[0].points,-1),[options[0].points[0]]);
+  assert.deepEqual(trailTracePoints(options[0].points,99),options[0].points);
 });

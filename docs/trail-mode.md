@@ -1,18 +1,22 @@
 # Bunny-hop trails
 
+![Video-composited Classic knife and simultaneous candidate traces](chroma-key-trails.png)
+
 Pick **Mode → Bunny-hop trails**, watch the 12-second first-person run, and choose the route you followed. Map routes use **A red (#ff6358), B green (#58d68b), C cyan (#39d5ed)**, labelled circles for starts and arrows for ends. Tap a line or its letter. Colours are also named in text and accessible button labels.
 
 Space pauses/resumes, F inspects, Replay starts again, and the time slider jumps to any frame. Automatic inspections run at 1.2–4.0 and 7.4–10.2 seconds. Manual inspections also work while the camera is paused. Reduced-motion preferences start playback paused; changing tabs pauses the clock.
 
 ## Appearance and links
 
-**Knife & character** selects CS 1.6 style fingerless or CS:GO style tactical hands, classic/default/karambit/Huntsman (Hunter) knives, steel/fade/tiger/night finishes and right/left hands. These are original procedural meshes, not extracted game assets. Wrist movement, grip, bevels and inspect rotations are drawn in a dedicated WebGL viewmodel pass.
+**Knife video & hand** selects **CS 1.6 Classic**, **CS:GO Default** or **CS:GO Butterfly**, right/left hand and small/original/large size. These are the three supplied videos, rendered as a bottom-anchored video texture with green dominance keying, soft alpha edges and spill suppression. There is no procedural hand or knife geometry. Source gloves and finishes remain together with the blade. The Classic clip’s black sidebars are cropped before shipping. Half-second keyframes and fast-start metadata make source-frame seeking quick.
+
+F and automatic inspection replay an existing segment of the source clip. The Classic recording contains knife swings, so it replays that recorded movement rather than inventing an inspect animation. Karambit and Huntsman/Hunter require additional green-screen clips and are not offered as fabricated models. Add future footage to `src/assets/knives/` and describe its source times and aspect ratio in `knifeClips.js`.
 
 Movement and appearance are independent. The Bunny hop selector changes the physics profile; cosmetics do not change terrain, options or the correct route. Appearance is saved locally and included in links:
 
 ```
 #seed=bhop-demo&d=master&m=trail
-#seed=bhop-demo&d=medium&m=trail&mv=classic&k=default&char=classic&skin=tiger&hand=left
+#seed=bhop-demo&d=medium&m=trail&mv=classic&k=classic&hand=left&ks=0.8
 ```
 
 New positions preserves the seeded terrain, generates another matched route triple and resets the clock. Scramble letters preserves every route and the actual motion, and reassigns the letter colours.
@@ -50,16 +54,16 @@ Starts are at least 240 m apart and must form a spread-out triangle. The complet
 | Expert | 0.8–4.0° | 1.0° | 4 m |
 | Master | 0.7–3.5° | 0.9° | 3.4 m |
 
-The clue must occur before 12 seconds and outside either automatic inspect window. It uses the central 9° of the scene; even its three-column coarse footprint lies in the centre strip left open by every idle hand/knife model. Its skyline position must fit both candidate views in both export aspect ratios. Cue angles also account for each route's small landing pitch, so camera punch cannot cancel the claimed difference. These constraints ensure there is a usable terrain difference; they do not guarantee a human difficulty rating. If no validated triple is found, generation explicitly asks for another seed or a lower difficulty.
+The clue must occur before 12 seconds and outside either automatic inspect window. It uses the central 9° of the scene; its three-column coarse footprint lies in the central skyline area above the idle video hands. The browser audit checks this area at both export aspect ratios. Its skyline position must fit both candidate views in both export aspect ratios. Cue angles also account for each route's small landing pitch, so camera punch cannot cancel the claimed difference. These constraints ensure there is a usable terrain difference; they do not guarantee a human difficulty rating. If no validated triple is found, generation explicitly asks for another seed or a lower difficulty.
 
 ## Answer and export
 
-Before answering there is no moving position dot or correctness-dependent trail style. The answer highlights the correct route and enables replay of all three candidates. **Actual here** and **Compare here** show both views at exactly the same clue time.
+During playback, the complete routes remain faintly visible and the travelled portion of **all three** A/B/C routes grows at the same clip time, each with an identically styled coloured head. Pause, replay and seeking update the traces together. There is no correctness-dependent style before answering. Static contours are cached to keep mobile animation responsive. The answer highlights the correct route and enables replay of all three candidates. **Actual here** and **Compare here** show both views at exactly the same clue time.
 
-PNG and video export use `trailFrame()`, the same random-access sampler as live playback. The default 15-second video plays the run for 12 seconds and freezes at its endpoint while optionally revealing the answer for the last 3 seconds. Inspect timing depends on clip time, so encoding speed cannot change the motion. Appearance settings carry into both 9:16 and 4:5 formats. Answer PNG dots follow the displayed frame, and seasonal sky effects track the moving skyline.
+PNG and video export use `trailFrame()`, the same random-access sampler as live playback. The default 15-second video plays the run for 12 seconds and freezes at its endpoint while optionally revealing the answer for the last 3 seconds. Inspect timing depends on clip time, so encoding speed cannot change the motion. Appearance settings and the simultaneous traces carry into both 9:16 and 4:5 formats. PNG and video encoding await each decoded source frame before capture. The native video elements remain paused and are sampled from the shared clock, so decoding cannot advance terrain movement independently. Answer PNG dots follow the displayed frame, and seasonal sky effects track the moving skyline.
 
 ## Validation
 
-`npm test` checks matching at every difficulty in both physics profiles, ballistic height/timing, walkable paths, deterministic replay, new positions, scrambling, symmetric pair comparisons, cue timing, rotated line hit tests, question-style isolation and export sampling. Mesh tests cover all knives, glove styles and finishes, mirroring, inspect visibility and the unobstructed centre strip.
+`npm test` checks matching at every difficulty in both physics profiles, ballistic height/timing, walkable paths, deterministic replay, new positions, scrambling, symmetric pair comparisons, cue timing, rotated line hit tests, question-style isolation and export sampling. Clip tests cover real assets, source frame boundaries, deterministic inspection, aspect ratios and mirroring. Trace tests check identical pre-answer rendering even when correctness flags change.
 
-`node scripts/check-trail-browser.mjs browser-artifacts` additionally checks the assembled module-worker graph, actual WebGL pixels/shaders, playback and controls, mobile touch/layout, line selection, timed comparisons, PNG downloads, a short encoded video, both export formats and switching back to existing modes. Playwright is installed only for these development/CI checks; the application still has no runtime dependencies.
+`node scripts/check-trail-browser.mjs browser-artifacts` additionally checks the assembled module-worker graph, actual decoded video pixels/chroma-key shaders, playback and controls, mobile touch/layout, line selection, timed comparisons, PNG downloads, a short encoded video, both export formats and switching back to existing modes. Playwright is installed only for these development/CI checks; the application still has no runtime dependencies.

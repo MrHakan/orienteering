@@ -28,6 +28,16 @@ export function quizMarkers(quiz) {
   return quiz.options;
 }
 
+/** All candidates advance by clip time, independently of correctness. */
+export function trailTracePoints(points, time, duration = 12) {
+  if (!points.length) return [];
+  const index = Math.max(0, Math.min(1, time / duration)) * (points.length - 1);
+  const i = Math.floor(index), f = index - i, a = points[i], b = points[Math.min(i + 1, points.length - 1)];
+  const trace = points.slice(0, i + 1);
+  if (f > 0) trace.push({ x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f });
+  return trace;
+}
+
 function chaikin(pts, closed) {
   if (pts.length < 6) return pts;
   const out = [];
@@ -75,18 +85,24 @@ export class MapRenderer {
     this.contours = data.model.getContours(data.interval);
     this.reveal = null;
     this.viewing = null;
+    this.trailTime = 0;
     this.selection = null;
     this.hover = null;
     this._lines = null;
     this.pickable = true;
     this._hillshade = null;
+    this._trailBase = null;
     this.draw();
   }
 
   setReveal(reveal) { this.reveal = reveal; this.pickable = !reveal; this.draw(); }
   setSelection(label) { this.selection = label; this.draw(); }
   setViewing(v) { this.viewing = v; this.draw(); }
-  setOverlays(o) { Object.assign(this.overlays, o); this.draw(); }
+  setTrailTime(time, viewing = null) {
+    if (!this.data?.trails) return;
+    this.trailTime = time; this.viewing = viewing; this.draw();
+  }
+  setOverlays(o) { Object.assign(this.overlays, o); this._trailBase = null; this.draw(); }
 
   layout() {
     const f = this.fixedSize;
@@ -150,13 +166,28 @@ export class MapRenderer {
     return best;
   }
 
-  draw() {
+  draw({ staticOnly = false } = {}) {
     if (!this.data) return;
     this.layout();
     const { ctx, dpr } = this;
     const w = this.canvas.width / dpr, h = this.canvas.height / dpr;
     this.cssW = w; this.cssH = h;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Contours are static during playback. Cache them once so every trace
+    // update only paints three short paths, including in mobile exports.
+    if (this.data.trails && !staticOnly) {
+      const key = `${this.canvas.width}:${this.canvas.height}:${this.data.rotation}`;
+      if (!this._trailBase || this._trailBaseKey !== key) {
+        this.draw({ staticOnly: true });
+        const base = document.createElement('canvas');
+        base.width = this.canvas.width; base.height = this.canvas.height;
+        base.getContext('2d').drawImage(this.canvas, 0, 0);
+        this._trailBase = base; this._trailBaseKey = key;
+      }
+      ctx.drawImage(this._trailBase, 0, 0, w, h);
+      this.drawTrails(); this.drawTrailLabels();
+      return;
+    }
     ctx.fillStyle = COLORS.bg;
     ctx.fillRect(0, 0, w, h);
 
@@ -218,7 +249,7 @@ export class MapRenderer {
     if (this.overlays.drainage) this.drawDrainage();
     if (this.overlays.landforms) this.drawLandforms();
     if (this.data.grid) this.drawGrid();
-    if (this.data.trails) this.drawTrails();
+    if (this.data.trails && !staticOnly) this.drawTrails();
     if (!this.data.trails) this.drawCone();
     ctx.restore();
 
@@ -232,7 +263,7 @@ export class MapRenderer {
     this.drawNorthArrow();
     this.drawScaleBar();
     if (this.data.grid) this.drawGridLabels();
-    else if (this.data.trails) this.drawTrailLabels();
+    else if (this.data.trails) { if (!staticOnly) this.drawTrailLabels(); }
     else this.drawMarkers(); // last, so nothing ever hides an answer option
     if (this.currentObserver()) this.drawObserver();
   }
@@ -486,13 +517,24 @@ export class MapRenderer {
   drawTrails() {
     const { ctx } = this;
     for (const route of this.data.options) {
-      const active = this.viewing?.label === route.label, hovered = this.pickable && this.hover === route.label;
+      const active = !!this.reveal && this.viewing?.label === route.label, hovered = this.pickable && this.hover === route.label;
       ctx.globalAlpha = this.reveal && !route.correct && !active ? .5 : 1;
       const points = route.points.map((p) => this.toCanvas(p.x, p.y));
       ctx.lineJoin = 'round'; ctx.lineCap = 'round';
       const line = () => { ctx.beginPath(); points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); };
       line(); ctx.strokeStyle = COLORS.bg; ctx.lineWidth = active || hovered ? 7 : 6; ctx.stroke();
+      const opacity = ctx.globalAlpha;
+      ctx.globalAlpha = opacity * .48;
       line(); ctx.strokeStyle = TRAIL_COLORS[route.label]; ctx.lineWidth = active || hovered ? 3.8 : 3; ctx.stroke();
+      ctx.globalAlpha = opacity;
+      const trace = trailTracePoints(route.points, this.trailTime || 0, this.data.trailDuration || 12)
+        .map(p => this.toCanvas(p.x, p.y));
+      ctx.beginPath(); trace.forEach(([x,y], i) => i ? ctx.lineTo(x,y) : ctx.moveTo(x,y)); ctx.stroke();
+      if ((this.trailTime || 0) > 0 && trace.length) {
+        const [x,y] = trace.at(-1);
+        ctx.fillStyle = TRAIL_COLORS[route.label];
+        ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
+      }
       const end = points.at(-1), before = points[Math.max(0, points.length - 5)], az = Math.atan2(end[1] - before[1], end[0] - before[0]);
       ctx.fillStyle = TRAIL_COLORS[route.label]; ctx.beginPath(); ctx.moveTo(end[0] + Math.cos(az) * 6, end[1] + Math.sin(az) * 6);
       for (const a of [az + 2.5, az - 2.5]) ctx.lineTo(end[0] + Math.cos(a) * 5, end[1] + Math.sin(a) * 5);

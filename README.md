@@ -2,7 +2,7 @@
 
 A browser quiz in the style of classic "Where are you?" contour-map puzzles. You get a first-person view of the terrain and the heading you're facing, plus a contour map with 3–4 marked points. Pick the one you're standing on.
 
-Everything is procedural and reproducible from a seed: `#seed=kx7p-2m9q&d=hard`.
+Terrain and questions are procedural and reproducible from a seed: `#seed=kx7p-2m9q&d=hard`.
 
 ![screenshot](docs/screenshot.png)
 
@@ -78,7 +78,7 @@ Open **Export for Instagram**; the dialog previews the 15 s loop with the event.
 
 **Mode → Bunny-hop trails** (`&m=trail`) plays a 12-second first-person run over the terrain. Choose which map trail you followed: **A red, B green or C cyan**. All three have the same shape, speed and steering; their moving terrain views are matched pairwise so the skyline and nearby slopes decide the answer. After answering, replay each route or compare the specific time and bearing that rules it out.
 
-Choose **CS 1.6 / CS:GO style** movement; classic fingerless or tactical hands; **classic, default, karambit or Huntsman/Hunter** knives; four finishes; and either hand. The meshes are original procedural models. **Space** pauses/resumes, **F** inspects, and the scrubber replays any moment. Reduced-motion preferences start the run paused. Cosmetics persist locally and travel in shared links without changing the question.
+Choose **CS 1.6 / CS:GO style** movement and the supplied **CS 1.6 Classic, CS:GO Default or Butterfly** green-screen clips. A WebGL chroma-key pass removes the background and green edge spill; hands and knives come entirely from the footage. Choose either hand and three sizes. **Space** pauses/resumes, **F** replays the clip’s knife animation, and the scrubber replays any moment. All three coloured map traces advance with the same playback clock without exposing the answer. Reduced-motion preferences start the run paused. Appearance persists locally and travels in shared links without changing the question.
 
 Videos play the run for 12 seconds and freeze at its endpoint for the final 3-second answer reveal. Both export formats and PNGs use the same camera sampler. [The trail guide](docs/trail-mode.md) explains movement, matching and validation.
 

@@ -147,7 +147,11 @@ export class ExportComposer {
       const mr = new MapRenderer(c, { fixedSize: { width: s / 2, height: s / 2, dpr: 2 } });
       mr.setData({ model: this.model, interval: q.terrain.contourInterval, options: quizMarkers(q), rotation: this.options.northUp ? 0 : q.mapRotation, landmarks: q.landmarks,
         grid: q.mode === 'grid' ? { ...q.grid, correctLabel: q.correctLabel } : null,
-        extent: q.mapExtent || null, trails: q.mode === 'trail', observer: friendObserver(q), friendMode: q.mode === 'friend' });
+        extent: q.mapExtent || null, trails: q.mode === 'trail', trailDuration: q.trail?.duration, observer: friendObserver(q), friendMode: q.mode === 'friend' });
+      if (q.mode === 'trail') {
+        if (reveal) this.trailRevealMap = mr;
+        else this.trailQuestionMap = mr;
+      }
       if (reveal) {
         mr.setReveal({ chosen: null, camera: q.camera });
         if (q.mode === 'trail') {
@@ -198,7 +202,7 @@ export class ExportComposer {
     // Scene.
     const S = L.scene;
     this.renderer.render(camera, { weather: this.weather, time: frame ? frame.motion.t : t,
-      motion: frame?.motion || {}, sunHeading: q.mode === 'trail' ? q.camera.heading : camera.heading });
+      motion: frame ? { ...frame.motion, clockRunning: this.animated } : {}, sunHeading: q.mode === 'trail' ? q.camera.heading : camera.heading });
     ctx.drawImage(this.glCanvas, S.x, S.y, S.w, S.h);
     ctx.save();
     ctx.beginPath(); ctx.rect(S.x, S.y, S.w, S.h); ctx.clip();
@@ -220,6 +224,10 @@ export class ExportComposer {
     ctx.fillRect(S.x, L.rule, S.w, 2);
 
     const M = L.map;
+    if (frame) {
+      const trailMap = reveal ? this.trailRevealMap : this.trailQuestionMap;
+      trailMap?.setTrailTime?.(frame.motion.t, reveal ? { ...camera, label: q.correctLabel } : null);
+    }
     if (frame && reveal && this.trailRevealMap && this.trailRevealMapTime !== frame.motion.t) {
       this.trailRevealMap.setViewing({ ...camera, label: q.correctLabel });
       this.trailRevealMapTime = frame.motion.t;
@@ -289,11 +297,20 @@ export class ExportComposer {
   /** PNG of a single frame. */
   async toImage({ reveal = false, time = 4 } = {}) {
     this.animated = false;
-    this.drawFrame(time, { reveal });
+    await this.drawFrameReady(time, { reveal });
     return new Promise((resolve) => this.canvas.toBlob(resolve, 'image/png'));
   }
 
   dispose() {
+    this.renderer.viewmodel?.dispose();
     this.renderer.gl.getExtension('WEBGL_lose_context')?.loseContext();
+  }
+
+  async drawFrameReady(time = 0, options = {}) {
+    if (this.quiz.mode === 'trail') {
+      const frame = trailFrame(this.quiz, time, this.quiz.correctLabel, this.model);
+      await this.renderer.prepareViewmodel?.(frame.motion.t, frame.motion);
+    }
+    this.drawFrame(time, options);
   }
 }
