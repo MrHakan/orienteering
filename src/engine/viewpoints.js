@@ -14,7 +14,7 @@ export class ViewpointGenerator {
    * @param {object} preset difficulty preset
    * @param {import('./rng.js').Random} rng
    */
-  constructor(model, preset, rng, { fov, eyeHeight, gridSize = 16, margin = 110, maxPicks = 16 } = {}) {
+  constructor(model, preset, rng, { fov, eyeHeight, gridSize = 16, margin = 110, maxPicks = 16, minPickDistance = 120 } = {}) {
     this.model = model;
     this.analyzer = model.analyzer;
     this.preset = preset;
@@ -24,6 +24,7 @@ export class ViewpointGenerator {
     this.gridSize = gridSize;
     this.margin = margin;
     this.maxPicks = maxPicks;
+    this.minPickDistance = minPickDistance;
   }
 
   candidatePositions() {
@@ -193,9 +194,10 @@ export class ViewpointGenerator {
     const rng = this.rng.fork('pick');
     while (pool.length && picked.length < this.maxPicks) {
       const c = rng.weighted(pool, (v) => v.quality.total ** 2);
+      if (!c) break; // remaining views may all have zero quality
       pool.splice(pool.indexOf(c), 1);
       // Diversity: skip views from (nearly) the same spot as an earlier pick.
-      if (picked.some((q) => Math.hypot(q.x - c.x, q.y - c.y) < 120)) continue;
+      if (picked.some((q) => Math.hypot(q.x - c.x, q.y - c.y) < this.minPickDistance)) continue;
       picked.push(c);
     }
     return { picked, evaluated: all.length, best: all[0] };

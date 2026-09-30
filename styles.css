@@ -85,6 +85,11 @@ body {
 .scramble.flash { animation: flash 0.35s; }
 @keyframes flash { 50% { border-color: var(--accent); color: var(--accent); } }
 .answers { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
+.grid-answer { display: flex; justify-content: center; align-items: flex-end; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+.grid-answer input { width: 110px; min-height: 42px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; }
+.grid-answer .btn { min-height: 42px; }
+.grid-help { flex-basis: 100%; text-align: center; color: var(--muted); font-size: 13px; margin: 0; }
+.grid-answer input[aria-invalid="true"] { border-color: var(--bad); }
 .answer {
   width: 58px; height: 58px; border-radius: 50%; border: 2px solid #e9e4d8; background: transparent; color: #e9e4d8;
   font: 800 20px system-ui, sans-serif; cursor: pointer; transition: transform 0.08s, background 0.15s;

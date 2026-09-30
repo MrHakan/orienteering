@@ -2,6 +2,7 @@
 // TerrainModel's oriented Marching Squares output.
 
 import { ContourGenerator } from '../engine/contours.js';
+import { cellAt, parseCell } from '../engine/gridQuiz.js';
 
 const COLORS = {
   bg: '#151a20',
@@ -21,6 +22,7 @@ const COLORS = {
  * you?", or the single (unlabelled) observer point in "Which way?".
  */
 export function quizMarkers(quiz) {
+  if (quiz.mode === 'grid') return [];
   if (quiz.mode === 'facing') return [{ label: '', x: quiz.point.x, y: quiz.point.y, correct: true }];
   return quiz.options;
 }
@@ -72,12 +74,16 @@ export class MapRenderer {
     this.contours = data.model.getContours(data.interval);
     this.reveal = null;
     this.viewing = null;
+    this.selection = null;
+    this.hover = null;
+    this._lines = null;
     this.pickable = true;
     this._hillshade = null;
     this.draw();
   }
 
   setReveal(reveal) { this.reveal = reveal; this.pickable = !reveal; this.draw(); }
+  setSelection(label) { this.selection = label; this.draw(); }
   setViewing(v) { this.viewing = v; this.draw(); }
   setOverlays(o) { Object.assign(this.overlays, o); this.draw(); }
 
@@ -88,7 +94,7 @@ export class MapRenderer {
     if (this.canvas.width !== Math.round(w * dpr) || this.canvas.height !== Math.round(h * dpr)) {
       this.canvas.width = Math.round(w * dpr); this.canvas.height = Math.round(h * dpr);
     }
-    const pad = Math.max(14, Math.min(w, h) * 0.035);
+    const pad = this.data?.grid ? 28 : Math.max(14, Math.min(w, h) * 0.035);
     this.dpr = dpr;
     this.S = Math.min(w, h) - 2 * pad;
     this.cx = w / 2; this.cy = h / 2;
@@ -115,6 +121,11 @@ export class MapRenderer {
     if (!this.data) return null;
     const r = this.canvas.getBoundingClientRect();
     const px = e.clientX - r.left, py = e.clientY - r.top;
+    if (this.data.grid) {
+      const [x, y] = this.toWorld(px, py);
+      const label = cellAt(x, y, this.data.model.size, this.data.grid.size);
+      return label ? { label } : null;
+    }
     let best = null, bd = 22;
     for (const o of this.data.options) {
       const [x, y] = this.toCanvas(o.x, o.y);
@@ -188,6 +199,7 @@ export class MapRenderer {
 
     if (this.overlays.drainage) this.drawDrainage();
     if (this.overlays.landforms) this.drawLandforms();
+    if (this.data.grid) this.drawGrid();
     this.drawCone();
     ctx.restore();
 
@@ -200,7 +212,81 @@ export class MapRenderer {
 
     this.drawNorthArrow();
     this.drawScaleBar();
-    this.drawMarkers(); // last, so nothing ever hides an answer option
+    if (this.data.grid) this.drawGridLabels();
+    else this.drawMarkers(); // last, so nothing ever hides an answer option
+  }
+
+  gridPolygon(label) {
+    const grid = this.data.grid, code = parseCell(label, grid.size);
+    if (!code) return;
+    const step = this.data.model.size / grid.size;
+    const row = code.charCodeAt(0) - 65, col = Number(code.slice(1)) - 1;
+    const x = col * step, y = this.data.model.size - row * step;
+    const { ctx } = this;
+    ctx.beginPath();
+    [[x, y], [x + step, y], [x + step, y - step], [x, y - step]].forEach(([wx, wy], i) => {
+      const [px, py] = this.toCanvas(wx, wy);
+      i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+    });
+    ctx.closePath();
+  }
+
+  drawGrid() {
+    const { ctx } = this, { size: n, correctLabel } = this.data.grid;
+    const highlight = (label, color, fill) => {
+      if (!label) return;
+      this.gridPolygon(label);
+      ctx.fillStyle = fill; ctx.fill();
+      ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
+    };
+    if (this.reveal) {
+      if (this.reveal.chosen !== correctLabel) highlight(this.reveal.chosen, COLORS.wrong, 'rgba(255,107,94,0.22)');
+      highlight(correctLabel, COLORS.correct, 'rgba(95,208,138,0.22)');
+    } else {
+      highlight(this.selection, '#ffd666', 'rgba(255,214,102,0.18)');
+      if (this.pickable && this.hover !== this.selection) highlight(this.hover, '#ffd666', 'rgba(255,214,102,0.10)');
+    }
+    ctx.strokeStyle = 'rgba(125,185,219,0.65)'; ctx.lineWidth = 0.7;
+    const L = this.data.model.size;
+    ctx.beginPath();
+    for (let i = 0; i <= n; i++) {
+      for (const ends of [[[i / n * L, 0], [i / n * L, L]], [[0, i / n * L], [L, i / n * L]]]) {
+        const a = this.toCanvas(...ends[0]), b = this.toCanvas(...ends[1]);
+        ctx.moveTo(...a); ctx.lineTo(...b);
+      }
+    }
+    ctx.stroke();
+    if (this.reveal?.camera) {
+      const [x, y] = this.toCanvas(this.reveal.camera.x, this.reveal.camera.y);
+      ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fillStyle = COLORS.correct; ctx.fill();
+    }
+  }
+
+  drawGridLabels() {
+    const { ctx } = this, n = this.data.grid.size, L = this.data.model.size;
+    const label = (text, x, y, font = 10) => {
+      ctx.font = `700 ${font}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.lineWidth = 3; ctx.strokeStyle = COLORS.bg; ctx.strokeText(text, x, y);
+      ctx.fillStyle = '#bde0f5'; ctx.fillText(text, x, y);
+    };
+    // Headers rotate with the terrain, while text stays upright. Dense mobile
+    // grids use these headers instead of covering contours with 256 tiny codes.
+    const offset = 11 / this.S * L;
+    for (let i = 0; i < n; i++) {
+      label(String(i + 1), ...this.toCanvas((i + 0.5) / n * L, L + offset));
+      label(String.fromCharCode(65 + i), ...this.toCanvas(-offset, L - (i + 0.5) / n * L));
+    }
+    if (n <= 8 || this.S / n >= 30) {
+      const font = Math.min(11, Math.max(8, this.S / n * 0.23));
+      for (let row = 0; row < n; row++) for (let col = 0; col < n; col++) {
+        label(`${String.fromCharCode(65 + row)}${col + 1}`, ...this.toCanvas((col + 0.5) / n * L, L - (row + 0.5) / n * L), font);
+      }
+    }
+    const active = this.reveal ? this.data.grid.correctLabel : this.selection || (this.pickable ? this.hover : null);
+    if (active) {
+      ctx.fillStyle = 'rgba(21,26,32,0.95)'; ctx.fillRect(0, 0, 48, 24);
+      label(active, 24, 12, 13);
+    }
   }
 
   prepareLines() {
@@ -433,6 +519,17 @@ export class MapRenderer {
 
   drawNorthArrow() {
     const { ctx } = this;
+    if (this.data.grid) {
+      const angle = (this.data.rotation || 0) * Math.PI / 180;
+      const x = this.cssW - 12, y = 14, dx = Math.sin(angle), dy = -Math.cos(angle);
+      ctx.strokeStyle = COLORS.marker; ctx.fillStyle = COLORS.marker; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x - dx * 7, y - dy * 7); ctx.lineTo(x + dx * 7, y + dy * 7); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + dx * 9, y + dy * 9);
+      ctx.lineTo(x + dx * 3 - dy * 3, y + dy * 3 + dx * 3);
+      ctx.lineTo(x + dx * 3 + dy * 3, y + dy * 3 - dx * 3); ctx.closePath(); ctx.fill();
+      ctx.font = '700 9px system-ui'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText('N', x - 12, y);
+      return;
+    }
     const L = this.data.model.size;
     const [ax, ay] = this.toCanvas(L / 2, L / 2), [bx, by] = this.toCanvas(L / 2, L / 2 + 1);
     const l = Math.hypot(bx - ax, by - ay);
@@ -455,6 +552,11 @@ export class MapRenderer {
 
   drawScaleBar() {
     const { ctx } = this;
+    if (this.data.grid) {
+      ctx.fillStyle = COLORS.marker; ctx.font = '500 10px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(`${Math.round(this.data.model.size / this.data.grid.size)} m per cell · ${this.data.interval} m contours`, this.cx, this.cssH - 4);
+      return;
+    }
     const L = this.data.model.size;
     const pxPerM = this.S / L;
     const metres = pxPerM * 500 > 140 ? 250 : 500;

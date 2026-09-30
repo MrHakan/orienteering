@@ -193,3 +193,10 @@ src/easter/   seasonal Easter eggs: config, schedule (dates/preview), stage (all
 scripts/      dev server, CLI generator, batch stats, debug PNG
 test/         node:test suite
 ```
+
+## Grid method
+
+The Mode menu includes 4 × 4, 8 × 8 and 16 × 16 grids with references such as A1,
+B3 and P16. Tap a cell or enter its code, then check your answer. The **Lost
+compass** challenge hides the heading and requires terrain-based orientation.
+See [the grid guide](docs/grid-mode.md) for controls, generation and export details.

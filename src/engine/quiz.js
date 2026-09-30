@@ -29,6 +29,10 @@ export function buildTerrain({ seed, difficulty, attempt, preset, seeds, size = 
 
 /** Dispatch on quiz mode; existing location quizzes retain their defaults. */
 export async function generate(opts) {
+  if (opts.mode === 'grid') {
+    const { generateGridQuiz } = await import('./gridQuiz.js');
+    return generateGridQuiz(opts);
+  }
   if (opts.mode === 'lookalike') {
     const { generateLookalikeQuiz } = await import('./lookalikeQuiz.js');
     return generateLookalikeQuiz(opts);

@@ -5,6 +5,7 @@ import { SeedManager } from '../engine/rng.js';
 import { scrambleLabels } from '../engine/scramble.js';
 import { DIFFICULTIES, TUNABLES, tunableValue, encodeTuning, decodeTuning } from '../engine/difficulty.js';
 import { getLookalikePreset, DIRECTIONS } from '../engine/lookalikeQuiz.js';
+import { normaliseGridSize, normaliseGridChallenge, parseCell, headingHidden } from '../engine/gridQuiz.js';
 import { TerrainRenderer } from '../render/webglTerrain.js';
 import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
@@ -30,6 +31,7 @@ const state = {
   answered: false,
   chosen: null,
   viewing: null,
+  loading: true,
   score: store.get('otq.score', { correct: 0, total: 0, streak: 0 }),
   settings: store.get('otq.settings', { northUp: false, tape: true, hillshade: false, landforms: false, drainage: false }),
   requestId: 0,
@@ -41,7 +43,11 @@ try {
 } catch (err) {
   $('loading-text').textContent = `WebGL unavailable: ${err.message}`;
 }
-const map = new MapRenderer($('map'), { onPick: (label) => answer(label) });
+const map = new MapRenderer($('map'), { onPick: (label) => {
+  if (state.loading || state.answered) return;
+  if (state.quiz?.mode === 'grid') selectCell(label);
+  else answer(label);
+} });
 
 // ---------------------------------------------------------------- generation
 
@@ -56,14 +62,14 @@ function getWorker() {
   return worker;
 }
 
-function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, direction, tuning }) {
+function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, direction, gridSize, gridChallenge, tuning }) {
   const id = ++state.requestId;
   return new Promise((resolve, reject) => {
     const w = getWorker();
     if (!w) {
       // Fallback: generate on the main thread.
       import('../engine/quiz.js').then(({ generate }) => {
-        setTimeout(() => generate({ seed, difficulty, variant, mode, headingMode, direction, tuning }).then(resolve, reject), 30);
+        setTimeout(() => generate({ seed, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, tuning }).then(resolve, reject), 30);
       }, reject);
       return;
     }
@@ -75,7 +81,7 @@ function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, directi
       else reject(new Error(e.data.message));
     };
     w.addEventListener('message', onMessage);
-    w.postMessage({ id, seed, difficulty, variant, mode, headingMode, direction, tuning });
+    w.postMessage({ id, seed, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, tuning });
   });
 }
 
@@ -92,22 +98,29 @@ async function load(req) {
     mode: req.mode || $('mode').value,
     headingMode: req.headingMode || $('heading-mode').value,
     direction: req.direction || $('lookalike-direction').value,
+    gridSize: normaliseGridSize(req.gridSize ?? $('grid-size').value),
+    gridChallenge: normaliseGridChallenge(req.gridChallenge ?? $('grid-challenge').value),
     tuning: req.tuning || activeTuning(),
   };
   if (r.mode === 'lookalike') r.headingMode = 'auto';
+  if (r.mode === 'grid' && r.gridChallenge === 'lost-compass') r.headingMode = 'auto';
   $('seed').value = r.seed;
   $('difficulty').value = r.difficulty;
   $('mode').value = r.mode;
   $('heading-mode').value = r.headingMode;
   $('lookalike-direction').value = r.direction;
+  $('grid-size').value = r.gridSize;
+  $('grid-challenge').value = r.gridChallenge;
   syncControls();
   setLoading(true, r.mode === 'lookalike' ? 'Searching for matching A/B/C views…' : r.difficulty === 'master' ? 'Searching for a devious question…' : 'Generating terrain…');
   setAnswersEnabled(false);
+  map.pickable = false;
   const myId = state.requestId + 1;
   let quiz;
   try {
     quiz = await requestQuiz({ ...r, headingMode: r.headingMode === 'auto' ? null : r.headingMode });
   } catch (err) {
+    if (myId !== state.requestId) return;
     console.error(err);
     setLoading(true, `Generation failed: ${err.message}`);
     return;
@@ -116,7 +129,7 @@ async function load(req) {
   quiz.headingChoice = r.headingMode;
   quiz.tuning = r.tuning;
   state.baseQuiz = quiz;
-  show(r.scramble && quiz.mode !== 'facing' ? scrambleLabels(quiz, r.scramble) : quiz);
+  show(r.scramble && !['facing', 'grid'].includes(quiz.mode) ? scrambleLabels(quiz, r.scramble) : quiz);
   updateHash();
 }
 
@@ -125,6 +138,11 @@ function updateHash() {
   if (!q) return;
   const parts = [`seed=${encodeURIComponent(q.seed)}`, `d=${q.difficulty}`];
   if (q.mode === 'facing') parts.push('m=facing');
+  else if (q.mode === 'grid') {
+    parts.push('m=grid', `g=${q.grid.size}`);
+    if (q.grid.challenge !== 'standard') parts.push(`gc=${q.grid.challenge}`);
+    if (!headingHidden(q) && q.headingChoice !== 'auto') parts.push(`h=${q.headingChoice}`);
+  }
   else if (q.mode === 'lookalike') {
     parts.push('m=lookalike');
     if (q.directionChoice !== 'auto') parts.push(`dir=${q.directionChoice}`);
@@ -140,9 +158,12 @@ function updateHash() {
 function syncControls() {
   const facing = $('mode').value === 'facing';
   const lookalike = $('mode').value === 'lookalike';
-  $('heading-field').hidden = facing || lookalike;
+  const grid = $('mode').value === 'grid';
+  $('grid-size-field').hidden = !grid;
+  $('grid-challenge-field').hidden = !grid;
+  $('heading-field').hidden = facing || lookalike || (grid && $('grid-challenge').value === 'lost-compass');
   $('direction-field').hidden = !lookalike;
-  $('scramble').hidden = facing;
+  $('scramble').hidden = facing || grid;
   if (typeof dev !== 'undefined') renderDevPanel();
 }
 
@@ -156,17 +177,20 @@ function show(quiz) {
 
   const facing = quiz.mode === 'facing';
   const lookalike = quiz.mode === 'lookalike';
-  $('quiz-title').textContent = facing ? 'WHICH WAY ARE YOU FACING?' : lookalike ? 'LOOK-ALIKES' : 'WHERE ARE YOU?';
+  const grid = quiz.mode === 'grid';
+  $('quiz-title').textContent = facing ? 'WHICH WAY ARE YOU FACING?' : lookalike ? 'LOOK-ALIKES' : grid ? `${quiz.grid.size} × ${quiz.grid.size} GRID` : 'WHERE ARE YOU?';
   $('quiz-title').classList.toggle('long', facing);
-  $('facing-text').textContent = facing ? 'YOU ARE AT THE MARKED POINT' : quiz.heading.text;
-  $('facing-arrow').textContent = facing || quiz.heading.mode === 'exact' ? '' : quiz.heading.arrow;
+  $('facing-text').textContent = facing ? 'YOU ARE AT THE MARKED POINT' : headingHidden(quiz) ? 'LOST COMPASS · FIND YOUR CELL' : quiz.heading.text;
+  $('facing-arrow').textContent = headingHidden(quiz) || quiz.heading.mode === 'exact' ? '' : quiz.heading.arrow;
   $('prompt').textContent = facing ? 'You stand at the marked point. Which of the 8 directions are you looking in?'
     : lookalike ? 'A, B and C have similar views in this direction. Match the ridge shapes and foreground to find your point.'
+    : grid ? `You stand at a cell centre.${headingHidden(quiz) ? ' Your heading is one of 8 directions, hidden until you answer.' : ''} Tap your cell or type its code, then check your answer. Rows start at north; columns start at west.`
     : 'You are at one of the marked points, facing the direction shown. Which one?';
   $('credit').textContent = `seed ${quiz.seed}${quiz.variant ? ` · positions #${quiz.variant}` : ''} · ${DIFFICULTIES[quiz.difficulty].label.toLowerCase()} · ${Math.round(t.size / 1000 * 10) / 10} km × ${Math.round(t.size / 1000 * 10) / 10} km`;
   $('viewing-badge').hidden = true;
   $('result').hidden = true;
   $('prompt').hidden = false;
+  $('map').setAttribute('aria-label', grid ? `${quiz.grid.size} by ${quiz.grid.size} contour grid. Rows A to ${String.fromCharCode(64 + quiz.grid.size)} from north to south; columns 1 to ${quiz.grid.size} from west to east. Enter a cell code below to answer.` : 'Topographic contour map with candidate locations');
 
   if (renderer) {
     renderer.setTerrain(state.model);
@@ -178,6 +202,7 @@ function show(quiz) {
     options: quizMarkers(quiz),
     rotation: state.settings.northUp ? 0 : quiz.mapRotation,
     landmarks: quiz.landmarks,
+    grid: grid ? { ...quiz.grid, correctLabel: quiz.correctLabel } : null,
   });
   map.setOverlays(state.settings);
 
@@ -193,6 +218,15 @@ function renderAnswerButtons() {
   const answers = $('answers');
   answers.innerHTML = '';
   const facing = state.quiz.mode === 'facing';
+  const grid = state.quiz.mode === 'grid';
+  $('grid-answer').hidden = !grid;
+  answers.parentElement.hidden = grid;
+  if (grid) {
+    $('grid-cell').value = '';
+    $('grid-cell').removeAttribute('aria-invalid');
+    $('grid-help').textContent = `Tap a cell or enter A1–${String.fromCharCode(64 + state.quiz.grid.size)}${state.quiz.grid.size}.`;
+    return;
+  }
   answers.classList.toggle('rose', facing);
   if (facing) {
     for (const label of ROSE) {
@@ -230,7 +264,7 @@ function renderScene(camera) {
   if (!renderer) return;
   renderer.render(camera);
   // In "Which way?" the bearing tape would give the answer away.
-  const tapeAllowed = state.quiz.mode !== 'facing' || state.answered;
+  const tapeAllowed = !headingHidden(state.quiz) || state.answered;
   const tape = $('tape');
   if (state.settings.tape && tapeAllowed) drawCompassTape(tape, camera, { exact: state.quiz.heading.mode === 'exact' });
   else {
@@ -248,8 +282,36 @@ function renderScene(camera) {
 
 // ---------------------------------------------------------------- answering
 
+function selectCell(label) {
+  if (state.loading || state.answered || state.quiz?.mode !== 'grid') return;
+  $('grid-cell').value = label;
+  $('grid-cell').removeAttribute('aria-invalid');
+  $('grid-help').textContent = `${label} selected — check your answer when ready.`;
+  map.setSelection(label);
+}
+
+$('grid-cell').addEventListener('input', () => {
+  if (state.quiz?.mode !== 'grid') return;
+  const label = parseCell($('grid-cell').value, state.quiz.grid.size);
+  $('grid-cell').removeAttribute('aria-invalid');
+  map.setSelection(label);
+});
+$('grid-answer').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (state.loading || state.answered || state.quiz?.mode !== 'grid') return;
+  const label = parseCell($('grid-cell').value, state.quiz.grid.size);
+  if (!label) {
+    $('grid-cell').setAttribute('aria-invalid', 'true');
+    $('grid-help').textContent = `Enter a cell from A1 to ${String.fromCharCode(64 + state.quiz.grid.size)}${state.quiz.grid.size}.`;
+    $('grid-cell').focus();
+    return;
+  }
+  $('grid-cell').value = label;
+  answer(label);
+});
+
 function answer(label) {
-  if (!state.quiz || state.answered) return;
+  if (!state.quiz || state.answered || state.loading) return;
   const quiz = state.quiz;
   if (!quiz.options.some((o) => o.label === label)) return;
   state.answered = true;
@@ -266,10 +328,13 @@ function answer(label) {
     else if (b.dataset.label === label) b.classList.add('wrong');
   }
   map.setReveal({ chosen: label, camera: quiz.camera });
+  $('grid-cell').disabled = true;
+  $('grid-submit').disabled = true;
   $('scramble').disabled = true;
   $('prompt').hidden = true;
   renderFacts();
   if (quiz.mode === 'facing') { showFacingResult(label, right); return; }
+  if (quiz.mode === 'grid') { showGridResult(label, right); return; }
 
   const res = $('result');
   res.hidden = false;
@@ -286,6 +351,30 @@ function answer(label) {
   res.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => viewFrom(b.dataset.view)));
   $('next').addEventListener('click', newQuiz);
   highlightView(quiz.correctLabel);
+}
+
+function showGridResult(label, right) {
+  const q = state.quiz, res = $('result');
+  const codes = [...new Set([q.correctLabel, label, q.closestLabel])];
+  const options = codes.map((code) => q.options.find((o) => o.label === code));
+  const trueHeading = `${String(Math.round(q.camera.heading)).padStart(3, '0')}°`;
+  res.hidden = false;
+  res.innerHTML = `<div class="verdict ${right ? 'good' : 'bad'}">${right ? 'Correct' : 'Not quite'} — your cell was ${q.correctLabel}.</div>
+    <p>${label !== q.correctLabel ? `You selected ${label}. ` : ''}The green cell marks your position; the wedge shows your view.${headingHidden(q) ? ` Your compass was pointing ${trueHeading}.` : ''}</p>
+    <div class="views">${options.map((o) => `<button type="button" class="btn ghost" data-view="${o.label}">View ${o.label}${o.correct ? ' (true)' : o.label === label ? ' (your pick)' : ' (closest match)'}</button>`).join('')}</div>
+    <table><tr><th>Cell</th><th>Landform</th><th>Elevation</th><th>View diff.</th>${headingHidden(q) ? '<th>Compared heading</th>' : ''}</tr>
+    ${options.map((o) => `<tr><td><strong>${o.label}</strong></td><td>${o.landform}</td><td>${Math.round(o.z)} m</td><td>${o.correct ? '—' : `${o.D.toFixed(1)}°`}</td>${headingHidden(q) ? `<td>${String(o.heading).padStart(3, '0')}°</td>` : ''}</tr>`).join('')}</table>
+    <p class="note">Views are compared from cell centres.${headingHidden(q) ? ' Wrong cells use their closest-looking compass direction.' : ''}</p>
+    <button type="button" class="btn primary" id="next">Next quiz (N)</button>`;
+  res.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => viewFrom(b.dataset.view)));
+  $('next').addEventListener('click', newQuiz);
+  $('grid-help').textContent = `Your answer: ${label} · correct cell: ${q.correctLabel}`;
+  if (headingHidden(q)) {
+    $('facing-text').textContent = q.heading.text;
+    $('facing-arrow').textContent = q.heading.arrow;
+  }
+  highlightView(q.correctLabel);
+  renderScene(q.camera);
 }
 
 function showFacingResult(label, right) {
@@ -319,7 +408,7 @@ function optionCamera(label) {
   const quiz = state.quiz;
   const o = quiz.options.find((p) => p.label === label);
   if (quiz.mode === 'facing') return { cam: { ...quiz.camera, heading: o.heading }, o };
-  return { cam: { ...quiz.camera, x: o.x, y: o.y, z: state.model.getElevation(o.x, o.y) + quiz.camera.eyeHeight }, o };
+  return { cam: { ...quiz.camera, heading: o.heading ?? quiz.camera.heading, x: o.x, y: o.y, z: state.model.getElevation(o.x, o.y) + quiz.camera.eyeHeight }, o };
 }
 
 function viewFrom(label) {
@@ -349,8 +438,9 @@ function renderScore() {
 function renderFacts() {
   const q = state.quiz;
   const facts = [
-    ['Mode', q.mode === 'facing' ? 'Which way are you facing?' : q.mode === 'lookalike' ? 'Look-alikes (A / B / C)' : 'Where are you?'],
-    ['Heading', q.mode === 'facing' && !state.answered ? 'hidden until you answer' : `${String(Math.round(q.camera.heading)).padStart(3, '0')}° (${q.mode === 'facing' ? 'one of 8 directions' : q.heading.mode})`],
+    ['Mode', q.mode === 'facing' ? 'Which way are you facing?' : q.mode === 'lookalike' ? 'Look-alikes (A / B / C)' : q.mode === 'grid' ? `Grid ${q.grid.size} × ${q.grid.size}${headingHidden(q) ? ' · Lost compass' : ''}` : 'Where are you?'],
+    ['Heading', headingHidden(q) && !state.answered ? 'hidden until you answer' : `${String(Math.round(q.camera.heading)).padStart(3, '0')}° (${q.mode === 'facing' ? 'one of 8 directions' : q.heading.mode})`],
+    ...(q.mode === 'grid' ? [['Cells', `${q.options.length} · ${Math.round(q.grid.cellMetres)} m per side · observer at centre`]] : []),
     ['Field of view', `${q.camera.fov}° · eye ${q.camera.eyeHeight} m`],
     ['Relief', `${Math.round(q.terrain.min)}–${Math.round(q.terrain.max)} m`],
     ['Contours', `${q.terrain.contourInterval} m (index every ${q.terrain.contourInterval * 5} m)`],
@@ -386,12 +476,15 @@ function renderFacts() {
 }
 
 function setLoading(on, text) {
+  state.loading = on;
   $('loading').classList.toggle('hidden', !on);
   if (text) $('loading-text').textContent = text;
 }
 
 function setAnswersEnabled(on) {
   for (const b of $('answers').children) b.disabled = !on;
+  $('grid-cell').disabled = !on;
+  $('grid-submit').disabled = !on;
 }
 
 // ---------------------------------------------------------------- controls
@@ -406,7 +499,7 @@ function newQuiz() {
  */
 function scrambleOptions() {
   const q = state.quiz;
-  if (!q || state.answered || q.mode === 'facing') return;
+  if (!q || state.answered || state.loading || ['facing', 'grid'].includes(q.mode)) return;
   // Derived from the unscrambled quiz so "&s=N" in a link reproduces it.
   const quiz = scrambleLabels(state.baseQuiz, (q.scramble || 0) + 1);
   state.quiz = quiz;
@@ -425,7 +518,8 @@ function newPositions() {
   const same = $('difficulty').value === q.difficulty && $('seed').value.trim() === q.seed
     && $('mode').value === q.mode && $('heading-mode').value === (q.headingChoice || 'auto')
     && (q.mode !== 'lookalike' || $('lookalike-direction').value === q.directionChoice);
-  load({ seed: q.seed, variant: same ? (q.variant || 0) + 1 : 0 });
+  const gridSame = q.mode !== 'grid' || (Number($('grid-size').value) === q.grid.size && $('grid-challenge').value === q.grid.challenge);
+  load({ seed: q.seed, variant: same && gridSame ? (q.variant || 0) + 1 : 0 });
 }
 
 $('controls').addEventListener('submit', (e) => {
@@ -436,7 +530,7 @@ $('new-quiz').addEventListener('click', newQuiz);
 $('new-positions').addEventListener('click', newPositions);
 $('scramble').addEventListener('click', scrambleOptions);
 // Changing mode, difficulty or heading style keeps the seed, so the terrain carries over.
-for (const id of ['difficulty', 'mode', 'heading-mode', 'lookalike-direction']) {
+for (const id of ['difficulty', 'mode', 'heading-mode', 'lookalike-direction', 'grid-size', 'grid-challenge']) {
   $(id).addEventListener('change', () => { syncControls(); load({ seed: $('seed').value.trim() }); });
 }
 $('copy-link').addEventListener('click', async () => {
@@ -713,7 +807,9 @@ function parseHash() {
   const h = p.get('h');
   return {
     seed: p.get('seed'), difficulty: d && DIFFICULTIES[d] ? d : null, variant: v, scramble: sc,
-    mode: ['facing', 'lookalike'].includes(p.get('m')) ? p.get('m') : 'where-am-i',
+    mode: ['facing', 'lookalike', 'grid'].includes(p.get('m')) ? p.get('m') : 'where-am-i',
+    gridSize: normaliseGridSize(p.get('g')),
+    gridChallenge: normaliseGridChallenge(p.get('gc')),
     direction: DIRECTIONS.some((d) => d.label === p.get('dir')) ? p.get('dir') : 'auto',
     headingMode: ['exact', 'intercardinal', 'cardinal'].includes(h) ? h : 'auto',
     tuning: p.has('dev') ? decodeTuning(p.get('dev')) : null,
@@ -726,6 +822,7 @@ window.addEventListener('hashchange', () => {
   if (h.seed && (h.seed !== q?.seed || h.difficulty !== q?.difficulty || h.variant !== (q?.variant || 0) || h.scramble !== (q?.scramble || 0)
     || h.mode !== q?.mode || h.headingMode !== (q?.headingChoice || 'auto')
     || (h.mode === 'lookalike' && h.direction !== q?.directionChoice)
+    || (h.mode === 'grid' && (h.gridSize !== q?.grid?.size || h.gridChallenge !== q?.grid?.challenge))
     || encodeTuning(h.tuning || {}) !== encodeTuning(q?.tuning || {}))) { adoptLinkTuning(h.tuning); load({ ...h, difficulty: h.difficulty || 'medium' }); }
 });
 
@@ -761,6 +858,7 @@ function renderDevPanel() {
     const def = tunableValue(preset, t);
     const applies = def !== undefined && (!t.key.startsWith('facing') || mode === 'facing')
       && !(mode === 'facing' && ['minTrue', 'minSep', 'sameLandform', 'bandMin', 'bandTarget', 'bandMax', 'distractors', 'minConfidence'].includes(t.key))
+      && !(mode === 'grid' && !['bandMin', 'minQuality', 'minConfidence', 'viewTries'].includes(t.key))
       && !(mode === 'lookalike' && ['distractors', 'viewTries'].includes(t.key));
     const v = dev.values[t.key];
     const label = `${t.label}${t.unit ? ` (${t.unit})` : ''}`;
@@ -810,6 +908,12 @@ $('dev-reset').addEventListener('click', () => {
 for (const id of ['difficulty', 'mode']) $(id).addEventListener('change', renderDevPanel);
 
 renderScore();
+const savedGrid = store.get('otq.grid', {});
+$('grid-size').value = normaliseGridSize(savedGrid.size);
+$('grid-challenge').value = normaliseGridChallenge(savedGrid.challenge);
+for (const id of ['grid-size', 'grid-challenge']) $(id).addEventListener('change', () => {
+  store.set('otq.grid', { size: Number($('grid-size').value), challenge: $('grid-challenge').value });
+});
 const initial = parseHash();
 adoptLinkTuning(initial.tuning);
 renderDevPanel();
