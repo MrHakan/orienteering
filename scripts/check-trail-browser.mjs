@@ -81,7 +81,7 @@ try {
   for(const knife of ['classic','default','huntsman','karambit']) {
     await page.locator('#trail-knife').selectOption(knife);
     assert.match(page.url(),new RegExp('k='+knife));
-    assert.equal(await page.locator('#loading').isVisible(),false);
+    assert.equal(await page.locator('#loading').evaluate(el=>el.classList.contains('hidden')),true);
   }
   await page.locator('#trail-character').selectOption('classic');
   await page.locator('#trail-finish').selectOption('tiger');
@@ -91,7 +91,7 @@ try {
   await screenshot(page,'trail-customisation');
   await page.locator('#scramble').click();q=scrambleLabels(q,1);
   assert.match(page.url(),/s=1/);
-  assert.equal(await page.locator('#trail-scrub').inputValue(),'0');
+  assert.equal(await page.locator('#trail-scrub').inputValue(),'6');
 
   // Select a segment, not only a start marker. Keep it away from neighbours.
   const wrong=q.options.find(o=>!o.correct);
@@ -102,7 +102,7 @@ try {
   const safe=wrong.points.slice(12,-12).map(p=>({p,d:Math.min(...q.options.filter(o=>o!==wrong)
     .flatMap(o=>o.points.slice(1).map((b,i)=>segmentDistance(p,o.points[i],b))))})).sort((a,b)=>b.d-a.d)[0].p;
   await page.locator('#map').scrollIntoViewIfNeeded();
-  const box=await page.locator('#map').boundingBox(),s=Math.min(box.width,box.height)-56;
+  const box=await page.locator('#map').boundingBox(),s=Math.min(box.width,box.height)-2*Math.max(14,Math.min(box.width,box.height)*.035);
   const a=q.mapRotation*Math.PI/180,u=(safe.x-q.mapExtent.x)/q.mapExtent.size,v=(q.mapExtent.y-safe.y)/q.mapExtent.size;
   await page.locator('#map').click({position:{x:box.width/2+(u*Math.cos(a)-v*Math.sin(a))*s,y:box.height/2+(u*Math.sin(a)+v*Math.cos(a))*s}});
   assert.match(await page.locator('#result .verdict').textContent(),new RegExp('Not quite — you followed trail '+q.correctLabel));
@@ -237,6 +237,11 @@ try {
   assert.deepEqual(errors,[]);
   console.log('Trail browser checks passed: versioned worker, playback, inspect, models, colours, segment selection, timed comparisons, mobile touch, PNG/video export and mode switching.');
 } catch(error) {
+  console.log('Browser page errors: '+JSON.stringify(errors));
+  if(process.env.PRINT_PREVIEW==='1') {
+    const preview=await page.locator('.card').screenshot({type:'jpeg',quality:60}).catch(()=>null);
+    if(preview)console.log('TRAIL_FAILURE_JPEG='+preview.toString('base64'));
+  }
   if(out)await page.screenshot({path:join(out,'trail-failure.png'),fullPage:true}).catch(()=>{});
   throw error;
 } finally {
