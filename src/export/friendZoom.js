@@ -3,10 +3,10 @@
 const ease = (t) => t * t * (3 - 2 * t);
 
 export function friendVideoZoom(time) {
-  if (!Number.isFinite(time) || time <= 3 || time >= 12) return 1;
+  if (!Number.isFinite(time) || time <= 3 || time >= 10) return 1;
   if (time < 5) return 1 + 2 * ease((time - 3) / 2);
-  if (time <= 10) return 3;
-  return 3 - 2 * ease((time - 10) / 2);
+  if (time <= 8) return 3;
+  return 3 - 2 * ease((time - 8) / 2);
 }
 
 export function exportCamera(quiz, time, animated) {
