@@ -10,6 +10,7 @@ import { skylineScreenPoints } from '../render/skylineOverlay.js';
 import { createEasterEgg } from '../easter/index.js';
 import { Random } from '../engine/rng.js';
 import { headingHidden } from '../engine/gridQuiz.js';
+import { exportCamera } from './friendZoom.js';
 
 export const FORMATS = {
   reels: { label: 'Reels / Story 9:16', width: 1080, height: 1920 },
@@ -93,6 +94,7 @@ export class ExportComposer {
    * engine's skyline, so it cannot alter or reveal the quiz.
    */
   buildEasterEgg() {
+    this.easterFov = this.quiz.camera.fov;
     const plan = this.options.easterEgg || null;
     if (!plan) { this.easter = null; return; }
     const S = this.layout.scene;
@@ -159,6 +161,7 @@ export class ExportComposer {
   /** Draw one frame. t = seconds since start. */
   drawFrame(t = 0, { reveal = false } = {}) {
     const { ctx, layout: L, quiz: q } = this;
+    const camera = exportCamera(q, t, this.animated);
     const W = this.canvas.width, H = this.canvas.height;
     const duration = this.options.duration;
     ctx.save();
@@ -181,13 +184,13 @@ export class ExportComposer {
 
     // Scene.
     const S = L.scene;
-    this.renderer.render(q.camera, { weather: this.weather, time: t });
+    this.renderer.render(camera, { weather: this.weather, time: t });
     ctx.drawImage(this.glCanvas, S.x, S.y, S.w, S.h);
     ctx.save();
     ctx.beginPath(); ctx.rect(S.x, S.y, S.w, S.h); ctx.clip();
     if (this.weather.rain) this.drawRain(t);
     // The bearing tape would reveal the answer in "Which way?" until the reveal.
-    if (this.options.tape && (!headingHidden(q) || reveal)) drawCompassTape(null, q.camera, { exact: q.heading.mode === 'exact', target: { ctx, x: S.x, y: S.y, width: S.w, scale: S.w / 666 } });
+    if (this.options.tape && (!headingHidden(q) || reveal)) drawCompassTape(null, camera, { exact: q.heading.mode === 'exact', target: { ctx, x: S.x, y: S.y, width: S.w, scale: S.w / 666 } });
     ctx.restore();
 
     // Countdown bar under the scene (video only).
@@ -220,7 +223,14 @@ export class ExportComposer {
     }
     // Seasonal Easter egg: last, clipped away from every protected element.
     // Inactive (and untouched) outside an event and after the fade-out.
-    if (this.easter) this.easter.draw(ctx, t);
+    if (this.easter) {
+      // Sky objects must still disappear behind the terrain as the lens zooms.
+      if (this.easterFov !== camera.fov) {
+        this.easter.stage.setSkyline(skylineScreenPoints(camera, this.model, S.w, S.h));
+        this.easterFov = camera.fov;
+      }
+      this.easter.draw(ctx, t);
+    }
     ctx.restore();
   }
 

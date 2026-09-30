@@ -105,6 +105,16 @@ export function createStage({ layout, frame, skyline }) {
     left: S.x, right: S.x + S.w,
     skyX: xs, skyY: ys, skyRawY: rawY,
 
+    /** Update terrain clipping for an animated lens without reseeding objects. */
+    setSkyline(points) {
+      xs.length = 0; ys.length = 0; rawY.length = 0;
+      for (const [x, y] of points) {
+        xs.push(S.x + x);
+        ys.push(clamp(S.y + y - SKY_MARGIN, top, bottom));
+        rawY.push(S.y + y);
+      }
+    },
+
     /** Height of free sky (px) under the stage top at frame-x. */
     headroomAt(x) {
       let best = Infinity, y = ys[0];

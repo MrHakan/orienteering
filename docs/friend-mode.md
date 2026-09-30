@@ -8,6 +8,7 @@ Choose **Where is your friend?** in Mode. YOU marks the observer on a local cont
 - After answering, **Friend at A/B/C** moves the person to each candidate. The camera stays at YOU, even for wrong answers.
 - **New positions** changes the observer and the candidates on the same seeded terrain. Replay links record mode, challenge (`fc=depth-trap`), difficulty, variant and heading style. Letter scrambling preserves the person and observer.
 - Image and video exports render the same person, observer and local map, with a friend-specific title and caption.
+- **Video zoom:** 0–3 s at 1×; 3–5 s gradually zooms to 3×; 5–10 s holds at 3×; 10–12 s gradually returns to 1×. The last 3 seconds use the original view for the answer reveal. The preview follows the same timeline; PNGs remain at 1×. Only the lens changes, with smooth starts and stops.
 
 Example: `#seed=friend-demo&d=medium&m=friend&fc=depth-trap`.
 
