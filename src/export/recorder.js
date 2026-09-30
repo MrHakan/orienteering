@@ -25,7 +25,7 @@ export async function pickVideoPath(width, height, fps = 30) {
 }
 
 /**
- * Renders drawFrame(t) for t in [0, duration) and encodes it.
+ * Awaits drawFrame(t) for t in [0, duration) and encodes it.
  * @returns {Promise<{blob:Blob, extension:string, h264:boolean, codec:string}>}
  */
 export async function encodeCanvasVideo(canvas, drawFrame, { duration = 15, fps = 30, onProgress = () => {} } = {}) {
@@ -51,22 +51,27 @@ async function encodeWebCodecs(canvas, drawFrame, { codec, h264 }, { duration, f
   });
   const config = { codec, width: canvas.width, height: canvas.height, bitrate: 10_000_000, framerate: fps, latencyMode: 'quality' };
   if (h264) config.avc = { format: 'avc' };
-  encoder.configure(config);
-
   const frames = Math.round(duration * fps);
   const us = 1e6 / fps;
-  for (let i = 0; i < frames; i++) {
+  try {
+    encoder.configure(config);
+    for (let i = 0; i < frames; i++) {
+      if (failure) throw failure;
+      await drawFrame(i / fps);
+      const frame = new VideoFrame(canvas, { timestamp: Math.round(i * us), duration: Math.round(us) });
+      try { encoder.encode(frame, { keyFrame: i % (fps * 2) === 0 }); }
+      finally { frame.close(); }
+      onProgress((i + 1) / frames);
+      // Wait for actual capacity. A single yield can enqueue hundreds of
+      // full-size GPU snapshots and exhaust memory on a 15-second export.
+      while (encoder.encodeQueueSize > 4 && !failure) await new Promise((r) => setTimeout(r, 10));
+      if (i % 5 === 0) await new Promise((r) => setTimeout(r, 0));
+    }
     if (failure) throw failure;
-    await drawFrame(i / fps);
-    const frame = new VideoFrame(canvas, { timestamp: Math.round(i * us), duration: Math.round(us) });
-    encoder.encode(frame, { keyFrame: i % (fps * 2) === 0 });
-    frame.close();
-    onProgress((i + 1) / frames);
-    // Yield so the page stays responsive and the encoder queue drains.
-    if (encoder.encodeQueueSize > 4 || i % 5 === 0) await new Promise((r) => setTimeout(r, 0));
+    await encoder.flush();
+  } finally {
+    if (encoder.state !== 'closed') encoder.close();
   }
-  await encoder.flush();
-  encoder.close();
   if (failure) throw failure;
   if (h264 && !description) throw new Error('Encoder returned no H.264 configuration.');
   const blob = muxMp4({ codec, width: canvas.width, height: canvas.height, fps, description, samples });
@@ -85,11 +90,11 @@ async function recordRealtime(canvas, drawFrame, { type, h264 }, { duration, fps
   await new Promise((resolve, reject) => {
     const tick = async () => {
       try {
-      const t = (performance.now() - start) / 1000;
-      if (t >= duration) { await drawFrame(duration); resolve(); return; }
-      await drawFrame(t);
-      onProgress(t / duration);
-      requestAnimationFrame(tick);
+        const t = (performance.now() - start) / 1000;
+        if (t >= duration) { await drawFrame(duration); resolve(); return; }
+        await drawFrame(t);
+        onProgress(t / duration);
+        requestAnimationFrame(tick);
       } catch (error) { reject(error); }
     };
     requestAnimationFrame(tick);
