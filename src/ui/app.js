@@ -7,6 +7,8 @@ import { DIFFICULTIES, TUNABLES, tunableValue, encodeTuning, decodeTuning } from
 import { getLookalikePreset, DIRECTIONS } from '../engine/lookalikeQuiz.js';
 import { normaliseGridSize, normaliseGridChallenge, parseCell, headingHidden, usesGrid } from '../engine/gridQuiz.js';
 import { normaliseFriendChallenge, normaliseFriendAnswer, friendObserver, friendOptionCamera } from '../engine/friendQuiz.js';
+import { FRIEND_SKINS, normaliseFriendSkin } from '../engine/friendAppearance.js';
+import { friendSceneFrame } from '../export/friendZoom.js';
 import { normaliseMovement, trailFrame } from '../engine/trailMotion.js';
 import { TRAIL_COLORS } from '../engine/trailQuiz.js';
 import { KNIVES, normaliseAppearance } from '../render/knifeClips.js';
@@ -37,6 +39,8 @@ const state = {
   chosen: null,
   viewing: null,
   friendZoom: false,
+  friendCinematicPlaying: false,
+  friendCinematicTime: 0,
   trailTime: 0,
   appearance: normaliseAppearance(store.get('otq.appearance', {})),
   loading: true,
@@ -46,7 +50,7 @@ const state = {
 };
 
 let renderer = null;
-let friendWaveRaf = 0, friendWaveStart = 0;
+let friendWaveRaf = 0, friendWaveStart = 0, friendCinematicStart = 0;
 try {
   renderer = new TerrainRenderer($('scene'));
 } catch (err) {
@@ -88,14 +92,55 @@ function stopFriendWave() {
   cancelAnimationFrame(friendWaveRaf); friendWaveRaf = 0;
 }
 function scheduleFriendWave() {
-  if (friendWaveRaf || !renderer || !state.friendZoom || state.quiz?.mode !== 'friend'
+  const active = state.quiz?.friend?.skin === 'conquest' ? state.friendCinematicPlaying : state.friendZoom;
+  if (friendWaveRaf || !renderer || !active || state.quiz?.mode !== 'friend'
     || state.loading || document.hidden || $('export-dialog').open) return;
   friendWaveRaf = requestAnimationFrame(() => {
     friendWaveRaf = 0;
+    if (state.friendCinematicPlaying) {
+      state.friendCinematicTime = Math.min(15, (performance.now() - friendCinematicStart) / 1000);
+      if (state.friendCinematicTime >= 15) state.friendCinematicPlaying = false;
+    }
     renderScene(currentCamera());
     scheduleFriendWave();
   });
 }
+
+function syncFriendAppearance() {
+  if (state.quiz?.mode !== 'friend') return;
+  const conquest = state.quiz?.friend?.skin === 'conquest';
+  $('friend-skin').value = normaliseFriendSkin(state.quiz?.friend?.skin);
+  $('friend-arrival').hidden = !conquest;
+  $('friend-skin-note').textContent = conquest
+    ? '3 seconds to read the terrain, then zoom and a slow-motion arrival. The view follows Conquest as he lands.'
+    : 'Your friend waves when you zoom in.';
+  $('friend-status').textContent = conquest ? 'Conquest · slow-motion arrival · locate his landing cell or point'
+    : state.quiz?.friend?.observerHidden ? 'Orange jacket · 1.80 m tall · locate him using the terrain'
+    : 'Orange jacket · 1.80 m tall · your viewpoint stays fixed';
+}
+
+function startFriendArrival() {
+  if (state.loading || state.quiz?.mode !== 'friend' || state.quiz.friend.skin !== 'conquest') return;
+  stopFriendWave();
+  state.friendZoom = false; state.friendCinematicTime = 0; state.friendCinematicPlaying = true;
+  friendCinematicStart = performance.now();
+  $('friend-zoom').textContent = 'Zoom 3×'; $('friend-zoom').setAttribute('aria-pressed', 'false');
+  renderScene(currentCamera()); scheduleFriendWave();
+}
+
+$('friend-skin').innerHTML = FRIEND_SKINS.map(skin => `<option value="${skin.id}">${skin.label}</option>`).join('');
+$('friend-skin').addEventListener('change', () => {
+  const skin = normaliseFriendSkin($('friend-skin').value);
+  store.set('otq.friendSkin', skin);
+  if (state.loading || state.quiz?.mode !== 'friend') return;
+  stopFriendWave();
+  state.quiz.friend.skin = skin; state.baseQuiz.friend.skin = skin;
+  state.friendZoom = false; state.friendCinematicPlaying = false; state.friendCinematicTime = 0;
+  $('friend-zoom').textContent = 'Zoom 3×'; $('friend-zoom').setAttribute('aria-pressed', 'false');
+  syncFriendAppearance(); updateHash();
+  if (skin === 'conquest') startFriendArrival(); else renderScene(currentCamera());
+});
+$('friend-arrival').addEventListener('click', startFriendArrival);
 
 function syncAppearanceControls() {
   const o = state.appearance;
@@ -129,14 +174,14 @@ function getWorker() {
   return worker;
 }
 
-function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, movement, tuning }) {
+function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, tuning }) {
   const id = ++state.requestId;
   return new Promise((resolve, reject) => {
     const w = getWorker();
     if (!w) {
       // Fallback: generate on the main thread.
       import('../engine/quiz.js').then(({ generate }) => {
-        setTimeout(() => generate({ seed, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, movement, tuning }).then(resolve, reject), 30);
+        setTimeout(() => generate({ seed, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, tuning }).then(resolve, reject), 30);
       }, reject);
       return;
     }
@@ -148,7 +193,7 @@ function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, directi
       else reject(new Error(e.data.message));
     };
     w.addEventListener('message', onMessage);
-    w.postMessage({ id, seed, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, movement, tuning });
+    w.postMessage({ id, seed, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, tuning });
   });
 }
 
@@ -169,11 +214,13 @@ async function load(req) {
     gridChallenge: normaliseGridChallenge(req.gridChallenge ?? $('grid-challenge').value),
     friendChallenge: normaliseFriendChallenge(req.friendChallenge ?? $('friend-challenge').value),
     friendAnswer: normaliseFriendAnswer(req.friendAnswer ?? $('friend-answer').value),
+    friendSkin: normaliseFriendSkin(req.friendSkin ?? $('friend-skin').value),
     movement: normaliseMovement(req.movement ?? $('movement').value),
     appearance: normaliseAppearance(req.appearance || state.appearance),
     tuning: req.tuning || activeTuning(),
   };
   stopFriendWave();
+  state.friendCinematicPlaying = false;
   trailPlayer.reset(); state.trailTime = 0;
   if (r.mode === 'lookalike') r.headingMode = 'auto';
   if (r.mode === 'grid' && r.gridChallenge === 'lost-compass') r.headingMode = 'auto';
@@ -186,6 +233,7 @@ async function load(req) {
   $('grid-challenge').value = r.gridChallenge;
   $('friend-challenge').value = r.friendChallenge;
   $('friend-answer').value = r.friendAnswer;
+  $('friend-skin').value = r.friendSkin;
   $('movement').value = r.movement;
   state.appearance = r.appearance; syncAppearanceControls();
   syncControls();
@@ -232,6 +280,7 @@ function updateHash() {
   else if (q.mode === 'friend') {
     parts.push('m=friend');
     if (usesGrid(q)) parts.push('fa=grid', `g=${q.grid.size}`);
+    if (q.friend.skin === 'conquest') parts.push('fs=conquest');
     if (q.friend.challenge !== 'standard') parts.push(`fc=${q.friend.challenge}`);
     if (q.headingChoice !== 'auto') parts.push(`h=${q.headingChoice}`);
   }
@@ -270,6 +319,8 @@ function show(quiz) {
   state.chosen = null;
   state.viewing = null;
   state.friendZoom = false;
+  state.friendCinematicTime = 0;
+  state.friendCinematicPlaying = quiz.mode === 'friend' && quiz.friend.skin === 'conquest';
   state.trailTime = 0; trailPlayer.reset(quiz.trail?.duration || 12);
   $('trail-tools').hidden = quiz.mode !== 'trail';
   $('trail-legend').hidden = quiz.mode !== 'trail';
@@ -279,6 +330,7 @@ function show(quiz) {
     : 'Orange jacket · 1.80 m tall · your viewpoint stays fixed';
   $('friend-zoom').textContent = 'Zoom 3×';
   $('friend-zoom').setAttribute('aria-pressed', 'false');
+  syncFriendAppearance();
   const t = quiz.terrain;
   state.model = new TerrainModel({ size: t.size, n: t.n, heights: t.heights, seed: t.modelSeed });
 
@@ -294,8 +346,8 @@ function show(quiz) {
     : grid ? `${friendGrid ? "Locate your friend's cell" : 'Find your cell'}: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size} (row + column, e.g. B3).`
     : quiz.mode === 'trail' ? 'Which trail did you follow: A red, B green or C cyan? All three traces advance together. Match the slopes, ridges and hollows in the moving view. Circles mark the starts; arrows mark the ends.'
     : quiz.mode === 'friend' ? quiz.friend.observerHidden
-      ? `Where is the person in the orange jacket: A, B or C? Your position is unmarked. All three spots fit his distance and apparent size; use the skyline, slopes and hollows to locate him.${quiz.friend.challenge === 'depth-trap' ? ' Depth trap also matches his vertical angle more closely.' : ''}`
-      : `You stand at YOU. Where is the person in the orange jacket: A, B or C?${quiz.friend.challenge === 'depth-trap' ? ' All three spots share a bearing — compare distance, apparent size and slope.' : ' Match his position to the surrounding terrain.'}`
+      ? `Where is your friend: A, B or C? Your position is unmarked. All three spots fit his distance and apparent size; use the skyline, slopes and hollows to locate him.${quiz.friend.challenge === 'depth-trap' ? ' Depth trap also matches his vertical angle more closely.' : ''}`
+      : `You stand at YOU. Where is your friend: A, B or C?${quiz.friend.challenge === 'depth-trap' ? ' All three spots share a bearing — compare distance, apparent size and slope.' : ' Match his position to the surrounding terrain.'}`
     : 'You are at one of the marked points, facing the direction shown. Which one?';
   $('prompt').classList.toggle('grid-remark', grid);
   (grid ? document.querySelector('.map-wrap') : document.querySelector('.answer-row')).before($('prompt'));
@@ -326,6 +378,7 @@ function show(quiz) {
   renderFacts();
   setLoading(false);
   setAnswersEnabled(true);
+  if (quiz.mode === 'friend' && quiz.friend.skin === 'conquest') startFriendArrival();
   if (quiz.mode === 'trail' && renderer && !window.matchMedia('(prefers-reduced-motion: reduce)').matches && !document.hidden) trailPlayer.play();
 }
 
@@ -384,10 +437,12 @@ function renderAnswerButtons() {
 
 function renderScene(camera, playback = {}) {
   if (!renderer) return;
+  let friendPerson = null;
   if (state.quiz.mode === 'friend') {
     const o = state.quiz.options.find((p) => p.label === state.viewing);
-    renderer.setPerson(o ? { ...state.quiz.friend, x: o.x, y: o.y, z: o.z, heading: (o.bearing + 180) % 360 } : state.quiz.friend);
-    if (state.friendZoom) camera = { ...camera, fov: 2 * Math.atan(Math.tan(camera.fov * Math.PI / 360) / 3) * 180 / Math.PI };
+    friendPerson = o ? { ...state.quiz.friend, x: o.x, y: o.y, z: o.z, heading: (o.bearing + 180) % 360 } : state.quiz.friend;
+    renderer.setPerson(friendPerson);
+    if (state.friendZoom && !state.friendCinematicPlaying) camera = { ...camera, fov: 2 * Math.atan(Math.tan(camera.fov * Math.PI / 360) / 3) * 180 / Math.PI };
   }
   if (state.quiz.mode === 'trail') {
     const frame = trailFrame(state.quiz, state.trailTime, state.viewing || state.quiz.correctLabel, state.model);
@@ -405,8 +460,12 @@ function renderScene(camera, playback = {}) {
   } else {
     const elapsed = state.quiz.mode === 'friend' && state.friendZoom ? Math.max(0, (performance.now() - friendWaveStart) / 1000) : 0;
     const lift = Math.min(1, elapsed / .35);
-    renderer.setViewmodel(null); renderer.render(camera, { time: elapsed,
-      personMotion: { wave: state.friendZoom && state.quiz.mode === 'friend' ? lift * lift * (3 - 2 * lift) : 0 } });
+    const conquest = friendPerson?.skin === 'conquest';
+    const frame = conquest ? friendSceneFrame(state.quiz, state.friendCinematicTime,
+      state.friendCinematicPlaying || state.friendCinematicTime > 0, { camera, person: friendPerson }) : null;
+    if (frame) camera = frame.camera;
+    renderer.setViewmodel(null); renderer.render(camera, { time: conquest ? state.friendCinematicTime : elapsed,
+      personMotion: frame ? frame.personMotion : { wave: state.friendZoom && state.quiz.mode === 'friend' ? lift * lift * (3 - 2 * lift) : 0 } });
   }
   // In "Which way?" the bearing tape would give the answer away.
   const tapeAllowed = !headingHidden(state.quiz) || state.answered;
@@ -429,6 +488,7 @@ $('friend-zoom').addEventListener('click', () => {
   if (state.loading || state.quiz?.mode !== 'friend') return;
   state.friendZoom = !state.friendZoom;
   stopFriendWave();
+  if (state.quiz.friend.skin === 'conquest') { state.friendCinematicPlaying = false; state.friendCinematicTime = 15; }
   friendWaveStart = performance.now();
   $('friend-zoom').setAttribute('aria-pressed', String(state.friendZoom));
   $('friend-zoom').textContent = state.friendZoom ? 'Overview 1×' : 'Zoom 3×';
@@ -539,7 +599,7 @@ function showFriendGridResult(label, right) {
   res.hidden = false;
   res.innerHTML = `<div class="verdict ${right ? 'good' : 'bad'}">${right ? 'Correct' : 'Not quite'} — your friend was in ${q.correctLabel}.</div>
     <p>${right ? '' : `You selected ${label}. `}The green cell contains your friend; FRIEND marks his exact position. YOU marks your observation point.</p>
-    <p class="note">Cell references locate the person in the orange jacket. He can stand anywhere inside a cell. Use the terrain, bearing and his apparent size from your original viewpoint.</p>
+    <p class="note">Cell references locate your friend. He can stand anywhere inside a cell. Use the terrain, bearing and his apparent size from your original viewpoint.</p>
     <button type="button" class="btn primary" id="next">Next quiz (N)</button>`;
   $('grid-help').textContent = `Your answer: ${label} · friend's cell: ${q.correctLabel}`;
   $('next').addEventListener('click', newQuiz);
@@ -1057,6 +1117,7 @@ function parseHash() {
     gridChallenge: normaliseGridChallenge(p.get('gc')),
     friendChallenge: normaliseFriendChallenge(p.get('fc')),
     friendAnswer: normaliseFriendAnswer(p.get('fa')),
+    friendSkin: normaliseFriendSkin(p.get('fs')),
     movement: normaliseMovement(p.get('mv')),
     appearance: p.get('m') === 'trail' ? normaliseAppearance({ knife: p.get('k'), scale: p.get('ks') === null ? 1 : Number(p.get('ks')), handedness: p.get('hand') }) : null,
     direction: DIRECTIONS.some((d) => d.label === p.get('dir')) ? p.get('dir') : 'auto',
@@ -1072,7 +1133,7 @@ window.addEventListener('hashchange', () => {
     || h.mode !== q?.mode || h.headingMode !== (q?.headingChoice || 'auto')
     || (h.mode === 'lookalike' && h.direction !== q?.directionChoice)
     || (h.mode === 'trail' && (h.movement !== q?.trail?.movement || JSON.stringify(h.appearance) !== JSON.stringify(q?.appearance)))
-    || (h.mode === 'friend' && (h.friendChallenge !== q?.friend?.challenge || h.friendAnswer !== q?.friend?.answerMode
+    || (h.mode === 'friend' && (h.friendSkin !== q?.friend?.skin || h.friendChallenge !== q?.friend?.challenge || h.friendAnswer !== q?.friend?.answerMode
       || (h.friendAnswer === 'grid' && h.gridSize !== q?.grid?.size)))
     || (h.mode === 'grid' && (h.gridSize !== q?.grid?.size || h.gridChallenge !== q?.grid?.challenge))
     || encodeTuning(h.tuning || {}) !== encodeTuning(q?.tuning || {}))) { adoptLinkTuning(h.tuning); load({ ...h, difficulty: h.difficulty || 'medium' }); }
@@ -1172,6 +1233,7 @@ $('friend-challenge').value = normaliseFriendChallenge(store.get('otq.friend', '
 $('friend-challenge').addEventListener('change', () => store.set('otq.friend', $('friend-challenge').value));
 $('friend-answer').value = normaliseFriendAnswer(store.get('otq.friendAnswer', 'point'));
 $('friend-answer').addEventListener('change', () => store.set('otq.friendAnswer', $('friend-answer').value));
+$('friend-skin').value = normaliseFriendSkin(store.get('otq.friendSkin', 'classic'));
 const initial = parseHash();
 adoptLinkTuning(initial.tuning);
 renderDevPanel();

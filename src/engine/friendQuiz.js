@@ -10,6 +10,7 @@ import { descriptorDistance } from './skyline.js';
 import { distinguishingCue } from './quizCandidates.js';
 import { DEG, saturate, angleDiff, wrap360 } from './grid.js';
 import { normaliseGridSize, gridCells, cellAtExtent } from './gridQuiz.js';
+import { normaliseFriendSkin } from './friendAppearance.js';
 
 export const FRIEND_HEIGHT = 1.8;
 export const normaliseFriendChallenge = (value) => value === 'depth-trap' ? value : 'standard';
@@ -57,6 +58,7 @@ export function friendOptionCamera(quiz, option) {
 export function generateFriendQuiz(opts) {
   const quiz = opts.difficulty === 'easy' ? generateKnownFriendQuiz(opts) : generateTerrainFriendQuiz(opts);
   quiz.friend.answerMode = normaliseFriendAnswer(opts.friendAnswer);
+  quiz.friend.skin = normaliseFriendSkin(opts.friendSkin);
   if (quiz.friend.answerMode !== 'grid') return quiz;
   const size = normaliseGridSize(opts.gridSize), extent = quiz.mapExtent;
   const correctLabel = cellAtExtent(quiz.friend.x, quiz.friend.y, extent, size);

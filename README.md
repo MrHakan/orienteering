@@ -74,6 +74,8 @@ Open **Export for Instagram**; the dialog previews the 15 s loop with the event.
 
 **Where is your friend?** shows a small 3D person from your own viewpoint. Choose **Point — A / B / C** or **Grid — cell reference** to answer. Grid supports 4 × 4, 6 × 6, 8 × 8 and 16 × 16: tap or type the friend's cell, then check; the answer shows his exact position and your observation point. Easy marks where you stand as YOU. Medium and above hide the observer and give each A/B/C target a plausible observation point with the same range, bearing and apparent body size. Match the skyline and intervening slopes to locate him. Expert and Master also use similar target landforms; **Depth trap** tightens the elevation-angle match. **Zoom 3×** helps inspect the sighting. After answering, YOU is revealed and Point comparisons show each possible observer view. See [the friend mode guide](docs/friend-mode.md).
 
+In Friend mode, **Friend character → Conquest** adds a slow-motion arrival using the supplied transparent artwork. After the first 3 seconds and the normal zoom, Conquest descends from above while the view follows him, then returns for the answer. Selection works with Point, Grid, replay links (`fs=conquest`) and PNG/video exports. **Replay arrival** repeats the scene.
+
 ## Bunny-hop trails
 
 **Mode → Bunny-hop trails** (`&m=trail`) plays a 12-second first-person run over the terrain. Choose which map trail you followed: **A red, B green or C cyan**. All three have the same shape, speed and steering; their moving terrain views are matched pairwise so the skyline and nearby slopes decide the answer. After answering, replay each route or compare the specific time and bearing that rules it out.

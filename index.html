@@ -123,7 +123,15 @@
 
       <div id="friend-tools" class="friend-tools" hidden>
         <span id="friend-status">Orange jacket · 1.80 m tall · locate him using the terrain</span>
-        <button type="button" class="btn ghost small" id="friend-zoom" aria-pressed="false">Zoom 3×</button>
+        <div class="friend-actions">
+          <button type="button" class="btn ghost small" id="friend-arrival" hidden>Replay arrival</button>
+          <button type="button" class="btn ghost small" id="friend-zoom" aria-pressed="false">Zoom 3×</button>
+        </div>
+        <details class="friend-customise">
+          <summary>Friend character</summary>
+          <label class="field"><span>Character</span><select id="friend-skin" aria-label="Friend character"></select></label>
+          <p class="note" id="friend-skin-note">Your friend waves when you zoom in.</p>
+        </details>
       </div>
       <div id="trail-tools" class="trail-tools" hidden>
         <div class="trail-playback">

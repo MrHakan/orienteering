@@ -4,6 +4,7 @@
 // GL axes: X = east, Y = up, Z = -north.
 import { personVertices } from './personMesh.js';
 import { KnifeViewModel } from './knifeViewModel.js';
+import { FriendSprite } from './friendSprite.js';
 
 const PERSON_VERT = `
 attribute vec3 aPos;
@@ -231,7 +232,10 @@ export class TerrainRenderer {
   }
 
   setPerson(person = null) {
-    if (person && this.person && ['x', 'y', 'z', 'height', 'heading'].every(k => person[k] === this.person[k])) return;
+    if (person?.skin === 'conquest' && !this.friendSprite) this.friendSprite = new FriendSprite(this.gl, () => {
+      if (this.lastFrame) this.render(this.lastFrame.camera, this.lastFrame.options);
+    });
+    if (person && this.person && ['x', 'y', 'z', 'height', 'heading', 'skin'].every(k => person[k] === this.person[k])) return;
     this.person = person;
     if (!person) { this.personCount = 0; return; }
     this.personPose = null;
@@ -250,7 +254,11 @@ export class TerrainRenderer {
     this.personPose = { wave, time };
   }
 
-  drawPerson(projection, view, eye, sun, horizon, fogDensity) {
+  drawPerson(projection, view, eye, sun, horizon, fogDensity, camera) {
+    if (this.person?.skin === 'conquest' && this.personMotion?.sprite && this.friendSprite?.loaded) {
+      this.friendSprite.render(this.person, this.personMotion, projection, view, camera, eye, horizon, fogDensity);
+      return;
+    }
     if (!this.personCount) return;
     const gl = this.gl, p = this.personProg;
     gl.useProgram(p);
@@ -360,6 +368,7 @@ export class TerrainRenderer {
   render(camera, { weather = {}, time = 0, motion = {}, personMotion = {}, sunHeading = camera.heading } = {}) {
     if (!this.model) return;
     this.lastFrame = { camera, options: { weather, time, motion, personMotion, sunHeading } };
+    this.personMotion = personMotion;
     this.updatePersonMotion({ wave: personMotion.wave, time });
     this.resize();
     const gl = this.gl, m = this.model;
@@ -444,7 +453,7 @@ export class TerrainRenderer {
       }
       gl.disableVertexAttribArray(aPos);
       gl.disableVertexAttribArray(aNor);
-      this.drawPerson(projection, view, eye, sun, horizon, fogDensity);
+      this.drawPerson(projection, view, eye, sun, horizon, fogDensity, camera);
     }
     if (this.viewmodelEnabled) this.viewmodel.render(W, H, time, motion);
   }

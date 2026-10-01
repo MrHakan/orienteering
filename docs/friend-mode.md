@@ -2,6 +2,12 @@
 
 Choose **Where is your friend?** in Mode. The orange-jacketed, 1.80 m person is seen from your own observation point. Choose his map position at A, B or C.
 
+Open **Friend character** below the view to choose **Classic — waving friend** or **Conquest — slow-motion arrival**. Conquest uses the supplied transparent artwork as a camera-facing cutout in the world, with the same physical height and terrain occlusion as the original friend. Character selection keeps the terrain, target position and correct answer; it is remembered and included in replay links as `fs=conquest`.
+
+Conquest's arrival plays automatically when selected and can be repeated with **Replay arrival**. The 15-second sequence starts with the familiar friend at the landing point: 0–3 s gives time to read the terrain; 3–5 s zooms normally to 3×; 5–10 s brings Conquest down slowly from 24 metres above the same point. The camera turns and tilts to keep him in focus from the fixed observer, holds the landing briefly, then returns to the original view by 12 s for the answer. The map always refers to the landing cell or point. **Zoom 3×** can also skip the arrival and inspect the landed artwork. PNGs show the landed Conquest; preview and video use the same deterministic arrival in both Point and Grid.
+
+Example: `#seed=friend-demo&d=easy&m=friend&fa=grid&g=6&fs=conquest`.
+
 Choose **Find friend by → Grid** to locate him by cell reference instead. Pick a **4 × 4**, **6 × 6**, **8 × 8** or **16 × 16** grid, tap his cell or type a code such as `B3`, then press **Check cell**. Selection does not submit immediately. Rows run north to south and columns west to east; references follow the terrain when the map rotates. Only the edge headers carry labels, leaving the contours inside each cell clear. The instruction appears once, between the view and map, in the app and in PNG/video exports.
 
 Grid scores the cell containing **your friend**, not the observer. The person keeps his real world position and may stand anywhere inside a cell. The answer highlights his cell green, a wrong choice red, and marks his exact location **FRIEND** alongside the observer **YOU**. Zoom remains available from the original viewpoint. Easy's grid covers the local map; higher levels cover the fixed full terrain. Point and Grid use the same qualified sighting and visibility checks, with Grid replacing the three marked choices with map cells.
@@ -14,17 +20,19 @@ Replay links include `fa=grid&g=4|6|8|16`, for example `#seed=friend-demo&d=medi
 - **Medium and above** leave your position unmarked until the answer. All three candidate targets have plausible observation points at the same range and bearing, with almost identical apparent body heights. Distance alone cannot eliminate a letter: match the skyline, slopes and hollows to infer where you stand and where your friend is.
 - Higher levels search more viewpoints and choose more similar terrain. **Expert and Master** also match the target's landform group (for example, valley/re-entrant). Every wrong view still has a visible terrain difference.
 - **Depth trap** tightens the elevation-angle tolerance from 0.5° to 0.25° at Medium and above. At Easy, it aligns the targets on a common bearing.
-- **Zoom 3×** changes the lens while keeping the observer, heading and pitch fixed. Your friend raises his right hand and waves while zoomed in, then lowers his arm on returning to 1×. This works in both Point and Grid. The human remains a physical 1.80 m mesh.
+- **Classic Zoom 3×** changes the lens while keeping the observer, heading and pitch fixed. Your friend raises his right hand and waves while zoomed in, then lowers his arm on returning to 1×. This works in both Point and Grid. The human remains a physical 1.80 m mesh.
 - After answering, **YOU** marks the real observer. At Medium and above, **Friend at A/B/C** shows what you would see from the plausible observation point for each target. These remain observer views looking towards the person, never the person's own view. The map shows the observation point for the active comparison; the answer table describes the distinguishing skyline clue.
 - **New positions** changes the observer and candidates on the same seeded terrain. Replay links record mode, challenge (`fc=depth-trap`), difficulty, variant and heading style. Letter scrambling preserves all world positions.
 - Image and video exports use the same question rules: hidden observers remain hidden on the question map and appear on the answer map.
-- **Video zoom:** 0–3 s at 1×; 3–5 s gradually zooms to 3×; 5–8 s holds at 3×; 8–10 s gradually returns to 1×. Your friend raises, waves and lowers his arm with that same timeline, including preview and encoded video. The last 3 seconds use the original view for the answer reveal. PNGs remain at 1× with his arm resting.
+- **Classic video zoom:** 0–3 s at 1×; 3–5 s gradually zooms to 3×; 5–8 s holds at 3×; 8–10 s gradually returns to 1×. Your friend raises, waves and lowers his arm with that same timeline, including preview and encoded video. The last 3 seconds use the original view for the answer reveal. PNGs remain at 1× with his arm resting.
 
 Example: `#seed=friend-demo&d=master&m=friend&fc=depth-trap`.
 
 ## Geometry and fairness
 
-The person is a WebGL triangle mesh with a cap, head, torso, two arms, two legs and boots. His height is in metres, with no artificial scaling. The terrain's projection and depth buffer determine his appearance.
+The Classic friend is a WebGL triangle mesh with a cap, head, torso, two arms, two legs and boots. His height is in metres, with no artificial scaling. The terrain's projection and depth buffer determine his appearance.
+
+The Conquest cutout shares the projection and depth buffer in both render passes. Transparent pixels leave the terrain visible, and foreground ridges can hide him. Its final ground position and height preserve the qualified sighting; only the arrival's altitude and camera direction are animated.
 
 Placement and visibility sample the same planar triangles as the rendered ground. Every target and observation point must be on a walkable slope (≤26°), and the person must be visible at ankle, torso and head height.
 
@@ -41,3 +49,5 @@ Easy retains the introductory geometry: three distance bands, a local map contai
 `test/friend-quiz.test.js` covers all difficulties and both challenges, replay, variants, scrambling, map transforms, physical mesh dimensions, terrain occlusion, and hiding/revealing YOU in exports. A separate 15-question session checks that every letter admits the same distance and bearing with less than 1% apparent-height difference, while keeping a visible terrain clue.
 
 `test/friend-grid.test.js` checks both map extents, all grid sizes, subject-cell scoring, rotated selection, exact answer markers and replay. `scripts/check-friend-grid-browser.mjs` checks desktop/mobile controls, Point/Grid switching, input validation, rejecting the observer's cell, touch selection, hash changes, PNGs and actual encoded video in both formats against the assembled release.
+
+`test/friend-conquest.test.js` checks the arrival timing, camera tracking, deterministic seeking and unchanged answers. `scripts/check-friend-conquest-browser.mjs` checks selection, replay, mobile links, the actual artwork, PNG/video exports and occlusion by a foreground ridge.

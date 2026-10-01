@@ -52,6 +52,10 @@ jobs:
         env:
           CHECK_SITE: _site
         run: node scripts/check-friend-grid-browser.mjs browser-artifacts
+      - name: Test Conquest arrival in Chromium
+        env:
+          CHECK_SITE: _site
+        run: node scripts/check-friend-conquest-browser.mjs browser-artifacts
       - uses: actions/upload-artifact@v4
         if: always()
         with:

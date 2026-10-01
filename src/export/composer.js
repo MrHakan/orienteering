@@ -10,7 +10,7 @@ import { skylineScreenPoints } from '../render/skylineOverlay.js';
 import { createEasterEgg } from '../easter/index.js';
 import { Random } from '../engine/rng.js';
 import { headingHidden } from '../engine/gridQuiz.js';
-import { exportCamera, friendVideoZoom } from './friendZoom.js';
+import { friendSceneFrame } from './friendZoom.js';
 import { friendObserver } from '../engine/friendQuiz.js';
 import { trailFrame } from '../engine/trailMotion.js';
 
@@ -181,7 +181,8 @@ export class ExportComposer {
   drawFrame(t = 0, { reveal = false } = {}) {
     const { ctx, layout: L, quiz: q } = this;
     const frame = q.mode === 'trail' ? trailFrame(q, t, q.correctLabel, this.model) : null;
-    const camera = frame ? frame.camera : exportCamera(q, t, this.animated);
+    const friendFrame = friendSceneFrame(q, t, this.animated);
+    const camera = frame ? frame.camera : friendFrame.camera;
     const W = this.canvas.width, H = this.canvas.height;
     const duration = this.options.duration;
     ctx.save();
@@ -205,7 +206,7 @@ export class ExportComposer {
     // Scene.
     const S = L.scene;
     this.renderer.render(camera, { weather: this.weather, time: frame ? frame.motion.t : t,
-      personMotion: { wave: q.mode === 'friend' && this.animated ? (friendVideoZoom(t) - 1) / 2 : 0 },
+      personMotion: friendFrame.personMotion,
       motion: frame ? { ...frame.motion, clockRunning: this.animated } : {}, sunHeading: q.mode === 'trail' ? q.camera.heading : camera.heading });
     ctx.drawImage(this.glCanvas, S.x, S.y, S.w, S.h);
     ctx.save();
@@ -263,7 +264,7 @@ export class ExportComposer {
     // Inactive (and untouched) outside an event and after the fade-out.
     if (this.easter) {
       // Sky objects must still disappear behind the terrain as the lens zooms.
-      if (this.easterFov !== camera.fov || (q.mode === 'trail' && this.easterCameraKey !== JSON.stringify(camera))) {
+      if (this.easterFov !== camera.fov || (['trail', 'friend'].includes(q.mode) && this.easterCameraKey !== JSON.stringify(camera))) {
         this.easter.stage.setSkyline(skylineScreenPoints(camera, this.model, S.w, S.h));
         this.easterFov = camera.fov;
         this.easterCameraKey = JSON.stringify(camera);
@@ -315,10 +316,12 @@ export class ExportComposer {
 
   dispose() {
     this.renderer.viewmodel?.dispose();
+    this.renderer.friendSprite?.dispose();
     this.renderer.gl.getExtension('WEBGL_lose_context')?.loseContext();
   }
 
   async drawFrameReady(time = 0, options = {}) {
+    if (this.quiz.mode === 'friend' && this.quiz.friend.skin === 'conquest') await this.renderer.friendSprite?.ready;
     if (this.quiz.mode === 'trail') {
       const frame = trailFrame(this.quiz, time, this.quiz.correctLabel, this.model);
       await this.renderer.prepareViewmodel?.(frame.motion.t, frame.motion);
