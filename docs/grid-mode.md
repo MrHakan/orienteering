@@ -74,17 +74,19 @@ another camera question.
 
 Examples:
 
+- `#seed=grid-check&d=medium&m=grid&g=6`
 - `#seed=grid-check&d=medium&m=grid&g=8`
 - `#seed=grid-check&d=medium&m=grid&g=16&gc=lost-compass`
 
 PNG and video exports use the same grid and give a short instruction such as
-“Find your cell: A1–P16.” They do not list 256 options. Question frames hide the
+“Find your cell: A1–P16.” between the view and map. The answer replaces that
+remark on reveal. Question frames hide the
 origin; answer frames highlight the true cell. Lost compass exports also hide
 the heading and tape before the reveal, even when the export tape setting is on.
 
 ## Validation
 
 `npm test` includes coordinate boundaries, input validation, rotated pointer
-selection, all three grid sizes with both challenges, deterministic replay,
+selection, all four grid sizes with both challenges, deterministic replay,
 fixed references across variants, heading overrides, all-direction comparison,
 short captions and refusal to emit an unvalidated question.
