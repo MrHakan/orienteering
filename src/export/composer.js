@@ -45,6 +45,7 @@ const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 export function captionText(quiz) {
   if (quiz.mode === 'facing') return 'Which way: N, NE, E, SE, S, SW, W or NW?';
   if (quiz.mode === 'trail') return 'Which trail: A red, B green or C cyan?';
+  if (quiz.mode === 'friend' && quiz.grid) return `Find your friend's cell: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size}.`;
   if (quiz.mode === 'grid') return `Find your cell: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size}.`;
   const labels = quiz.options.map((o) => o.label);
   const list = labels.length > 1 ? `${labels.slice(0, -1).join(', ')} or ${labels[labels.length - 1]}` : labels[0];
@@ -146,7 +147,7 @@ export class ExportComposer {
       const c = document.createElement('canvas');
       const mr = new MapRenderer(c, { fixedSize: { width: s / 2, height: s / 2, dpr: 2 } });
       mr.setData({ model: this.model, interval: q.terrain.contourInterval, options: quizMarkers(q), rotation: this.options.northUp ? 0 : q.mapRotation, landmarks: q.landmarks,
-        grid: q.mode === 'grid' ? { ...q.grid, correctLabel: q.correctLabel } : null,
+        grid: q.grid ? { ...q.grid, correctLabel: q.correctLabel } : null,
         extent: q.mapExtent || null, trails: q.mode === 'trail', trailDuration: q.trail?.duration, observer: friendObserver(q), friendMode: q.mode === 'friend' });
       if (q.mode === 'trail') {
         if (reveal) this.trailRevealMap = mr;

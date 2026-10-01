@@ -13,6 +13,12 @@ export const GRID_SIZES = [4, 8, 16];
 export const normaliseGridSize = (value) => GRID_SIZES.includes(Number(value)) ? Number(value) : 4;
 export const normaliseGridChallenge = (value) => value === 'lost-compass' ? value : 'standard';
 export const headingHidden = (quiz) => quiz.mode === 'facing' || (quiz.mode === 'grid' && quiz.grid.challenge === 'lost-compass');
+export const usesGrid = (quiz) => !!quiz?.grid;
+
+/** References belong to the displayed map extent, including local friend maps. */
+export function cellAtExtent(x, y, extent, divisions) {
+  return cellAt(x - extent.x + extent.size / 2, y - extent.y + extent.size / 2, extent.size, divisions);
+}
 
 export function gridCells(size, divisions) {
   const n = normaliseGridSize(divisions), step = size / n;

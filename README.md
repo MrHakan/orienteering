@@ -72,7 +72,7 @@ Open **Export for Instagram**; the dialog previews the 15 s loop with the event.
 
 ## Friend location mode
 
-**Where is your friend?** shows a small 3D person from your own viewpoint. Easy marks where you stand as YOU. Medium and above hide the observer and give each A/B/C target a plausible observation point with the same range, bearing and apparent body size. Match the skyline and intervening slopes to locate him. Expert and Master also use similar target landforms; **Depth trap** tightens the elevation-angle match. **Zoom 3×** helps inspect the sighting. After answering, YOU is revealed and comparisons show each possible observer view. See [the friend mode guide](docs/friend-mode.md).
+**Where is your friend?** shows a small 3D person from your own viewpoint. Choose **Point — A / B / C** or **Grid — cell reference** to answer. Grid supports 4 × 4, 8 × 8 and 16 × 16: tap or type the friend's cell, then check; the answer shows his exact position and your observation point. Easy marks where you stand as YOU. Medium and above hide the observer and give each A/B/C target a plausible observation point with the same range, bearing and apparent body size. Match the skyline and intervening slopes to locate him. Expert and Master also use similar target landforms; **Depth trap** tightens the elevation-angle match. **Zoom 3×** helps inspect the sighting. After answering, YOU is revealed and Point comparisons show each possible observer view. See [the friend mode guide](docs/friend-mode.md).
 
 ## Bunny-hop trails
 

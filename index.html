@@ -73,6 +73,13 @@
           <option value="lost-compass">Lost compass — surprise challenge</option>
         </select>
       </label>
+      <label class="field" id="friend-answer-field" hidden>
+        <span>Find friend by</span>
+        <select id="friend-answer" aria-label="Find friend by">
+          <option value="point">Point — A / B / C</option>
+          <option value="grid">Grid — cell reference</option>
+        </select>
+      </label>
       <label class="field" id="friend-challenge-field" hidden>
         <span>Friend challenge</span>
         <select id="friend-challenge" aria-label="Friend challenge">
@@ -155,7 +162,7 @@
         </button>
       </div>
       <form class="grid-answer" id="grid-answer" hidden>
-        <label class="field" for="grid-cell"><span>Your cell</span>
+        <label class="field" for="grid-cell"><span id="grid-cell-label">Your cell</span>
           <input id="grid-cell" type="text" placeholder="e.g. B3" maxlength="4" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-describedby="grid-help">
         </label>
         <button type="submit" class="btn primary" id="grid-submit">Check cell</button>

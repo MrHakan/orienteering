@@ -9,9 +9,11 @@ import { surfaceElevation, surfaceLineOfSight } from './terrainSurface.js';
 import { descriptorDistance } from './skyline.js';
 import { distinguishingCue } from './quizCandidates.js';
 import { DEG, saturate, angleDiff, wrap360 } from './grid.js';
+import { normaliseGridSize, gridCells, cellAtExtent } from './gridQuiz.js';
 
 export const FRIEND_HEIGHT = 1.8;
 export const normaliseFriendChallenge = (value) => value === 'depth-trap' ? value : 'standard';
+export const normaliseFriendAnswer = (value) => value === 'grid' ? 'grid' : 'point';
 
 export function personSight(model, observer, point) {
   const distance = Math.hypot(point.x - observer.x, point.y - observer.y);
@@ -53,8 +55,21 @@ export function friendOptionCamera(quiz, option) {
 }
 
 export function generateFriendQuiz(opts) {
-  if (opts.difficulty === 'easy') return generateKnownFriendQuiz(opts);
-  return generateTerrainFriendQuiz(opts);
+  const quiz = opts.difficulty === 'easy' ? generateKnownFriendQuiz(opts) : generateTerrainFriendQuiz(opts);
+  quiz.friend.answerMode = normaliseFriendAnswer(opts.friendAnswer);
+  if (quiz.friend.answerMode !== 'grid') return quiz;
+  const size = normaliseGridSize(opts.gridSize), extent = quiz.mapExtent;
+  const correctLabel = cellAtExtent(quiz.friend.x, quiz.friend.y, extent, size);
+  // Keep the qualified sighting and its terrain matches intact. Grid answers
+  // locate the actual person, who need not stand at a cell centre.
+  quiz.friend.matches = quiz.options;
+  quiz.grid = { size, origin: 'friend-position', cellMetres: extent.size / size,
+    target: { x: quiz.friend.x, y: quiz.friend.y } };
+  quiz.options = gridCells(extent.size, size).map(p => ({ ...p,
+    x: p.x + extent.x - extent.size / 2, y: p.y + extent.y - extent.size / 2,
+    correct: p.label === correctLabel }));
+  quiz.correctLabel = correctLabel;
+  return quiz;
 }
 
 // Each answer has a physically valid observation point at the SAME range and
