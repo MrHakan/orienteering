@@ -10,7 +10,7 @@ import { skylineScreenPoints } from '../render/skylineOverlay.js';
 import { createEasterEgg } from '../easter/index.js';
 import { Random } from '../engine/rng.js';
 import { headingHidden } from '../engine/gridQuiz.js';
-import { exportCamera } from './friendZoom.js';
+import { exportCamera, friendVideoZoom } from './friendZoom.js';
 import { friendObserver } from '../engine/friendQuiz.js';
 import { trailFrame } from '../engine/trailMotion.js';
 
@@ -205,6 +205,7 @@ export class ExportComposer {
     // Scene.
     const S = L.scene;
     this.renderer.render(camera, { weather: this.weather, time: frame ? frame.motion.t : t,
+      personMotion: { wave: q.mode === 'friend' && this.animated ? (friendVideoZoom(t) - 1) / 2 : 0 },
       motion: frame ? { ...frame.motion, clockRunning: this.animated } : {}, sunHeading: q.mode === 'trail' ? q.camera.heading : camera.heading });
     ctx.drawImage(this.glCanvas, S.x, S.y, S.w, S.h);
     ctx.save();

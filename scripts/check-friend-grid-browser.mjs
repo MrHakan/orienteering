@@ -51,8 +51,36 @@ try {
   assert.equal(await page.locator('#result').isVisible(), false);
   assert.equal(await page.locator('#scramble').isVisible(), false);
   await page.keyboard.press('s'); assert.ok(!page.url().includes('&s='));
+  // Observe the actual renderer: zoom must animate, preserve the observer/target,
+  // and stop requesting frames as soon as the player returns to the overview.
+  await page.evaluate(async () => {
+    const src = new URL('../', document.querySelector('script[type="module"]').src);
+    const { TerrainRenderer } = await import(new URL('render/webglTerrain.js', src));
+    window.friendFrames = [];
+    const render = TerrainRenderer.prototype.render;
+    TerrainRenderer.prototype.render = function(camera, options) {
+      const result = render.call(this, camera, options);
+      if (this.canvas.id === 'scene') window.friendFrames.push({ camera, person: this.person, pose: { ...this.personPose } });
+      return result;
+    };
+  });
   await page.locator('#friend-zoom').click(); assert.equal(await page.locator('#friend-zoom').getAttribute('aria-pressed'), 'true');
+  await page.waitForFunction(() => window.friendFrames.filter(f => f.pose.wave === 1).length >= 3);
+  const waveFrames = await page.evaluate(() => window.friendFrames);
+  assert.ok(new Set(waveFrames.map(f => f.pose.time)).size >= 3);
+  for (const frame of waveFrames) {
+    for (const key of ['x', 'y', 'z', 'heading', 'pitch']) assert.equal(frame.camera[key], q.camera[key]);
+    for (const key of ['x', 'y', 'z']) assert.equal(frame.person[key], q.friend[key]);
+  }
+  if (out) {
+    const scene = await page.locator('#scene').evaluate(canvas => canvas.toDataURL());
+    await writeFile(join(out, 'friend-wave-zoom.png'), Buffer.from(scene.split(',')[1], 'base64'));
+  }
   await page.locator('#friend-zoom').click();
+  assert.equal(await page.evaluate(() => window.friendFrames.at(-1).pose.wave), 0);
+  const stopped = await page.evaluate(() => window.friendFrames.length);
+  await page.waitForTimeout(100);
+  assert.equal(await page.evaluate(() => window.friendFrames.length), stopped);
   if (out) await page.locator('.card').screenshot({ path: join(out, 'friend-grid8-question.png') });
   // The observer's cell is a valid but wrong answer: score the friend, not YOU.
   const observerCell = cellAtExtent(q.camera.x, q.camera.y, q.mapExtent, 8);
@@ -121,15 +149,23 @@ try {
       c.ctx.fillText = (...args) => { texts.push(args[0]); positions.push({ text: args[0], y: args[2] }); fillText(...args); };
       await c.toImage(); const question = c.canvas.toDataURL(), questionTexts = [...texts];
       texts.length = 0; await c.toImage({ reveal: true }); const answer = c.canvas.toDataURL(), answerTexts = [...texts];
-      c.animated = true; c.drawFrame(7); c.drawFrame(13, { reveal: true });
-      const clip = await encodeCanvasVideo(c.canvas, t => c.drawFrameReady(t), { duration: .2, fps: 10 });
-      result.push({ format, question, answer, questionTexts, answerTexts, positions, layout: c.layout, correctLabel: q.correctLabel, bytes: clip.blob.size, type: clip.blob.type });
+      c.animated = true; c.drawFrame(7); const waveA = c.glCanvas.toDataURL(), poseA = { ...c.renderer.personPose };
+      c.drawFrame(7.2); const waveB = c.glCanvas.toDataURL();
+      c.drawFrame(7); const replay = c.glCanvas.toDataURL();
+      c.drawFrame(13, { reveal: true }); const resting = c.renderer.personPose.wave;
+      // Encode moving hand frames, rather than the static 1× opening.
+      const clip = await encodeCanvasVideo(c.canvas, t => c.drawFrameReady(t + 7), { duration: .2, fps: 10 });
+      result.push({ format, question, answer, questionTexts, answerTexts, positions, layout: c.layout, correctLabel: q.correctLabel,
+        waveA, waveB, replay, poseA, resting, bytes: clip.blob.size, type: clip.blob.type });
       c.dispose();
     }
     return result;
   });
   for (const e of exports) {
     assert.notEqual(e.question, e.answer);
+    assert.notEqual(e.waveA, e.waveB); // same zoom/camera, visibly different hand pixels
+    assert.equal(e.waveA, e.replay);
+    assert.equal(e.poseA.wave, 1); assert.equal(e.resting, 0);
     const questionRemark = "Find your friend's cell: A1–F6.", answerRemark = `Answer: ${e.correctLabel}`;
     assert.equal(e.questionTexts.filter(text => text === questionRemark).length, 1);
     assert.equal(e.answerTexts.filter(text => text === answerRemark).length, 1);
@@ -139,7 +175,8 @@ try {
     }
     assert.ok(e.bytes > 1000); assert.equal(e.type, 'video/mp4');
     if (out) for (const stage of ['question', 'answer']) await writeFile(join(out, `friend-grid6-export-${e.format}-${stage}.png`), Buffer.from(e[stage].split(',')[1], 'base64'));
+    if (out) await writeFile(join(out, `friend-wave-${e.format}.png`), Buffer.from(e.waveA.split(',')[1], 'base64'));
   }
   assert.deepEqual(errors, []);
-  console.log('Friend grid browser checks passed: 6×6 selection/replay, cropped selection, observer-cell rejection, keyboard input, variants, point switching, mobile touch, hash changes, single remarks, PNGs and encoded video in both formats.');
+  console.log('Friend grid browser checks passed: zoom-triggered waving, animation stop, deterministic hand pixels, 6×6 selection/replay, cropped selection, observer-cell rejection, keyboard input, variants, point switching, mobile touch, hash changes, single remarks, PNGs and encoded video in both formats.');
 } finally { await browser.close(); server.close(); }

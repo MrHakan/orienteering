@@ -56,10 +56,12 @@ test('both export formats use the zoom timeline and PNGs reset to 1x',async()=>{
       c.drawFrame(t,{reveal:t>=12});
       assert.deepEqual(calls.at(-1).camera,exportCamera(quiz,t,true));
       assert.equal(calls.at(-1).options.time,t);
+      assert.equal(calls.at(-1).options.personMotion.wave,(friendVideoZoom(t)-1)/2);
     }
     const png=await c.toImage({time:7});
     assert.equal(png,'png');assert.equal(c.animated,false);
     assert.equal(calls.at(-1).camera,quiz.camera);
+    assert.equal(calls.at(-1).options.personMotion.wave,0);
     c.animated=true;c.drawFrame(7);
     assert.deepEqual(calls.at(-1).camera,exportCamera(quiz,7,true));
   }

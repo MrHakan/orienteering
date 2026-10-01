@@ -46,6 +46,7 @@ const state = {
 };
 
 let renderer = null;
+let friendWaveRaf = 0, friendWaveStart = 0;
 try {
   renderer = new TerrainRenderer($('scene'));
 } catch (err) {
@@ -81,6 +82,20 @@ $('trail-replay').addEventListener('click', () => { if (!state.loading && state.
 $('trail-inspect').addEventListener('click', () => { if (!state.loading && state.quiz?.mode === 'trail') trailPlayer.inspect(); });
 $('trail-scrub').addEventListener('input', () => { if (!state.loading && state.quiz?.mode === 'trail') trailPlayer.seek(Number($('trail-scrub').value)); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && state.quiz?.mode === 'trail') trailPlayer.pause(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopFriendWave(); else scheduleFriendWave(); });
+
+function stopFriendWave() {
+  cancelAnimationFrame(friendWaveRaf); friendWaveRaf = 0;
+}
+function scheduleFriendWave() {
+  if (friendWaveRaf || !renderer || !state.friendZoom || state.quiz?.mode !== 'friend'
+    || state.loading || document.hidden || $('export-dialog').open) return;
+  friendWaveRaf = requestAnimationFrame(() => {
+    friendWaveRaf = 0;
+    renderScene(currentCamera());
+    scheduleFriendWave();
+  });
+}
 
 function syncAppearanceControls() {
   const o = state.appearance;
@@ -158,6 +173,7 @@ async function load(req) {
     appearance: normaliseAppearance(req.appearance || state.appearance),
     tuning: req.tuning || activeTuning(),
   };
+  stopFriendWave();
   trailPlayer.reset(); state.trailTime = 0;
   if (r.mode === 'lookalike') r.headingMode = 'auto';
   if (r.mode === 'grid' && r.gridChallenge === 'lost-compass') r.headingMode = 'auto';
@@ -248,6 +264,7 @@ function syncControls() {
 }
 
 function show(quiz) {
+  stopFriendWave();
   state.quiz = quiz;
   state.answered = false;
   state.chosen = null;
@@ -386,7 +403,10 @@ function renderScene(camera, playback = {}) {
       state.lastTrailMapTime = state.trailTime; state.lastTrailMapLabel = frame.route.label;
     }
   } else {
-    renderer.setViewmodel(null); renderer.render(camera);
+    const elapsed = state.quiz.mode === 'friend' && state.friendZoom ? Math.max(0, (performance.now() - friendWaveStart) / 1000) : 0;
+    const lift = Math.min(1, elapsed / .35);
+    renderer.setViewmodel(null); renderer.render(camera, { time: elapsed,
+      personMotion: { wave: state.friendZoom && state.quiz.mode === 'friend' ? lift * lift * (3 - 2 * lift) : 0 } });
   }
   // In "Which way?" the bearing tape would give the answer away.
   const tapeAllowed = !headingHidden(state.quiz) || state.answered;
@@ -408,9 +428,12 @@ function renderScene(camera, playback = {}) {
 $('friend-zoom').addEventListener('click', () => {
   if (state.loading || state.quiz?.mode !== 'friend') return;
   state.friendZoom = !state.friendZoom;
+  stopFriendWave();
+  friendWaveStart = performance.now();
   $('friend-zoom').setAttribute('aria-pressed', String(state.friendZoom));
   $('friend-zoom').textContent = state.friendZoom ? 'Overview 1×' : 'Zoom 3×';
   renderScene(currentCamera());
+  scheduleFriendWave();
 });
 
 // ---------------------------------------------------------------- answering
@@ -891,6 +914,7 @@ function stopPreview() { cancelAnimationFrame(exportUi.raf); }
 
 function openExport() {
   if (!state.quiz || !renderer) return;
+  stopFriendWave();
   if (state.quiz.mode === 'trail') trailPlayer.pause();
   exportUi.now = new Date();
   $('export-easter').innerHTML = EASTER_CHOICES.map((c) => `<option value="${c.value}">${c.label}</option>`).join('');
@@ -923,6 +947,7 @@ function closeExport() {
   exportUi.composer?.dispose();
   exportUi.composer = null;
   $('export-dialog').close();
+  scheduleFriendWave();
 }
 
 function setExportStatus(text) { $('export-status').textContent = text; }

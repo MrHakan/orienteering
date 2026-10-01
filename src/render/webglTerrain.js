@@ -231,12 +231,23 @@ export class TerrainRenderer {
   }
 
   setPerson(person = null) {
+    if (person && this.person && ['x', 'y', 'z', 'height', 'heading'].every(k => person[k] === this.person[k])) return;
     this.person = person;
     if (!person) { this.personCount = 0; return; }
-    const vertices = personVertices(person), gl = this.gl;
+    this.personPose = null;
+    this.updatePersonMotion();
+  }
+
+  updatePersonMotion({ wave = 0, time = 0 } = {}) {
+    if (!this.person) return;
+    wave = Number.isFinite(wave) ? Math.max(0, Math.min(1, wave)) : 0;
+    time = wave && Number.isFinite(time) ? time : 0;
+    if (this.personPose?.wave === wave && this.personPose.time === time) return;
+    const vertices = personVertices(this.person, { wave, time }), gl = this.gl;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.personBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
     this.personCount = vertices.length / 9;
+    this.personPose = { wave, time };
   }
 
   drawPerson(projection, view, eye, sun, horizon, fogDensity) {
@@ -346,9 +357,10 @@ export class TerrainRenderer {
    * weather: { cloud 0..1, wind [east, north] m/s, wet 0..1, fog 0..1 }, time in seconds.
    * Weather is purely visual: it never changes the terrain geometry.
    */
-  render(camera, { weather = {}, time = 0, motion = {}, sunHeading = camera.heading } = {}) {
+  render(camera, { weather = {}, time = 0, motion = {}, personMotion = {}, sunHeading = camera.heading } = {}) {
     if (!this.model) return;
-    this.lastFrame = { camera, options: { weather, time, motion, sunHeading } };
+    this.lastFrame = { camera, options: { weather, time, motion, personMotion, sunHeading } };
+    this.updatePersonMotion({ wave: personMotion.wave, time });
     this.resize();
     const gl = this.gl, m = this.model;
     const W = this.canvas.width, H = this.canvas.height;

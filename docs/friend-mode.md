@@ -14,11 +14,11 @@ Replay links include `fa=grid&g=4|6|8|16`, for example `#seed=friend-demo&d=medi
 - **Medium and above** leave your position unmarked until the answer. All three candidate targets have plausible observation points at the same range and bearing, with almost identical apparent body heights. Distance alone cannot eliminate a letter: match the skyline, slopes and hollows to infer where you stand and where your friend is.
 - Higher levels search more viewpoints and choose more similar terrain. **Expert and Master** also match the target's landform group (for example, valley/re-entrant). Every wrong view still has a visible terrain difference.
 - **Depth trap** tightens the elevation-angle tolerance from 0.5° to 0.25° at Medium and above. At Easy, it aligns the targets on a common bearing.
-- **Zoom 3×** changes the lens while keeping the observer, heading and pitch fixed. The human remains a physical 1.80 m mesh.
+- **Zoom 3×** changes the lens while keeping the observer, heading and pitch fixed. Your friend raises his right hand and waves while zoomed in, then lowers his arm on returning to 1×. This works in both Point and Grid. The human remains a physical 1.80 m mesh.
 - After answering, **YOU** marks the real observer. At Medium and above, **Friend at A/B/C** shows what you would see from the plausible observation point for each target. These remain observer views looking towards the person, never the person's own view. The map shows the observation point for the active comparison; the answer table describes the distinguishing skyline clue.
 - **New positions** changes the observer and candidates on the same seeded terrain. Replay links record mode, challenge (`fc=depth-trap`), difficulty, variant and heading style. Letter scrambling preserves all world positions.
 - Image and video exports use the same question rules: hidden observers remain hidden on the question map and appear on the answer map.
-- **Video zoom:** 0–3 s at 1×; 3–5 s gradually zooms to 3×; 5–8 s holds at 3×; 8–10 s gradually returns to 1×. The last 3 seconds use the original view for the answer reveal. PNGs remain at 1×.
+- **Video zoom:** 0–3 s at 1×; 3–5 s gradually zooms to 3×; 5–8 s holds at 3×; 8–10 s gradually returns to 1×. Your friend raises, waves and lowers his arm with that same timeline, including preview and encoded video. The last 3 seconds use the original view for the answer reveal. PNGs remain at 1× with his arm resting.
 
 Example: `#seed=friend-demo&d=master&m=friend&fc=depth-trap`.
 
