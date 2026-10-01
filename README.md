@@ -173,15 +173,18 @@ by at least 3.4° RMS. Inferring the bearing from the clock and sun therefore
 helps eliminate the similar-looking wrong locations.
 
 The clip lasts **15 seconds**. Location questions lower the camera at 2 seconds
-and show a readable analog wristwatch for three seconds (2.5–5.5 s), then look
-up and check both sides. The sun's world position is independent of the camera:
-it can start to either side, diagonally ahead or behind, and stays off-centre
-during the sun observation. The view returns to its original bearing at 15 s.
+and show a readable analog wristwatch for three seconds (2.5–5.5 s), then raise
+the head at the original bearing. The camera slowly turns directly toward the
+sun, holds it in the centre, and smoothly retraces the turn to the original view
+at 15 s. The sun's world position is independent of the camera: it can start to
+either side, diagonally ahead or behind.
 Replay, pause, Space and the timeline repeat or inspect the sequence.
 
 Friend questions first zoom from 3–5 s. One second after completing the zoom,
 the camera lowers at 6 s and shows the watch for three seconds (6.5–9.5 s), then
-looks up and around. Both point and grid answers (including 6×6) work. Classic
+raises the head toward the friend. From 10.2–12.3 s the camera slowly turns to
+the sun, holds it until 12.9 s, then returns to the friend by 15 s. Both point
+and grid answers (including 6×6) work. Classic
 friends wave at zoom; Conquest's entrance lands before the wrist is raised.
 
 No heading text, bearing tape, tutorial, developer overlay or pre-answer

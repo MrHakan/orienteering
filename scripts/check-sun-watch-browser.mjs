@@ -4,7 +4,7 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generate } from '../src/engine/quiz.js';
-import { sunWatchFrame } from '../src/engine/sunWatch.js';
+import { sunWatchFrame, WATCH_TIMING, FRIEND_WATCH_TIMING } from '../src/engine/sunWatch.js';
 import { friendSceneFrame } from '../src/export/friendZoom.js';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
@@ -52,12 +52,16 @@ try {
   assert.match(await page.locator('#prompt').textContent(), /^You are at A, B or C\. Which one\?$/);
   assert.equal(await page.locator('#open-export').isVisible(), true);
   const hash = new URL(page.url()).hash;
-  for (const t of [0, 2, 2.5, 4, 5.5, 6.4, 7.4, 9, 11, 12, 15]) {
+  for (const t of [0, 2, 2.5, 4, 5.5, 6.4, 8.3, 10.2, 11, 13, 15]) {
     await seek(page, t);
     const actual = await page.evaluate(() => window.sunFrames.at(-1));
     const expected = sunWatchFrame(q, t);
     for (const [key, value] of Object.entries(expected.camera)) assert.ok(Math.abs(actual.camera[key] - value) < 1e-9, `camera ${key} at ${t}`);
     assert.deepEqual(actual.options.watch, expected.watch);
+    if (t >= WATCH_TIMING.aim && t <= WATCH_TIMING.return) {
+      assert.ok(Math.abs(actual.camera.heading - actual.options.solar.azimuth) < 1e-9);
+      assert.ok(Math.abs(actual.camera.pitch - actual.options.solar.altitude) < 1e-9);
+    }
     for (const key of ['azimuth', 'altitude']) assert.ok(Math.abs(actual.options.solar[key] - expected.solar[key]) < 1e-9);
     expected.solar.direction.forEach((value, i) => assert.ok(Math.abs(actual.options.solar.direction[i] - value) < 1e-12));
     assert.equal(await page.locator('#tape').evaluate(c => c.getContext('2d').getImageData(0, 0, c.width, c.height).data.some((v, i) => i % 4 === 3 && v > 0)), false);
@@ -159,18 +163,22 @@ try {
       await page.locator('#friend-skin').selectOption(skin);
       const friend = await generate({ seed: 'sun-places', mode: 'friend', difficulty: 'sun-watch', friendAnswer: answerMode, gridSize: 6, friendSkin: skin });
       assert.equal(await page.locator('#friend-zoom').isVisible(), false);
-      for (const t of [0, 5, 5.5, 6, 6.5, 8, 9.5, 10.2, 13.5, 15]) {
+      for (const t of [0, 5, 5.5, 6, 6.5, 8, 9.5, 10.2, 11.2, 12.3, 12.6, 12.9, 13.9, 15]) {
         await seek(page, t);
         const actual = await page.evaluate(() => window.sunFrames.at(-1));
         const expected = friendSceneFrame(friend, t, true);
         for (const [key, value] of Object.entries(expected.camera)) assert.ok(Math.abs(actual.camera[key] - value) < 1e-9, `friend ${skin} ${answerMode} ${key} at ${t}`);
         assert.deepEqual(actual.options.watch, expected.watch);
+        if (t >= FRIEND_WATCH_TIMING.aim && t <= FRIEND_WATCH_TIMING.return) {
+          assert.ok(Math.abs(actual.camera.heading - actual.options.solar.azimuth) < 1e-9);
+          assert.ok(Math.abs(actual.camera.pitch - actual.options.solar.altitude) < 1e-9);
+        }
         assert.equal(actual.options.personMotion.wave, expected.personMotion.wave);
         assert.equal(actual.options.personMotion.altitude, expected.personMotion.altitude);
         assert.equal(await page.locator('.facing').isVisible(), false);
         assert.equal(await page.locator('#facts').isVisible(), false);
         assert.equal(await page.locator('#scene-error').isVisible(), false);
-        if (out && [5.5, 8, 13.5].includes(t)) await page.locator('.scene-wrap').screenshot({ path: join(out, `sun-friend-${answerMode}-${skin}-${t}.png`) });
+        if (out && [5.5, 8, 12.6].includes(t)) await page.locator('.scene-wrap').screenshot({ path: join(out, `sun-friend-${answerMode}-${skin}-${t}.png`) });
       }
       const plain = { ...friend, terrain: { ...friend.terrain, heights: [...friend.terrain.heights] } };
       const shots = await page.evaluate(async q => {
@@ -182,12 +190,12 @@ try {
         const shots = [];
         for (const format of ['reels', 'post']) {
           const c = new ExportComposer(q, model, { format, tape: true, easterEgg: null }); c.animated = true;
-          for (const t of [5.5, 8, 13.5, 15]) {
+          for (const t of [5.5, 8, 12.6, 13.95, 15]) {
             await c.drawFrameReady(t, { reveal: t >= 12 });
             const expected = friendSceneFrame(q, t, true), actual = c.renderer.lastFrame;
             if (JSON.stringify(actual.camera) !== JSON.stringify(expected.camera)) throw new Error(`Friend export differs at ${t}`);
             if (JSON.stringify(actual.options.watch) !== JSON.stringify(expected.watch)) throw new Error('Friend watch mismatch');
-            if (t === 8 || t === 13.5) shots.push({ format, t, image: c.canvas.toDataURL() });
+            if (t === 8 || t === 12.6) shots.push({ format, t, image: c.canvas.toDataURL() });
           }
           const png = await c.toImage();
           if (png.size < 10000 || c.renderer.lastFrame.options.watch.progress !== 1) throw new Error('Empty/mistimed friend PNG');
@@ -212,5 +220,5 @@ try {
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   if (out) await mobile.screenshot({ path: join(out, 'sun-watch-mobile.png'), fullPage: true });
   await mobile.close(); assert.deepEqual(errors, []);
-  console.log('Sun/watch browser checks passed: difficulty, three locations, 15s video, varied sun bearings, no heading/hints, friend zoom then watch, point/6×6 grid, both skins and export formats, replay/pause, ordinary modes restored, mobile and WebGL 1.');
+  console.log('Sun/watch browser checks passed: difficulty, three locations, 15s video, varied sun bearings, no heading/hints, direct sun turn then return to friend, friend zoom then watch, point/6×6 grid, both skins and export formats, replay/pause, ordinary modes restored, mobile and WebGL 1.');
 } finally { await browser.close(); server.close(); }

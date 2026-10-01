@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { solarPosition, createSunWatch, sunWatchFrame, WATCH_TIMING, FRIEND_WATCH_TIMING, SUN_WATCH_DURATION, usesSunWatch } from '../src/engine/sunWatch.js';
+import { solarPosition, createSunWatch, sunWatchFrame, WATCH_TIMING, FRIEND_WATCH_TIMING, SUN_WATCH_DURATION, usesSunWatch, watchTiming } from '../src/engine/sunWatch.js';
 import { descriptorDistance } from '../src/engine/skyline.js';
 import { compareSunWatchViews } from '../src/engine/sunWatchQuiz.js';
 import { getDifficulty } from '../src/engine/difficulty.js';
@@ -10,7 +10,7 @@ import { cellAtExtent } from '../src/engine/gridQuiz.js';
 import { scrambleLabels } from '../src/engine/scramble.js';
 import { captionText } from '../src/export/composer.js';
 import { watchHandAngles } from '../src/render/watchViewModel.js';
-import { angleDiff } from '../src/engine/grid.js';
+import { angleDiff, wrap360 } from '../src/engine/grid.js';
 import { generate } from '../src/engine/quiz.js';
 import { TerrainModel } from '../src/engine/terrainModel.js';
 
@@ -42,21 +42,40 @@ test('camera lowers at 2 seconds and the analog watch remains readable for 3 ful
   assert.equal(sunWatchFrame(quiz, WATCH_TIMING.sky).watch.progress, 0);
 });
 
-test('look-around visits both sides, holds the visible sun, and returns to the original answer view', () => {
-  for (const heading of [0, 45, 90, 135, 180, 225, 270, 315]) {
-    const q = { ...quiz, camera: { ...camera, heading } };
-    const a = sunWatchFrame(q, WATCH_TIMING.first), b = sunWatchFrame(q, WATCH_TIMING.second);
-    assert.ok(angleDiff(a.camera.heading, b.camera.heading) > 100);
-    for (const t of [WATCH_TIMING.aim, 11, WATCH_TIMING.return]) {
-      const f = sunWatchFrame(q, t);
-      assert.ok(angleDiff(f.camera.heading, f.solar.azimuth) <= 20.1);
-      assert.ok(Math.abs(f.camera.pitch - f.solar.altitude) <= 6.1);
+test('camera turns directly to the centred sun, then retraces its path to the original view', () => {
+  const signed = (a, b) => wrap360(a - b + 180) - 180;
+  for (const mode of ['where-am-i', 'friend']) for (const hour24 of [8, 14]) {
+    const sunWatch = { ...quiz.sunWatch, hour24 };
+    const timing = watchTiming({ mode });
+    const anchor = solarPosition(hour24, sunWatch.minute, timing.aim, sunWatch.latitude);
+    // Include wraparound and a sun almost exactly behind the player.
+    for (const heading of [0, 1, 45, 90, 135, 180, 225, 270, 315, 359,
+      wrap360(anchor.azimuth + 180), wrap360(solarPosition(hour24, sunWatch.minute).azimuth + 180)]) {
+      const q = { ...quiz, mode, sunWatch, camera: { ...camera, heading } };
+      const target = signed(anchor.azimuth, heading), side = Math.sign(target) || 1;
+      assert.equal(sunWatchFrame(q, timing.sky).camera.heading, heading);
+      assert.equal(sunWatchFrame(q, timing.sky).camera.pitch, camera.pitch);
+      let previous = heading, travelled = 0, previousTravel = 0;
+      const dt = 1 / 60;
+      for (let t = timing.sky; t < timing.finish; t += dt) {
+        const f = sunWatchFrame(q, t), step = signed(f.camera.heading, previous);
+        travelled += step; previous = f.camera.heading;
+        // No snap at north or at the 180-degree shortest-path boundary.
+        assert.ok(Math.abs(step) <= 130 * dt + .001, `${mode} turn is too fast at ${t}`);
+        if (t <= timing.aim) assert.ok((travelled - previousTravel) * side >= -.001, 'no search away from the sun');
+        if (t >= timing.return) assert.ok((travelled - previousTravel) * side <= .001, 'return follows the same arc');
+        assert.ok(travelled * side >= -.02 && travelled * side <= Math.abs(target) + .02);
+        previousTravel = travelled;
+        for (const key of ['x', 'y', 'z', 'roll', 'eyeHeight']) assert.equal(f.camera[key], q.camera[key]);
+      }
+      for (const t of [timing.aim, (timing.aim + timing.return) / 2, timing.return]) {
+        const f = sunWatchFrame(q, t);
+        assert.ok(angleDiff(f.camera.heading, f.solar.azimuth) < 1e-9, 'sun is horizontally centred');
+        assert.ok(Math.abs(f.camera.pitch - f.solar.altitude) < 1e-9, 'sun is vertically centred');
+      }
+      assert.deepEqual(sunWatchFrame(q, 15).camera, q.camera);
+      assert.deepEqual(sunWatchFrame(q, 1e6).camera, q.camera);
     }
-    for (const t of [0, 3.5, 7.5, 9.8, 12, 15, 1e6]) {
-      const f = sunWatchFrame(q, t);
-      for (const k of ['x', 'y', 'z', 'fov', 'roll', 'eyeHeight']) assert.equal(f.camera[k], q.camera[k]);
-    }
-    assert.deepEqual(sunWatchFrame(q, 15).camera, q.camera);
   }
   const before = JSON.stringify(quiz);
   for (const t of [9.8, 3.5, 12, 0, 3.5, NaN, -1]) assert.deepEqual(sunWatchFrame(quiz, t), sunWatchFrame(quiz, t));

@@ -2,8 +2,8 @@ import { Random } from './rng.js';
 import { clamp, lerp, smoothstep, wrap360 } from './grid.js';
 
 export const SUN_WATCH_DURATION = 15;
-export const WATCH_TIMING = Object.freeze({ down: 2, readable: 2.5, end: 5.5, sky: 6.4, first: 7.4, second: 9, aim: 10.2, return: 13, finish: 15 });
-export const FRIEND_WATCH_TIMING = Object.freeze({ down: 6, readable: 6.5, end: 9.5, sky: 10.2, first: 11, second: 12.2, aim: 13, return: 14, finish: 15 });
+export const WATCH_TIMING = Object.freeze({ down: 2, readable: 2.5, end: 5.5, sky: 6.4, aim: 10.2, return: 11.2, finish: 15 });
+export const FRIEND_WATCH_TIMING = Object.freeze({ down: 6, readable: 6.5, end: 9.5, sky: 10.2, aim: 12.3, return: 12.9, finish: 15 });
 export const supportsSunWatch = mode => ['where-am-i', 'lookalike', 'friend'].includes(mode);
 export const usesSunWatch = quiz => quiz?.difficulty === 'sun-watch' && !!quiz.sunWatch;
 export const watchTiming = quiz => quiz?.mode === 'friend' ? FRIEND_WATCH_TIMING : WATCH_TIMING;
@@ -56,21 +56,20 @@ export function sunWatchFrame(quiz, seconds = 0, { camera = quiz.camera, active 
     progress = smoothstep(timing.down, timing.readable, t) * (1 - rise);
     if (t <= timing.end) pitch = lerp(camera.pitch, -64, smoothstep(timing.down, timing.readable, t));
     else if (t < timing.finish) {
-      const skyPitch = Math.min(58, solar.altitude - 6);
-      pitch = lerp(-64, skyPitch, smoothstep(timing.end, timing.sky, t));
-      if (t >= timing.return) pitch = lerp(skyPitch, camera.pitch, smoothstep(timing.return, timing.finish, t));
-      const relativeSun = wrap360(solar.azimuth - camera.heading + 180) - 180;
-      const side = relativeSun >= 0 ? 1 : -1;
-      // Keep the sun off-centre during the observation, rather than rotating
-      // the world/sun to face the player. Its initial relative angle is free.
-      const aim = clamp(relativeSun - side * 18, -165, 165);
-      let turn = 0;
-      if (t <= timing.first) turn = -side * 70 * smoothstep(timing.sky, timing.first, t);
-      else if (t <= timing.second) turn = lerp(-side * 70, side * 70, smoothstep(timing.first, timing.second, t));
-      else if (t <= timing.aim) turn = lerp(side * 70, aim, smoothstep(timing.second, timing.aim, t));
-      else if (t <= timing.return) turn = aim;
-      else turn = lerp(aim, 0, smoothstep(timing.return, timing.finish, t));
-      heading = wrap360(camera.heading + turn);
+      // Raise the head at the original bearing before one direct turn. Keeping
+      // that reference view makes the rotation back to the friend easy to follow.
+      pitch = lerp(-64, camera.pitch, rise);
+      if (t >= timing.sky) {
+        const orient = smoothstep(timing.sky, timing.aim, t)
+          * (1 - smoothstep(timing.return, timing.finish, t));
+        // Choose the shortest arc once, then track the sun's tiny physical drift.
+        // Rechoosing the arc per frame could flip sides at the 180° boundary.
+        const anchor = solarPosition(p.hour24, p.minute, timing.aim, p.latitude);
+        const turn = wrap360(anchor.azimuth - camera.heading + 180) - 180;
+        const drift = wrap360(solar.azimuth - anchor.azimuth + 180) - 180;
+        heading = wrap360(camera.heading + (turn + drift) * orient);
+        pitch = lerp(camera.pitch, solar.altitude, orient);
+      }
     }
   }
   return { camera: heading === camera.heading && pitch === camera.pitch && fov === camera.fov ? camera : { ...camera, heading, pitch, fov }, solar,
