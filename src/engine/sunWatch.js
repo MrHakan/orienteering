@@ -1,9 +1,17 @@
 import { Random } from './rng.js';
 import { clamp, lerp, smoothstep, wrap360 } from './grid.js';
 
-export const SUN_WATCH_DURATION = 12;
-export const WATCH_TIMING = Object.freeze({ down: 2, readable: 2.5, end: 5.5, sky: 6.4, first: 7.3, second: 8.5, aim: 9.3, return: 10.7, finish: 12 });
-export const usesSunWatch = quiz => quiz?.mode === 'facing' && !!quiz.sunWatch;
+export const SUN_WATCH_DURATION = 15;
+export const WATCH_TIMING = Object.freeze({ down: 2, readable: 2.5, end: 5.5, sky: 6.4, first: 7.4, second: 9, aim: 10.2, return: 13, finish: 15 });
+export const FRIEND_WATCH_TIMING = Object.freeze({ down: 6, readable: 6.5, end: 9.5, sky: 10.2, first: 11, second: 12.2, aim: 13, return: 14, finish: 15 });
+export const supportsSunWatch = mode => ['where-am-i', 'lookalike', 'friend'].includes(mode);
+export const usesSunWatch = quiz => quiz?.difficulty === 'sun-watch' && !!quiz.sunWatch;
+export const watchTiming = quiz => quiz?.mode === 'friend' ? FRIEND_WATCH_TIMING : WATCH_TIMING;
+
+/** Finish the 3× optical zoom at 5s, wait one second, then lower the wrist. */
+export function sunFriendZoom(seconds) {
+  return 1 + 2 * smoothstep(3, 5, seconds) * (1 - smoothstep(6, 6.5, seconds));
+}
 
 /** Equinox, northern mid-latitudes, local solar time. ENU -> WebGL east/up/-north. */
 export function solarPosition(hour24, minute = 0, seconds = 0, latitude = 40) {
@@ -18,7 +26,7 @@ export function solarPosition(hour24, minute = 0, seconds = 0, latitude = 40) {
 /** Time is drawn independently of the answer; never use the host's wall clock. */
 export function createSunWatch(quiz, model) {
   const rng = new Random(`${quiz.seed}|${quiz.difficulty}|${quiz.variant || 0}|sun-watch-v1`);
-  const times = rng.shuffle([9, 14].flatMap(hour => Array.from({ length: 13 }, (_, i) => hour * 60 + i * 5)));
+  const times = rng.shuffle([8, 14].flatMap(hour => Array.from({ length: 25 }, (_, i) => hour * 60 + i * 5)));
   for (const minutes of times) {
     const plan = { hour24: Math.floor(minutes / 60), minute: minutes % 60, latitude: 40 };
     const sun = solarPosition(plan.hour24, plan.minute);
@@ -37,29 +45,34 @@ export function createSunWatch(quiz, model) {
 /** One deterministic camera/watch/sun sampler for the game, replay and exports. */
 export function sunWatchFrame(quiz, seconds = 0, { camera = quiz.camera, active = true } = {}) {
   if (!usesSunWatch(quiz)) return { camera, watch: null, solar: null, done: true };
-  const t = clamp(Number.isFinite(seconds) ? seconds : 0, 0, SUN_WATCH_DURATION), p = quiz.sunWatch;
+  const t = clamp(Number.isFinite(seconds) ? seconds : 0, 0, SUN_WATCH_DURATION), p = quiz.sunWatch, timing = watchTiming(quiz);
   const solar = solarPosition(p.hour24, p.minute, t, p.latitude);
   let heading = camera.heading, pitch = camera.pitch, progress = 0;
+  let fov = camera.fov;
   if (active) {
-    const rise = smoothstep(WATCH_TIMING.end, 6.2, t);
-    progress = smoothstep(WATCH_TIMING.down, WATCH_TIMING.readable, t) * (1 - rise);
-    if (t <= WATCH_TIMING.end) pitch = lerp(camera.pitch, -64, smoothstep(WATCH_TIMING.down, WATCH_TIMING.readable, t));
-    else if (t < WATCH_TIMING.finish) {
+    const zoom = quiz.mode === 'friend' ? sunFriendZoom(t) : 1;
+    if (zoom !== 1) fov = 2 * Math.atan(Math.tan(camera.fov * Math.PI / 360) / zoom) * 180 / Math.PI;
+    const rise = smoothstep(timing.end, timing.sky, t);
+    progress = smoothstep(timing.down, timing.readable, t) * (1 - rise);
+    if (t <= timing.end) pitch = lerp(camera.pitch, -64, smoothstep(timing.down, timing.readable, t));
+    else if (t < timing.finish) {
       const skyPitch = Math.min(58, solar.altitude - 6);
-      pitch = lerp(-64, skyPitch, smoothstep(WATCH_TIMING.end, WATCH_TIMING.sky, t));
-      if (t >= WATCH_TIMING.return) pitch = lerp(skyPitch, camera.pitch, smoothstep(WATCH_TIMING.return, WATCH_TIMING.finish, t));
+      pitch = lerp(-64, skyPitch, smoothstep(timing.end, timing.sky, t));
+      if (t >= timing.return) pitch = lerp(skyPitch, camera.pitch, smoothstep(timing.return, timing.finish, t));
       const relativeSun = wrap360(solar.azimuth - camera.heading + 180) - 180;
       const side = relativeSun >= 0 ? 1 : -1;
-      const aim = clamp(relativeSun, -160, 160);
+      // Keep the sun off-centre during the observation, rather than rotating
+      // the world/sun to face the player. Its initial relative angle is free.
+      const aim = clamp(relativeSun - side * 18, -165, 165);
       let turn = 0;
-      if (t <= WATCH_TIMING.first) turn = -side * 70 * smoothstep(WATCH_TIMING.sky, WATCH_TIMING.first, t);
-      else if (t <= WATCH_TIMING.second) turn = lerp(-side * 70, side * 70, smoothstep(WATCH_TIMING.first, WATCH_TIMING.second, t));
-      else if (t <= WATCH_TIMING.aim) turn = lerp(side * 70, aim, smoothstep(WATCH_TIMING.second, WATCH_TIMING.aim, t));
-      else if (t <= WATCH_TIMING.return) turn = aim;
-      else turn = lerp(aim, 0, smoothstep(WATCH_TIMING.return, WATCH_TIMING.finish, t));
+      if (t <= timing.first) turn = -side * 70 * smoothstep(timing.sky, timing.first, t);
+      else if (t <= timing.second) turn = lerp(-side * 70, side * 70, smoothstep(timing.first, timing.second, t));
+      else if (t <= timing.aim) turn = lerp(side * 70, aim, smoothstep(timing.second, timing.aim, t));
+      else if (t <= timing.return) turn = aim;
+      else turn = lerp(aim, 0, smoothstep(timing.return, timing.finish, t));
       heading = wrap360(camera.heading + turn);
     }
   }
-  return { camera: heading === camera.heading && pitch === camera.pitch ? camera : { ...camera, heading, pitch }, solar,
+  return { camera: heading === camera.heading && pitch === camera.pitch && fov === camera.fov ? camera : { ...camera, heading, pitch, fov }, solar,
     watch: { progress, hour24: p.hour24, minute: p.minute, seconds: t }, done: t >= SUN_WATCH_DURATION };
 }

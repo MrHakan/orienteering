@@ -160,23 +160,42 @@ The terrain stays the same; only the chosen viewpoint and heading change.
 ### "Which way are you facing?" mode
 
 `Mode → Which way are you facing?` (`&m=facing`) marks your position and asks
-which of eight directions you faced at the start. The camera begins looking at
-the terrain, lowers at 2 seconds, and holds a readable analog wristwatch for
-three seconds (2.5–5.5 s). It then looks up, checks both sides, holds the sun in
-view briefly, and returns to the original view at 12 seconds. Replay, pause,
-Space and the timeline repeat or inspect the sequence.
+which of eight directions you face. Compare the skyline and contours around
+the marked point; this mode uses the ordinary terrain view.
+
+### Sun & watch difficulty
+
+Select **Difficulty → Sun & watch** in Where are you?, Look-alikes or Where is
+your friend? A/B/C remain three separate locations. Their views match at three
+different bearings, at least 90° apart. All three pairs are checked at full ray
+resolution, and all six wrong-location/observed-bearing combinations must differ
+by at least 3.4° RMS. Inferring the bearing from the clock and sun therefore
+helps eliminate the similar-looking wrong locations.
+
+The clip lasts **15 seconds**. Location questions lower the camera at 2 seconds
+and show a readable analog wristwatch for three seconds (2.5–5.5 s), then look
+up and check both sides. The sun's world position is independent of the camera:
+it can start to either side, diagonally ahead or behind, and stays off-centre
+during the sun observation. The view returns to its original bearing at 15 s.
+Replay, pause, Space and the timeline repeat or inspect the sequence.
+
+Friend questions first zoom from 3–5 s. One second after completing the zoom,
+the camera lowers at 6 s and shows the watch for three seconds (6.5–9.5 s), then
+looks up and around. Both point and grid answers (including 6×6) work. Classic
+friends wave at zoom; Conquest's entrance lands before the wrist is raised.
 
 No heading text, bearing tape, tutorial, developer overlay or pre-answer
 question diagnostics are shown. The clock and sun provide the physical scene;
 the game does not explain how to interpret them. The answer and comparisons
-appear after the player submits a direction.
+appear after the player submits a location.
 
 The seeded watch uses simulated local solar time, an equinox and 40°N latitude.
 Morning and afternoon times are drawn independently of the correct answer.
 Solar azimuth/elevation drive both the visible sun and terrain illumination;
 the generator checks that the sun clears the skyline. The camera sequence never
-moves the observer or changes the answer. Existing terrain/view validation still
-compares every wrong direction. Video exports use the identical sequence; PNG
+moves the observer or changes the answer. The original difficulty presets keep
+their regular heading displays and cameras. Video exports use the identical
+15-second sequence, including camera movement during the final reveal; PNG
 exports capture a single frame. Reduced-motion preferences start the sequence
 paused so the player can start it manually.
 

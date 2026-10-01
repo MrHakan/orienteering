@@ -32,6 +32,7 @@ export function captionText(quiz) {
   if (quiz.mode === 'grid') return `Find your cell: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size}.`;
   const labels = quiz.options.map((o) => o.label);
   const list = labels.length > 1 ? `${labels.slice(0, -1).join(', ')} or ${labels[labels.length - 1]}` : labels[0];
+  if (usesSunWatch(quiz)) return quiz.mode === 'friend' ? `Find your friend: ${list}.` : `You are at ${list}. Which one?`;
   if (quiz.mode === 'friend') return quiz.friend.observerHidden
     ? `Find your friend: ${list}. Read the terrain.` : `From YOU, locate your friend: ${list}.`;
   return `You are at ${list}, ${quiz.heading.text.toLowerCase()}.`;
@@ -157,8 +158,9 @@ export class ExportComposer {
   drawFrame(t = 0, { reveal = false } = {}) {
     const { ctx, layout: L, quiz: q } = this;
     const frame = q.mode === 'trail' ? trailFrame(q, t, q.correctLabel, this.model) : null;
-    const friendFrame = friendSceneFrame(q, t, this.animated);
-    const watchFrame = usesSunWatch(q) ? sunWatchFrame(q, t, { active: !reveal }) : null;
+    const friendFrame = friendSceneFrame(q, t, this.animated || (!reveal && usesSunWatch(q)));
+    const watchFrame = usesSunWatch(q) ? q.mode === 'friend' ? friendFrame
+      : sunWatchFrame(q, t, { active: this.animated || !reveal }) : null;
     const camera = watchFrame ? watchFrame.camera : frame ? frame.camera : friendFrame.camera;
     const W = this.canvas.width, H = this.canvas.height;
     const duration = this.options.duration;
@@ -264,7 +266,7 @@ export class ExportComposer {
   }
 
   /** PNG of a single frame. */
-  async toImage({ reveal = false, time = 4 } = {}) {
+  async toImage({ reveal = false, time = usesSunWatch(this.quiz) && this.quiz.mode === 'friend' ? 8 : 4 } = {}) {
     this.animated = false;
     await this.drawFrameReady(time, { reveal });
     return new Promise((resolve) => this.canvas.toBlob(resolve, 'image/png'));

@@ -29,6 +29,11 @@ export function buildTerrain({ seed, difficulty, attempt, preset, seeds, size = 
 
 /** Dispatch on quiz mode; existing location quizzes retain their defaults. */
 export async function generate(opts) {
+  if (opts.difficulty === 'sun-watch' && ['where-am-i', 'lookalike', 'friend', undefined].includes(opts.mode)) {
+    const { generateSunWatchQuiz } = await import('./sunWatchQuiz.js');
+    return generateSunWatchQuiz(opts);
+  }
+  if (opts.difficulty === 'sun-watch') opts = { ...opts, difficulty: 'medium' };
   if (opts.mode === 'trail') {
     const { generateTrailQuiz } = await import('./trailQuiz.js');
     return generateTrailQuiz(opts);

@@ -57,6 +57,10 @@ export function friendOptionCamera(quiz, option) {
 
 export function generateFriendQuiz(opts) {
   const quiz = opts.difficulty === 'easy' ? generateKnownFriendQuiz(opts) : generateTerrainFriendQuiz(opts);
+  return finishFriendQuiz(quiz, opts);
+}
+
+export function finishFriendQuiz(quiz, opts) {
   quiz.friend.answerMode = normaliseFriendAnswer(opts.friendAnswer);
   quiz.friend.skin = normaliseFriendSkin(opts.friendSkin);
   if (quiz.friend.answerMode !== 'grid') return quiz;

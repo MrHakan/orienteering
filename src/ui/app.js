@@ -13,7 +13,7 @@ import { normaliseMovement, trailFrame } from '../engine/trailMotion.js';
 import { TRAIL_COLORS } from '../engine/trailQuiz.js';
 import { KNIVES, normaliseAppearance } from '../render/knifeClips.js';
 import { TrailPlayback } from './trailPlayback.js';
-import { usesSunWatch, sunWatchFrame, SUN_WATCH_DURATION } from '../engine/sunWatch.js';
+import { usesSunWatch, supportsSunWatch, sunWatchFrame, SUN_WATCH_DURATION } from '../engine/sunWatch.js';
 import { TerrainRenderer } from '../render/webglTerrain.js';
 import { CONDITIONS, WINDS, normaliseEnvironment, weatherParams, environmentAnimated } from '../render/environment.js';
 import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
@@ -93,6 +93,7 @@ const sunPlayer = new TrailPlayback({ duration: SUN_WATCH_DURATION,
     $('direction-play').setAttribute('aria-pressed', String(playing));
     $('direction-time').textContent = `${time.toFixed(1)} / ${duration.toFixed(1)} s`;
     $('direction-scrub').value = String(time);
+    $('direction-scrub').max = String(duration);
   },
 });
 $('direction-play').addEventListener('click', () => {
@@ -116,7 +117,7 @@ function stopFriendWave() {
   cancelAnimationFrame(friendWaveRaf); friendWaveRaf = 0;
 }
 function scheduleFriendWave() {
-  const friendActive = state.quiz?.mode === 'friend' && (state.quiz?.friend?.skin === 'conquest' ? state.friendCinematicPlaying : state.friendZoom);
+  const friendActive = !usesSunWatch(state.quiz) && state.quiz?.mode === 'friend' && (state.quiz?.friend?.skin === 'conquest' ? state.friendCinematicPlaying : state.friendZoom);
   const ambientActive = !reducedMotion.matches && environmentAnimated(state.environment);
   if (friendWaveRaf || !renderer || (!friendActive && !ambientActive)
     || state.loading || document.hidden || $('export-dialog').open) return;
@@ -168,8 +169,9 @@ function syncFriendAppearance() {
   if (state.quiz?.mode !== 'friend') return;
   const conquest = state.quiz?.friend?.skin === 'conquest';
   $('friend-skin').value = normaliseFriendSkin(state.quiz?.friend?.skin);
-  $('friend-arrival').hidden = !conquest;
-  $('friend-skin-note').textContent = conquest
+  $('friend-arrival').hidden = !conquest || usesSunWatch(state.quiz);
+  $('friend-zoom').hidden = usesSunWatch(state.quiz);
+  $('friend-skin-note').textContent = usesSunWatch(state.quiz) ? 'Use Play or Replay to watch the full sequence.' : conquest
     ? '3 seconds to read the terrain, then zoom and a slow-motion arrival. The view follows Conquest as he lands.'
     : 'Your friend waves when you zoom in.';
   $('friend-status').textContent = conquest ? 'Conquest · slow-motion arrival · locate his landing cell or point'
@@ -196,7 +198,11 @@ $('friend-skin').addEventListener('change', () => {
   state.friendZoom = false; state.friendCinematicPlaying = false; state.friendCinematicTime = 0;
   $('friend-zoom').textContent = 'Zoom 3×'; $('friend-zoom').setAttribute('aria-pressed', 'false');
   syncFriendAppearance(); updateHash();
-  if (skin === 'conquest') startFriendArrival(); else renderScene(currentCamera());
+  if (usesSunWatch(state.quiz)) {
+    sunPlayer.reset(SUN_WATCH_DURATION);
+    renderScene(currentCamera());
+    if (!reducedMotion.matches && !document.hidden) sunPlayer.play();
+  } else if (skin === 'conquest') startFriendArrival(); else renderScene(currentCamera());
   scheduleFriendWave();
 });
 $('friend-arrival').addEventListener('click', startFriendArrival);
@@ -278,9 +284,11 @@ async function load(req) {
     appearance: normaliseAppearance(req.appearance || state.appearance),
     tuning: req.tuning || activeTuning(),
   };
+  if (r.difficulty === 'sun-watch' && !supportsSunWatch(r.mode)) r.difficulty = 'medium';
+  if (r.difficulty === 'sun-watch') { r.headingMode = 'auto'; r.direction = 'auto'; }
   stopFriendWave();
   state.friendCinematicPlaying = false;
-  sunPlayer.reset(); state.sunTime = 0;
+  sunPlayer.reset(SUN_WATCH_DURATION); state.sunTime = 0;
   trailPlayer.reset(); state.trailTime = 0;
   if (r.mode === 'lookalike') r.headingMode = 'auto';
   if (r.mode === 'grid' && r.gridChallenge === 'lost-compass') r.headingMode = 'auto';
@@ -361,13 +369,15 @@ function syncControls() {
   const lookalike = $('mode').value === 'lookalike';
   const grid = $('mode').value === 'grid';
   const friendGrid = $('mode').value === 'friend' && $('friend-answer').value === 'grid';
+  $('difficulty').querySelector('[value="sun-watch"]').disabled = !supportsSunWatch($('mode').value);
+  const watch = $('difficulty').value === 'sun-watch';
   $('friend-answer-field').hidden = $('mode').value !== 'friend';
   $('friend-challenge-field').hidden = $('mode').value !== 'friend';
   $('movement-field').hidden = $('mode').value !== 'trail';
   $('grid-size-field').hidden = !(grid || friendGrid);
   $('grid-challenge-field').hidden = !grid;
-  $('heading-field').hidden = facing || lookalike || $('mode').value === 'trail' || (grid && $('grid-challenge').value === 'lost-compass');
-  $('direction-field').hidden = !lookalike;
+  $('heading-field').hidden = watch || facing || lookalike || $('mode').value === 'trail' || (grid && $('grid-challenge').value === 'lost-compass');
+  $('direction-field').hidden = watch || !lookalike;
   $('scramble').hidden = facing || grid || friendGrid;
   if (typeof dev !== 'undefined') renderDevPanel();
 }
@@ -381,9 +391,9 @@ function show(quiz) {
   state.viewing = null;
   state.friendZoom = false;
   state.friendCinematicTime = 0;
-  state.friendCinematicPlaying = quiz.mode === 'friend' && quiz.friend.skin === 'conquest';
+  state.friendCinematicPlaying = !usesSunWatch(quiz) && quiz.mode === 'friend' && quiz.friend.skin === 'conquest';
   state.trailTime = 0; trailPlayer.reset(quiz.trail?.duration || 12);
-  state.sunTime = 0; sunPlayer.reset();
+  state.sunTime = 0; sunPlayer.reset(SUN_WATCH_DURATION);
   $('direction-tools').hidden = !usesSunWatch(quiz);
   $('trail-tools').hidden = quiz.mode !== 'trail';
   $('trail-legend').hidden = quiz.mode !== 'trail';
@@ -407,7 +417,9 @@ function show(quiz) {
   $('facing-text').closest('.facing').hidden = usesSunWatch(quiz);
   document.querySelector('.card').classList.toggle('sun-watch', usesSunWatch(quiz));
   document.querySelector('.about').hidden = usesSunWatch(quiz);
-  $('prompt').textContent = facing ? 'Which direction were you facing at the start?'
+  $('prompt').textContent = usesSunWatch(quiz) ? grid ? `Locate your friend's cell: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size}.`
+    : quiz.mode === 'friend' ? 'Where is your friend: A, B or C?' : 'You are at A, B or C. Which one?'
+    : facing ? 'Which direction were you facing at the start?'
     : lookalike ? 'A, B and C have similar views in this direction. Match the ridge shapes and foreground to find your point.'
     : grid ? `${friendGrid ? "Locate your friend's cell" : 'Find your cell'}: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size} (row + column, e.g. B3).`
     : quiz.mode === 'trail' ? 'Which trail did you follow: A red, B green or C cyan? All three traces advance together. Match the slopes, ridges and hollows in the moving view. Circles mark the starts; arrows mark the ends.'
@@ -444,7 +456,7 @@ function show(quiz) {
   renderFacts();
   setLoading(false);
   setAnswersEnabled(true);
-  if (quiz.mode === 'friend' && quiz.friend.skin === 'conquest') startFriendArrival();
+  if (!usesSunWatch(quiz) && quiz.mode === 'friend' && quiz.friend.skin === 'conquest') startFriendArrival();
   if (quiz.mode === 'trail' && renderer && !window.matchMedia('(prefers-reduced-motion: reduce)').matches && !document.hidden) trailPlayer.play();
   if (usesSunWatch(quiz) && renderer) renderer.prepareWatch().then(() => {
     if (state.quiz !== quiz || state.loading) return;
@@ -518,7 +530,7 @@ function renderScene(camera, playback = {}) {
     const o = state.quiz.options.find((p) => p.label === state.viewing);
     friendPerson = o ? { ...state.quiz.friend, x: o.x, y: o.y, z: o.z, heading: (o.bearing + 180) % 360 } : state.quiz.friend;
     renderer.setPerson(friendPerson);
-    if (state.friendZoom && !state.friendCinematicPlaying) camera = { ...camera, fov: 2 * Math.atan(Math.tan(camera.fov * Math.PI / 360) / 3) * 180 / Math.PI };
+    if (!usesSunWatch(state.quiz) && state.friendZoom && !state.friendCinematicPlaying) camera = { ...camera, fov: 2 * Math.atan(Math.tan(camera.fov * Math.PI / 360) / 3) * 180 / Math.PI };
   }
   if (state.quiz.mode === 'trail') {
     const frame = trailFrame(state.quiz, state.trailTime, state.viewing || state.quiz.correctLabel, state.model);
@@ -534,12 +546,14 @@ function renderScene(camera, playback = {}) {
       state.lastTrailMapTime = state.trailTime; state.lastTrailMapLabel = frame.route.label;
     }
   } else {
-    const watchFrame = usesSunWatch(state.quiz) ? sunWatchFrame(state.quiz, state.sunTime, { camera }) : null;
+    const watchFrame = usesSunWatch(state.quiz) ? state.quiz.mode === 'friend'
+      ? friendSceneFrame(state.quiz, state.sunTime, true, { camera, person: friendPerson })
+      : sunWatchFrame(state.quiz, state.sunTime, { camera }) : null;
     const elapsed = state.quiz.mode === 'friend' && state.friendZoom ? Math.max(0, (performance.now() - friendWaveStart) / 1000) : 0;
     const lift = Math.min(1, elapsed / .35);
     const conquest = friendPerson?.skin === 'conquest';
-    const frame = conquest ? friendSceneFrame(state.quiz, state.friendCinematicTime,
-      state.friendCinematicPlaying || state.friendCinematicTime > 0, { camera, person: friendPerson }) : null;
+    const frame = watchFrame || (conquest ? friendSceneFrame(state.quiz, state.friendCinematicTime,
+      state.friendCinematicPlaying || state.friendCinematicTime > 0, { camera, person: friendPerson }) : null);
     if (frame) camera = frame.camera;
     if (watchFrame) camera = watchFrame.camera;
     renderer.setViewmodel(null); renderer.render(camera, { ...environmentOptions, time: watchFrame ? state.sunTime : conquest ? state.friendCinematicTime : elapsed,
@@ -766,6 +780,7 @@ function optionCamera(label) {
   if (quiz.mode === 'trail') return { cam: trailFrame(quiz, state.trailTime, label, state.model).camera, o };
   if (quiz.mode === 'friend') return { cam: friendOptionCamera(quiz, o), o };
   if (quiz.mode === 'facing') return { cam: { ...quiz.camera, heading: o.heading }, o };
+  if (usesSunWatch(quiz)) return { cam: { ...quiz.camera, x: o.x, y: o.y, z: o.z + quiz.camera.eyeHeight, heading: o.heading }, o };
   return { cam: { ...quiz.camera, heading: o.heading ?? quiz.camera.heading, x: o.x, y: o.y, z: state.model.getElevation(o.x, o.y) + quiz.camera.eyeHeight }, o };
 }
 

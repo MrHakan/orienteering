@@ -173,7 +173,7 @@ export function rankLookalikeTriples(points, pairFor, limit = SHORTLIST, acceptT
 }
 
 /** Approximate descriptors reuse a point's 360° sweep; exact rays decide acceptance. */
-function sweepDescriptor(sw, heading, fov, eyeHeight) {
+export function sweepDescriptor(sw, heading, fov, eyeHeight) {
   const horizon = [], dist = [], near = [[], [], []];
   const rays = sw.rays;
   for (let i = 0; i < COARSE_COLUMNS; i++) {

@@ -2,6 +2,15 @@
 // generator, viewpoint search, distractor search and validator stay generic.
 
 export const DIFFICULTIES = {
+  'sun-watch': {
+    label: 'Sun & watch',
+    terrain: { archetypes: [3, 4], relief: 1.45, complexity: 0.45, noiseShare: [0.22, 0.28] },
+    heading: 'intercardinal', distractors: 2, fov: [60, 66],
+    minSeparation: 420, minTrueDistance: 420,
+    band: { min: 0, target: 1.2, max: 2.8 }, signatureWeight: 0.4,
+    quality: { landmark: 1.1, occlusion: 1.2 }, minQuality: 0.42,
+    minConfidence: 0.5, mapRotation: false,
+  },
   easy: {
     label: 'Easy',
     terrain: { archetypes: [2, 3], relief: 1.6, complexity: 0.2, noiseShare: [0.18, 0.24] },
