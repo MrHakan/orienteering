@@ -2,7 +2,7 @@
 
 A browser quiz in the style of classic "Where are you?" contour-map puzzles. You get a first-person view of the terrain and the heading you're facing, plus a contour map with 3–4 marked points. Pick the one you're standing on.
 
-Everything is procedural and reproducible from a seed: `#seed=kx7p-2m9q&d=hard`.
+Terrain and questions are procedural and reproducible from a seed: `#seed=kx7p-2m9q&d=hard`.
 
 ![screenshot](docs/screenshot.png)
 
@@ -72,13 +72,13 @@ Open **Export for Instagram**; the dialog previews the 15 s loop with the event.
 
 ## Friend location mode
 
-**Where is your friend?** shows a small 3D person from your own viewpoint. Easy marks where you stand as YOU. Medium and above hide the observer and give each A/B/C target a plausible observation point with the same range, bearing and apparent body size. Match the skyline and intervening slopes to locate him. Expert and Master also use similar target landforms; **Depth trap** tightens the elevation-angle match. **Zoom 3×** helps inspect the sighting. After answering, YOU is revealed and comparisons show each possible observer view. See [the friend mode guide](docs/friend-mode.md).
+**Where is your friend?** shows a small 3D person from your own viewpoint. Choose **Point — A / B / C** or **Grid — cell reference** to answer. Grid supports 4 × 4, 8 × 8 and 16 × 16: tap or type the friend's cell, then check; the answer shows his exact position and your observation point. Easy marks where you stand as YOU. Medium and above hide the observer and give each A/B/C target a plausible observation point with the same range, bearing and apparent body size. Match the skyline and intervening slopes to locate him. Expert and Master also use similar target landforms; **Depth trap** tightens the elevation-angle match. **Zoom 3×** helps inspect the sighting. After answering, YOU is revealed and Point comparisons show each possible observer view. See [the friend mode guide](docs/friend-mode.md).
 
 ## Bunny-hop trails
 
 **Mode → Bunny-hop trails** (`&m=trail`) plays a 12-second first-person run over the terrain. Choose which map trail you followed: **A red, B green or C cyan**. All three have the same shape, speed and steering; their moving terrain views are matched pairwise so the skyline and nearby slopes decide the answer. After answering, replay each route or compare the specific time and bearing that rules it out.
 
-Choose **CS 1.6 / CS:GO style** movement; classic fingerless or tactical hands; **classic, default, karambit or Huntsman/Hunter** knives; four finishes; and either hand. The meshes are original procedural models. **Space** pauses/resumes, **F** inspects, and the scrubber replays any moment. Reduced-motion preferences start the run paused. Cosmetics persist locally and travel in shared links without changing the question.
+Choose **CS 1.6 / CS:GO style** movement and the supplied **CS 1.6 Classic, CS:GO Default or Butterfly** green-screen clips. A WebGL chroma-key pass removes the background and green edge spill; hands and knives come entirely from the footage. Choose either hand and three sizes. **Space** pauses/resumes, **F** replays the clip’s knife animation, and the scrubber replays any moment. All three coloured map traces advance with the same playback clock without exposing the answer. Reduced-motion preferences start the run paused. Appearance persists locally and travels in shared links without changing the question.
 
 Videos play the run for 12 seconds and freeze at its endpoint for the final 3-second answer reveal. Both export formats and PNGs use the same camera sampler. [The trail guide](docs/trail-mode.md) explains movement, matching and validation.
 

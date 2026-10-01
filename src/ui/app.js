@@ -5,11 +5,11 @@ import { SeedManager } from '../engine/rng.js';
 import { scrambleLabels } from '../engine/scramble.js';
 import { DIFFICULTIES, TUNABLES, tunableValue, encodeTuning, decodeTuning } from '../engine/difficulty.js';
 import { getLookalikePreset, DIRECTIONS } from '../engine/lookalikeQuiz.js';
-import { normaliseGridSize, normaliseGridChallenge, parseCell, headingHidden } from '../engine/gridQuiz.js';
-import { normaliseFriendChallenge, friendObserver, friendOptionCamera } from '../engine/friendQuiz.js';
+import { normaliseGridSize, normaliseGridChallenge, parseCell, headingHidden, usesGrid } from '../engine/gridQuiz.js';
+import { normaliseFriendChallenge, normaliseFriendAnswer, friendObserver, friendOptionCamera } from '../engine/friendQuiz.js';
 import { normaliseMovement, trailFrame } from '../engine/trailMotion.js';
 import { TRAIL_COLORS } from '../engine/trailQuiz.js';
-import { KNIVES, CHARACTERS, FINISHES, normaliseAppearance } from '../render/viewmodelMesh.js';
+import { KNIVES, normaliseAppearance } from '../render/knifeClips.js';
 import { TrailPlayback } from './trailPlayback.js';
 import { TerrainRenderer } from '../render/webglTerrain.js';
 import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
@@ -55,7 +55,7 @@ try {
 }
 const map = new MapRenderer($('map'), { onPick: (label) => {
   if (state.loading || state.answered) return;
-  if (state.quiz?.mode === 'grid') selectCell(label);
+  if (usesGrid(state.quiz)) selectCell(label);
   else answer(label);
 } });
 
@@ -84,16 +84,14 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && sta
 
 function syncAppearanceControls() {
   const o = state.appearance;
-  $('trail-knife').value = o.knife; $('trail-character').value = o.character;
-  $('trail-finish').value = o.finish; $('trail-hand').value = o.handedness;
+  $('trail-knife').value = o.knife; $('trail-hand').value = o.handedness;
+  $('trail-scale').value = String(o.scale);
 }
-for (const [id, choices] of [['trail-knife', KNIVES], ['trail-character', CHARACTERS], ['trail-finish', FINISHES]]) {
-  $(id).innerHTML = choices.map((o) => `<option value="${o.id}">${o.label}</option>`).join('');
-}
+$('trail-knife').innerHTML = KNIVES.map((o) => `<option value="${o.id}">${o.label}</option>`).join('');
 syncAppearanceControls();
-for (const id of ['trail-knife', 'trail-character', 'trail-finish', 'trail-hand']) $(id).addEventListener('change', () => {
-  state.appearance = normaliseAppearance({knife:$('trail-knife').value,character:$('trail-character').value,
-    finish:$('trail-finish').value,handedness:$('trail-hand').value});
+for (const id of ['trail-knife', 'trail-scale', 'trail-hand']) $(id).addEventListener('change', () => {
+  state.appearance = normaliseAppearance({knife:$('trail-knife').value,
+    scale:Number($('trail-scale').value),handedness:$('trail-hand').value});
   store.set('otq.appearance', state.appearance);
   if (state.quiz?.mode === 'trail') {
     state.quiz.appearance = {...state.appearance}; state.baseQuiz.appearance = {...state.appearance};
@@ -116,14 +114,14 @@ function getWorker() {
   return worker;
 }
 
-function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, movement, tuning }) {
+function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, movement, tuning }) {
   const id = ++state.requestId;
   return new Promise((resolve, reject) => {
     const w = getWorker();
     if (!w) {
       // Fallback: generate on the main thread.
       import('../engine/quiz.js').then(({ generate }) => {
-        setTimeout(() => generate({ seed, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, movement, tuning }).then(resolve, reject), 30);
+        setTimeout(() => generate({ seed, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, movement, tuning }).then(resolve, reject), 30);
       }, reject);
       return;
     }
@@ -135,7 +133,7 @@ function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, directi
       else reject(new Error(e.data.message));
     };
     w.addEventListener('message', onMessage);
-    w.postMessage({ id, seed, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, movement, tuning });
+    w.postMessage({ id, seed, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, movement, tuning });
   });
 }
 
@@ -155,6 +153,7 @@ async function load(req) {
     gridSize: normaliseGridSize(req.gridSize ?? $('grid-size').value),
     gridChallenge: normaliseGridChallenge(req.gridChallenge ?? $('grid-challenge').value),
     friendChallenge: normaliseFriendChallenge(req.friendChallenge ?? $('friend-challenge').value),
+    friendAnswer: normaliseFriendAnswer(req.friendAnswer ?? $('friend-answer').value),
     movement: normaliseMovement(req.movement ?? $('movement').value),
     appearance: normaliseAppearance(req.appearance || state.appearance),
     tuning: req.tuning || activeTuning(),
@@ -170,6 +169,7 @@ async function load(req) {
   $('grid-size').value = r.gridSize;
   $('grid-challenge').value = r.gridChallenge;
   $('friend-challenge').value = r.friendChallenge;
+  $('friend-answer').value = r.friendAnswer;
   $('movement').value = r.movement;
   state.appearance = r.appearance; syncAppearanceControls();
   syncControls();
@@ -209,11 +209,13 @@ function updateHash() {
     parts.push('m=trail');
     if (q.trail.movement !== 'go') parts.push(`mv=${q.trail.movement}`);
     const o = normaliseAppearance(q.appearance);
-    parts.push(`k=${o.knife}`, `char=${o.character}`, `skin=${o.finish}`, `hand=${o.handedness}`);
+    parts.push(`k=${o.knife}`, `hand=${o.handedness}`);
+    if (o.scale !== 1) parts.push(`ks=${o.scale}`);
     if (q.headingChoice !== 'auto') parts.push(`h=${q.headingChoice}`);
   }
   else if (q.mode === 'friend') {
     parts.push('m=friend');
+    if (usesGrid(q)) parts.push('fa=grid', `g=${q.grid.size}`);
     if (q.friend.challenge !== 'standard') parts.push(`fc=${q.friend.challenge}`);
     if (q.headingChoice !== 'auto') parts.push(`h=${q.headingChoice}`);
   }
@@ -233,13 +235,15 @@ function syncControls() {
   const facing = $('mode').value === 'facing';
   const lookalike = $('mode').value === 'lookalike';
   const grid = $('mode').value === 'grid';
+  const friendGrid = $('mode').value === 'friend' && $('friend-answer').value === 'grid';
+  $('friend-answer-field').hidden = $('mode').value !== 'friend';
   $('friend-challenge-field').hidden = $('mode').value !== 'friend';
   $('movement-field').hidden = $('mode').value !== 'trail';
-  $('grid-size-field').hidden = !grid;
+  $('grid-size-field').hidden = !(grid || friendGrid);
   $('grid-challenge-field').hidden = !grid;
   $('heading-field').hidden = facing || lookalike || $('mode').value === 'trail' || (grid && $('grid-challenge').value === 'lost-compass');
   $('direction-field').hidden = !lookalike;
-  $('scramble').hidden = facing || grid;
+  $('scramble').hidden = facing || grid || friendGrid;
   if (typeof dev !== 'undefined') renderDevPanel();
 }
 
@@ -263,15 +267,16 @@ function show(quiz) {
 
   const facing = quiz.mode === 'facing';
   const lookalike = quiz.mode === 'lookalike';
-  const grid = quiz.mode === 'grid';
+  const grid = usesGrid(quiz), friendGrid = quiz.mode === 'friend' && grid;
   $('quiz-title').textContent = quiz.mode === 'trail' ? 'WHICH TRAIL DID YOU FOLLOW?' : quiz.mode === 'friend' ? 'WHERE IS YOUR FRIEND?' : facing ? 'WHICH WAY ARE YOU FACING?' : lookalike ? 'LOOK-ALIKES' : grid ? `${quiz.grid.size} × ${quiz.grid.size} GRID` : 'WHERE ARE YOU?';
   $('quiz-title').classList.toggle('long', facing || ['friend', 'trail'].includes(quiz.mode));
   $('facing-text').textContent = quiz.mode === 'trail' ? 'BUNNY HOP · READ THE MOVING TERRAIN' : facing ? 'YOU ARE AT THE MARKED POINT' : headingHidden(quiz) ? 'LOST COMPASS · FIND YOUR CELL' : quiz.heading.text;
   $('facing-arrow').textContent = quiz.mode === 'trail' || headingHidden(quiz) || quiz.heading.mode === 'exact' ? '' : quiz.heading.arrow;
   $('prompt').textContent = facing ? 'You stand at the marked point. Which of the 8 directions are you looking in?'
     : lookalike ? 'A, B and C have similar views in this direction. Match the ridge shapes and foreground to find your point.'
+    : friendGrid ? `Find the orange-jacketed person's cell.${quiz.friend.observerHidden ? ' Your own position is unmarked; read the skyline, slopes and hollows.' : ' You stand at YOU; use bearing, apparent size and the terrain.'} Tap a cell or type its code, then check your answer. Rows start at north; columns start at west. Locate your friend, not your own cell.`
     : grid ? `You stand at a cell centre.${headingHidden(quiz) ? ' Your heading is one of 8 directions, hidden until you answer.' : ''} Tap your cell or type its code, then check your answer. Rows start at north; columns start at west.`
-    : quiz.mode === 'trail' ? 'Watch the slopes, ridges and hollows as you move. Which trail did you follow: A red, B green or C cyan? Circles mark the starts; arrows mark the ends.'
+    : quiz.mode === 'trail' ? 'Which trail did you follow: A red, B green or C cyan? All three traces advance together. Match the slopes, ridges and hollows in the moving view. Circles mark the starts; arrows mark the ends.'
     : quiz.mode === 'friend' ? quiz.friend.observerHidden
       ? `Where is the person in the orange jacket: A, B or C? Your position is unmarked. All three spots fit his distance and apparent size; use the skyline, slopes and hollows to locate him.${quiz.friend.challenge === 'depth-trap' ? ' Depth trap also matches his vertical angle more closely.' : ''}`
       : `You stand at YOU. Where is the person in the orange jacket: A, B or C?${quiz.friend.challenge === 'depth-trap' ? ' All three spots share a bearing — compare distance, apparent size and slope.' : ' Match his position to the surrounding terrain.'}`
@@ -294,7 +299,7 @@ function show(quiz) {
     rotation: state.settings.northUp ? 0 : quiz.mapRotation,
     landmarks: quiz.landmarks,
     grid: grid ? { ...quiz.grid, correctLabel: quiz.correctLabel } : null,
-    extent: quiz.mapExtent || null, trails: quiz.mode === 'trail',
+    extent: quiz.mapExtent || null, trails: quiz.mode === 'trail', trailDuration: quiz.trail?.duration,
     observer: friendObserver(quiz), friendMode: quiz.mode === 'friend',
   });
   map.setOverlays(state.settings);
@@ -312,10 +317,11 @@ function renderAnswerButtons() {
   const answers = $('answers');
   answers.innerHTML = '';
   const facing = state.quiz.mode === 'facing';
-  const grid = state.quiz.mode === 'grid';
+  const grid = usesGrid(state.quiz);
   $('grid-answer').hidden = !grid;
   answers.parentElement.hidden = grid;
   if (grid) {
+    $('grid-cell-label').textContent = state.quiz.mode === 'friend' ? "Friend's cell" : 'Your cell';
     $('grid-cell').value = '';
     $('grid-cell').removeAttribute('aria-invalid');
     $('grid-help').textContent = `Tap a cell or enter A1–${String.fromCharCode(64 + state.quiz.grid.size)}${state.quiz.grid.size}.`;
@@ -369,9 +375,14 @@ function renderScene(camera, playback = {}) {
     const frame = trailFrame(state.quiz, state.trailTime, state.viewing || state.quiz.correctLabel, state.model);
     camera = frame.camera;
     renderer.setViewmodel(state.appearance);
-    renderer.render(camera, { time: state.trailTime, sunHeading: state.quiz.camera.heading, motion: { ...frame.motion, ...playback } });
-    if (state.answered && (Math.abs(state.trailTime - (state.lastTrailMapTime ?? -1)) > .08 || state.lastTrailMapLabel !== frame.route.label || state.trailTime === 0)) {
-      map.setViewing({ ...camera, label: frame.route.label }); state.lastTrailMapTime = state.trailTime; state.lastTrailMapLabel = frame.route.label;
+    renderer.render(camera, { time: state.trailTime, sunHeading: state.quiz.camera.heading,
+      motion: { ...frame.motion, ...playback, clockRunning: trailPlayer.playing || Number.isFinite(playback.inspectElapsed) } });
+    if (Math.abs(state.trailTime - (state.lastTrailMapTime ?? -1)) > .04
+      || (!trailPlayer.playing && state.trailTime !== state.lastTrailMapTime)
+      || (state.answered && map.viewing?.label !== frame.route.label)
+      || state.lastTrailMapLabel !== frame.route.label || state.trailTime === 0 || state.trailTime === state.quiz.trail.duration) {
+      map.setTrailTime(state.trailTime, state.answered ? { ...camera, label: frame.route.label } : null);
+      state.lastTrailMapTime = state.trailTime; state.lastTrailMapLabel = frame.route.label;
     }
   } else {
     renderer.setViewmodel(null); renderer.render(camera);
@@ -404,7 +415,7 @@ $('friend-zoom').addEventListener('click', () => {
 // ---------------------------------------------------------------- answering
 
 function selectCell(label) {
-  if (state.loading || state.answered || state.quiz?.mode !== 'grid') return;
+  if (state.loading || state.answered || !usesGrid(state.quiz)) return;
   $('grid-cell').value = label;
   $('grid-cell').removeAttribute('aria-invalid');
   $('grid-help').textContent = `${label} selected — check your answer when ready.`;
@@ -412,14 +423,14 @@ function selectCell(label) {
 }
 
 $('grid-cell').addEventListener('input', () => {
-  if (state.quiz?.mode !== 'grid') return;
+  if (!usesGrid(state.quiz)) return;
   const label = parseCell($('grid-cell').value, state.quiz.grid.size);
   $('grid-cell').removeAttribute('aria-invalid');
   map.setSelection(label);
 });
 $('grid-answer').addEventListener('submit', (e) => {
   e.preventDefault();
-  if (state.loading || state.answered || state.quiz?.mode !== 'grid') return;
+  if (state.loading || state.answered || !usesGrid(state.quiz)) return;
   const label = parseCell($('grid-cell').value, state.quiz.grid.size);
   if (!label) {
     $('grid-cell').setAttribute('aria-invalid', 'true');
@@ -458,6 +469,7 @@ function answer(label) {
   if (quiz.mode === 'trail') { showTrailResult(label, right); return; }
   if (quiz.mode === 'facing') { showFacingResult(label, right); return; }
   if (quiz.mode === 'grid') { showGridResult(label, right); return; }
+  if (quiz.mode === 'friend' && usesGrid(quiz)) { showFriendGridResult(label, right); return; }
   if (quiz.mode === 'friend') { showFriendResult(label, right); return; }
 
   const res = $('result');
@@ -486,7 +498,7 @@ function showTrailResult(label, right) {
     <div class="views">${q.options.map(o => `<button type="button" class="btn ghost" data-view="${o.label}" style="border-color:${TRAIL_COLORS[o.label]}">Replay ${o.label}${o.correct ? ' (actual)' : ''}</button>`).join('')}</div>
     <table><tr><th>Trail</th><th>Terrain difference</th><th>Detail to check</th></tr>
     ${q.options.map(o => `<tr><td><strong>${o.label}</strong></td><td>${o.correct ? 'Matches' : `${o.D.toFixed(1)}°`}</td><td>${o.correct ? 'Actual run' : `At ${o.cue.t.toFixed(1)} s, skyline ${Math.abs(o.cue.delta).toFixed(1)}° ${o.cue.delta > 0 ? 'higher' : 'lower'} near ${String(o.cue.bearing).padStart(3,'0')}° <button class="btn ghost small" type="button" data-cue="${o.label}" data-actual="true">Actual here</button> <button class="btn ghost small" type="button" data-cue="${o.label}">Compare here</button>`}</td></tr>`).join('')}</table>
-    <p class="note">The dotted highlight marks the correct trail. The moving dot appears only after answering. Knife and character choices change the viewmodel, not the answer.</p>
+    <p class="note">The dotted highlight marks the correct trail; the white dot follows the replay. Before answering, all three coloured traces advance together. Knife choices do not change the answer.</p>
     <button type="button" class="btn primary" id="next">Next quiz (N)</button>`;
   res.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => viewFrom(b.dataset.view)));
   res.querySelectorAll('[data-cue]').forEach(b => b.addEventListener('click', () => {
@@ -496,6 +508,17 @@ function showTrailResult(label, right) {
   }));
   $('next').addEventListener('click', newQuiz);
   state.viewing = q.correctLabel; highlightView(q.correctLabel); trailPlayer.refresh();
+}
+
+function showFriendGridResult(label, right) {
+  const q = state.quiz, res = $('result');
+  res.hidden = false;
+  res.innerHTML = `<div class="verdict ${right ? 'good' : 'bad'}">${right ? 'Correct' : 'Not quite'} — your friend was in ${q.correctLabel}.</div>
+    <p>${right ? '' : `You selected ${label}. `}The green cell contains your friend; FRIEND marks his exact position. YOU marks your observation point.</p>
+    <p class="note">Cell references locate the person in the orange jacket. He can stand anywhere inside a cell. Use the terrain, bearing and his apparent size from your original viewpoint.</p>
+    <button type="button" class="btn primary" id="next">Next quiz (N)</button>`;
+  $('grid-help').textContent = `Your answer: ${label} · friend's cell: ${q.correctLabel}`;
+  $('next').addEventListener('click', newQuiz);
 }
 
 function showFriendResult(label, right) {
@@ -620,7 +643,7 @@ function renderFacts() {
     ...(q.mode === 'trail' ? [['Run', `${q.trail.duration} s · ${Math.round(q.trail.plan.length)} m · three matched routes`],
       ['Movement', q.trail.movement === 'classic' ? 'CS 1.6 style' : 'CS:GO style']] : []),
     ...(q.mode === 'grid' ? [['Cells', `${q.options.length} · ${Math.round(q.grid.cellMetres)} m per side · observer at centre`]] : []),
-    ...(q.mode === 'friend' ? [['Person', 'orange jacket · 1.80 m tall'], ['Viewpoint', q.friend.observerHidden && !state.answered ? 'unmarked · infer from terrain' : 'YOU · observer position'], ['Map area', `${Math.round(q.mapExtent.size)} m × ${Math.round(q.mapExtent.size)} m`]] : []),
+    ...(q.mode === 'friend' ? [['Person', 'orange jacket · 1.80 m tall'], ['Find by', q.grid ? `${q.grid.size} × ${q.grid.size} grid · ${Math.round(q.grid.cellMetres)} m per side` : 'Point · A / B / C'], ['Viewpoint', q.friend.observerHidden && !state.answered ? 'unmarked · infer from terrain' : 'YOU · observer position'], ['Map area', `${Math.round(q.mapExtent.size)} m × ${Math.round(q.mapExtent.size)} m`]] : []),
     ['Field of view', `${q.camera.fov}° · eye ${q.camera.eyeHeight} m`],
     ['Relief', `${Math.round(q.terrain.min)}–${Math.round(q.terrain.max)} m`],
     ['Contours', `${q.terrain.contourInterval} m (index every ${q.terrain.contourInterval * 5} m)`],
@@ -679,7 +702,7 @@ function newQuiz() {
  */
 function scrambleOptions() {
   const q = state.quiz;
-  if (!q || state.answered || state.loading || ['facing', 'grid'].includes(q.mode)) return;
+  if (!q || state.answered || state.loading || q.mode === 'facing' || usesGrid(q)) return;
   // Derived from the unscrambled quiz so "&s=N" in a link reproduces it.
   const quiz = scrambleLabels(state.baseQuiz, (q.scramble || 0) + 1);
   state.quiz = quiz;
@@ -699,7 +722,8 @@ function newPositions() {
     && $('mode').value === q.mode && $('heading-mode').value === (q.headingChoice || 'auto')
     && (q.mode !== 'lookalike' || $('lookalike-direction').value === q.directionChoice);
   const gridSame = q.mode !== 'grid' || (Number($('grid-size').value) === q.grid.size && $('grid-challenge').value === q.grid.challenge);
-  const friendSame = q.mode !== 'friend' || $('friend-challenge').value === q.friend.challenge;
+  const friendSame = q.mode !== 'friend' || ($('friend-challenge').value === q.friend.challenge
+    && $('friend-answer').value === q.friend.answerMode && (!q.grid || Number($('grid-size').value) === q.grid.size));
   const trailSame = q.mode !== 'trail' || $('movement').value === q.trail.movement;
   load({ seed: q.seed, variant: same && gridSame && friendSame && trailSame ? (q.variant || 0) + 1 : 0 });
 }
@@ -712,7 +736,7 @@ $('new-quiz').addEventListener('click', newQuiz);
 $('new-positions').addEventListener('click', newPositions);
 $('scramble').addEventListener('click', scrambleOptions);
 // Changing mode, difficulty or heading style keeps the seed, so the terrain carries over.
-for (const id of ['difficulty', 'mode', 'heading-mode', 'lookalike-direction', 'grid-size', 'grid-challenge', 'friend-challenge', 'movement']) {
+for (const id of ['difficulty', 'mode', 'heading-mode', 'lookalike-direction', 'grid-size', 'grid-challenge', 'friend-challenge', 'friend-answer', 'movement']) {
   $(id).addEventListener('change', () => { syncControls(); load({ seed: $('seed').value.trim() }); });
 }
 $('copy-link').addEventListener('click', async () => {
@@ -929,10 +953,16 @@ function setExportBusy(on) {
 async function exportImage(reveal) {
   const c = exportUi.composer;
   stopPreview();
-  const blob = await c.toImage({ reveal });
-  download(blob, exportName(reveal ? '-answer' : '', 'png'));
-  setExportStatus(`Saved ${exportName(reveal ? '-answer' : '', 'png')}`);
-  startPreview();
+  setExportBusy(true);
+  try {
+    const blob = await c.toImage({ reveal });
+    download(blob, exportName(reveal ? '-answer' : '', 'png'));
+    setExportStatus(`Saved ${exportName(reveal ? '-answer' : '', 'png')}`);
+  } catch (error) {
+    setExportStatus(`Image export failed: ${error.message}`);
+  } finally {
+    setExportBusy(false); startPreview();
+  }
 }
 
 async function exportVideo() {
@@ -945,7 +975,7 @@ async function exportVideo() {
   try {
     c.animated = true;
     const d = c.options.duration;
-    const { blob, extension, h264 } = await encodeCanvasVideo(c.canvas, (t) => c.drawFrame(t, { reveal: c.options.reveal && t >= d - 3 }), {
+    const { blob, extension, h264 } = await encodeCanvasVideo(c.canvas, (t) => c.drawFrameReady(t, { reveal: c.options.reveal && t >= d - 3 }), {
       duration: d, fps: 30, onProgress: (p) => { progress.value = p; },
     });
     const name = exportName('', extension);
@@ -1000,8 +1030,9 @@ function parseHash() {
     gridSize: normaliseGridSize(p.get('g')),
     gridChallenge: normaliseGridChallenge(p.get('gc')),
     friendChallenge: normaliseFriendChallenge(p.get('fc')),
+    friendAnswer: normaliseFriendAnswer(p.get('fa')),
     movement: normaliseMovement(p.get('mv')),
-    appearance: p.get('m') === 'trail' ? normaliseAppearance({ knife: p.get('k'), character: p.get('char'), finish: p.get('skin'), handedness: p.get('hand') }) : null,
+    appearance: p.get('m') === 'trail' ? normaliseAppearance({ knife: p.get('k'), scale: p.get('ks') === null ? 1 : Number(p.get('ks')), handedness: p.get('hand') }) : null,
     direction: DIRECTIONS.some((d) => d.label === p.get('dir')) ? p.get('dir') : 'auto',
     headingMode: ['exact', 'intercardinal', 'cardinal'].includes(h) ? h : 'auto',
     tuning: p.has('dev') ? decodeTuning(p.get('dev')) : null,
@@ -1015,7 +1046,8 @@ window.addEventListener('hashchange', () => {
     || h.mode !== q?.mode || h.headingMode !== (q?.headingChoice || 'auto')
     || (h.mode === 'lookalike' && h.direction !== q?.directionChoice)
     || (h.mode === 'trail' && (h.movement !== q?.trail?.movement || JSON.stringify(h.appearance) !== JSON.stringify(q?.appearance)))
-    || (h.mode === 'friend' && h.friendChallenge !== q?.friend?.challenge)
+    || (h.mode === 'friend' && (h.friendChallenge !== q?.friend?.challenge || h.friendAnswer !== q?.friend?.answerMode
+      || (h.friendAnswer === 'grid' && h.gridSize !== q?.grid?.size)))
     || (h.mode === 'grid' && (h.gridSize !== q?.grid?.size || h.gridChallenge !== q?.grid?.challenge))
     || encodeTuning(h.tuning || {}) !== encodeTuning(q?.tuning || {}))) { adoptLinkTuning(h.tuning); load({ ...h, difficulty: h.difficulty || 'medium' }); }
 });
@@ -1112,6 +1144,8 @@ for (const id of ['grid-size', 'grid-challenge']) $(id).addEventListener('change
 });
 $('friend-challenge').value = normaliseFriendChallenge(store.get('otq.friend', 'standard'));
 $('friend-challenge').addEventListener('change', () => store.set('otq.friend', $('friend-challenge').value));
+$('friend-answer').value = normaliseFriendAnswer(store.get('otq.friendAnswer', 'point'));
+$('friend-answer').addEventListener('change', () => store.set('otq.friendAnswer', $('friend-answer').value));
 const initial = parseHash();
 adoptLinkTuning(initial.tuning);
 renderDevPanel();

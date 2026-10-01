@@ -2,7 +2,7 @@
 // TerrainModel's oriented Marching Squares output.
 
 import { ContourGenerator } from '../engine/contours.js';
-import { cellAt, parseCell } from '../engine/gridQuiz.js';
+import { cellAtExtent, parseCell } from '../engine/gridQuiz.js';
 import { TRAIL_COLORS } from '../engine/trailQuiz.js';
 
 const COLORS = {
@@ -23,9 +23,19 @@ const COLORS = {
  * you?", or the single (unlabelled) observer point in "Which way?".
  */
 export function quizMarkers(quiz) {
-  if (quiz.mode === 'grid') return [];
+  if (quiz.grid) return [];
   if (quiz.mode === 'facing') return [{ label: '', x: quiz.point.x, y: quiz.point.y, correct: true }];
   return quiz.options;
+}
+
+/** All candidates advance by clip time, independently of correctness. */
+export function trailTracePoints(points, time, duration = 12) {
+  if (!points.length) return [];
+  const index = Math.max(0, Math.min(1, time / duration)) * (points.length - 1);
+  const i = Math.floor(index), f = index - i, a = points[i], b = points[Math.min(i + 1, points.length - 1)];
+  const trace = points.slice(0, i + 1);
+  if (f > 0) trace.push({ x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f });
+  return trace;
 }
 
 function chaikin(pts, closed) {
@@ -75,18 +85,24 @@ export class MapRenderer {
     this.contours = data.model.getContours(data.interval);
     this.reveal = null;
     this.viewing = null;
+    this.trailTime = 0;
     this.selection = null;
     this.hover = null;
     this._lines = null;
     this.pickable = true;
     this._hillshade = null;
+    this._trailBase = null;
     this.draw();
   }
 
   setReveal(reveal) { this.reveal = reveal; this.pickable = !reveal; this.draw(); }
   setSelection(label) { this.selection = label; this.draw(); }
   setViewing(v) { this.viewing = v; this.draw(); }
-  setOverlays(o) { Object.assign(this.overlays, o); this.draw(); }
+  setTrailTime(time, viewing = null) {
+    if (!this.data?.trails) return;
+    this.trailTime = time; this.viewing = viewing; this.draw();
+  }
+  setOverlays(o) { Object.assign(this.overlays, o); this._trailBase = null; this.draw(); }
 
   layout() {
     const f = this.fixedSize;
@@ -124,7 +140,7 @@ export class MapRenderer {
     const px = e.clientX - r.left, py = e.clientY - r.top;
     if (this.data.grid) {
       const [x, y] = this.toWorld(px, py);
-      const label = cellAt(x, y, this.data.model.size, this.data.grid.size);
+      const label = cellAtExtent(x, y, this.gridExtent(), this.data.grid.size);
       return label ? { label } : null;
     }
     if (this.data.trails) {
@@ -150,13 +166,28 @@ export class MapRenderer {
     return best;
   }
 
-  draw() {
+  draw({ staticOnly = false } = {}) {
     if (!this.data) return;
     this.layout();
     const { ctx, dpr } = this;
     const w = this.canvas.width / dpr, h = this.canvas.height / dpr;
     this.cssW = w; this.cssH = h;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Contours are static during playback. Cache them once so every trace
+    // update only paints three short paths, including in mobile exports.
+    if (this.data.trails && !staticOnly) {
+      const key = `${this.canvas.width}:${this.canvas.height}:${this.data.rotation}`;
+      if (!this._trailBase || this._trailBaseKey !== key) {
+        this.draw({ staticOnly: true });
+        const base = document.createElement('canvas');
+        base.width = this.canvas.width; base.height = this.canvas.height;
+        base.getContext('2d').drawImage(this.canvas, 0, 0);
+        this._trailBase = base; this._trailBaseKey = key;
+      }
+      ctx.drawImage(this._trailBase, 0, 0, w, h);
+      this.drawTrails(); this.drawTrailLabels();
+      return;
+    }
     ctx.fillStyle = COLORS.bg;
     ctx.fillRect(0, 0, w, h);
 
@@ -218,7 +249,7 @@ export class MapRenderer {
     if (this.overlays.drainage) this.drawDrainage();
     if (this.overlays.landforms) this.drawLandforms();
     if (this.data.grid) this.drawGrid();
-    if (this.data.trails) this.drawTrails();
+    if (this.data.trails && !staticOnly) this.drawTrails();
     if (!this.data.trails) this.drawCone();
     ctx.restore();
 
@@ -231,18 +262,23 @@ export class MapRenderer {
 
     this.drawNorthArrow();
     this.drawScaleBar();
-    if (this.data.grid) this.drawGridLabels();
-    else if (this.data.trails) this.drawTrailLabels();
+    if (this.data.grid) { this.drawGridLabels(); this.drawGridTarget(); }
+    else if (this.data.trails) { if (!staticOnly) this.drawTrailLabels(); }
     else this.drawMarkers(); // last, so nothing ever hides an answer option
     if (this.currentObserver()) this.drawObserver();
+  }
+
+  gridExtent() {
+    const L = this.data.model.size;
+    return this.data.extent || { x: L / 2, y: L / 2, size: L };
   }
 
   gridPolygon(label) {
     const grid = this.data.grid, code = parseCell(label, grid.size);
     if (!code) return;
-    const step = this.data.model.size / grid.size;
+    const extent = this.gridExtent(), step = extent.size / grid.size;
     const row = code.charCodeAt(0) - 65, col = Number(code.slice(1)) - 1;
-    const x = col * step, y = this.data.model.size - row * step;
+    const x = extent.x - extent.size / 2 + col * step, y = extent.y + extent.size / 2 - row * step;
     const { ctx } = this;
     ctx.beginPath();
     [[x, y], [x + step, y], [x + step, y - step], [x, y - step]].forEach(([wx, wy], i) => {
@@ -268,23 +304,25 @@ export class MapRenderer {
       if (this.pickable && this.hover !== this.selection) highlight(this.hover, '#ffd666', 'rgba(255,214,102,0.10)');
     }
     ctx.strokeStyle = 'rgba(125,185,219,0.65)'; ctx.lineWidth = 0.7;
-    const L = this.data.model.size;
+    const extent = this.gridExtent(), L = extent.size;
+    const left = extent.x - L / 2, bottom = extent.y - L / 2;
     ctx.beginPath();
     for (let i = 0; i <= n; i++) {
       for (const ends of [[[i / n * L, 0], [i / n * L, L]], [[0, i / n * L], [L, i / n * L]]]) {
-        const a = this.toCanvas(...ends[0]), b = this.toCanvas(...ends[1]);
+        const a = this.toCanvas(ends[0][0] + left, ends[0][1] + bottom), b = this.toCanvas(ends[1][0] + left, ends[1][1] + bottom);
         ctx.moveTo(...a); ctx.lineTo(...b);
       }
     }
     ctx.stroke();
-    if (this.reveal?.camera) {
+    if (this.reveal?.camera && !this.data.grid.target) {
       const [x, y] = this.toCanvas(this.reveal.camera.x, this.reveal.camera.y);
       ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fillStyle = COLORS.correct; ctx.fill();
     }
   }
 
   drawGridLabels() {
-    const { ctx } = this, n = this.data.grid.size, L = this.data.model.size;
+    const { ctx } = this, n = this.data.grid.size, extent = this.gridExtent(), L = extent.size;
+    const left = extent.x - L / 2, bottom = extent.y - L / 2;
     const label = (text, x, y, font = 10) => {
       ctx.font = `700 ${font}px system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.lineWidth = 3; ctx.strokeStyle = COLORS.bg; ctx.strokeText(text, x, y);
@@ -294,13 +332,13 @@ export class MapRenderer {
     // grids use these headers instead of covering contours with 256 tiny codes.
     const offset = 11 / this.S * L;
     for (let i = 0; i < n; i++) {
-      label(String(i + 1), ...this.toCanvas((i + 0.5) / n * L, L + offset));
-      label(String.fromCharCode(65 + i), ...this.toCanvas(-offset, L - (i + 0.5) / n * L));
+      label(String(i + 1), ...this.toCanvas(left + (i + 0.5) / n * L, bottom + L + offset));
+      label(String.fromCharCode(65 + i), ...this.toCanvas(left - offset, bottom + L - (i + 0.5) / n * L));
     }
     if (n <= 8 || this.S / n >= 30) {
       const font = Math.min(11, Math.max(8, this.S / n * 0.23));
       for (let row = 0; row < n; row++) for (let col = 0; col < n; col++) {
-        label(`${String.fromCharCode(65 + row)}${col + 1}`, ...this.toCanvas((col + 0.5) / n * L, L - (row + 0.5) / n * L), font);
+        label(`${String.fromCharCode(65 + row)}${col + 1}`, ...this.toCanvas(left + (col + 0.5) / n * L, bottom + L - (row + 0.5) / n * L), font);
       }
     }
     const active = this.reveal ? this.data.grid.correctLabel : this.selection || (this.pickable ? this.hover : null);
@@ -308,6 +346,17 @@ export class MapRenderer {
       ctx.fillStyle = 'rgba(21,26,32,0.95)'; ctx.fillRect(0, 0, 48, 24);
       label(active, 24, 12, 13);
     }
+  }
+
+  drawGridTarget() {
+    const target = this.data.grid.target;
+    if (!this.reveal || !target) return;
+    const { ctx } = this, [x, y] = this.toCanvas(target.x, target.y);
+    ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.strokeStyle = COLORS.bg; ctx.lineWidth = 3; ctx.stroke();
+    ctx.fillStyle = COLORS.correct; ctx.fill();
+    ctx.font = '700 10px system-ui, sans-serif'; ctx.textAlign = 'center';
+    ctx.strokeText('FRIEND', x, y - 11); ctx.fillText('FRIEND', x, y - 11);
   }
 
   prepareLines() {
@@ -486,13 +535,24 @@ export class MapRenderer {
   drawTrails() {
     const { ctx } = this;
     for (const route of this.data.options) {
-      const active = this.viewing?.label === route.label, hovered = this.pickable && this.hover === route.label;
+      const active = !!this.reveal && this.viewing?.label === route.label, hovered = this.pickable && this.hover === route.label;
       ctx.globalAlpha = this.reveal && !route.correct && !active ? .5 : 1;
       const points = route.points.map((p) => this.toCanvas(p.x, p.y));
       ctx.lineJoin = 'round'; ctx.lineCap = 'round';
       const line = () => { ctx.beginPath(); points.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)); };
       line(); ctx.strokeStyle = COLORS.bg; ctx.lineWidth = active || hovered ? 7 : 6; ctx.stroke();
+      const opacity = ctx.globalAlpha;
+      ctx.globalAlpha = opacity * .48;
       line(); ctx.strokeStyle = TRAIL_COLORS[route.label]; ctx.lineWidth = active || hovered ? 3.8 : 3; ctx.stroke();
+      ctx.globalAlpha = opacity;
+      const trace = trailTracePoints(route.points, this.trailTime || 0, this.data.trailDuration || 12)
+        .map(p => this.toCanvas(p.x, p.y));
+      ctx.beginPath(); trace.forEach(([x,y], i) => i ? ctx.lineTo(x,y) : ctx.moveTo(x,y)); ctx.stroke();
+      if ((this.trailTime || 0) > 0 && trace.length) {
+        const [x,y] = trace.at(-1);
+        ctx.fillStyle = TRAIL_COLORS[route.label];
+        ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
+      }
       const end = points.at(-1), before = points[Math.max(0, points.length - 5)], az = Math.atan2(end[1] - before[1], end[0] - before[0]);
       ctx.fillStyle = TRAIL_COLORS[route.label]; ctx.beginPath(); ctx.moveTo(end[0] + Math.cos(az) * 6, end[1] + Math.sin(az) * 6);
       for (const a of [az + 2.5, az - 2.5]) ctx.lineTo(end[0] + Math.cos(a) * 5, end[1] + Math.sin(a) * 5);
@@ -630,7 +690,7 @@ export class MapRenderer {
     const { ctx } = this;
     if (this.data.grid) {
       ctx.fillStyle = COLORS.marker; ctx.font = '500 10px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-      ctx.fillText(`${Math.round(this.data.model.size / this.data.grid.size)} m per cell · ${this.data.interval} m contours`, this.cx, this.cssH - 4);
+      ctx.fillText(`${Math.round(this.gridExtent().size / this.data.grid.size)} m per cell · ${this.data.interval} m contours`, this.cx, this.cssH - 4);
       return;
     }
     const L = this.data.extent?.size || this.data.model.size;

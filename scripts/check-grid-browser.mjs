@@ -9,13 +9,13 @@ import { fileURLToPath } from 'node:url';
 import { generate } from '../src/engine/quiz.js';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
-const root = fileURLToPath(new URL('..', import.meta.url));
+const root = fileURLToPath(new URL(process.env.CHECK_SITE ? '../' + process.env.CHECK_SITE + '/' : '..', import.meta.url));
 const out = process.argv[2];
 if (out) await mkdir(out, { recursive: true });
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
 const server = createServer(async (req, res) => {
   const path = new URL(req.url, 'http://localhost').pathname.slice(1) || 'index.html';
-  try { res.writeHead(200, { 'Content-Type': types[extname(path)] || 'application/octet-stream' }); res.end(await readFile(join(root, path))); }
+  try { const body = await readFile(join(root, path)); res.writeHead(200, { 'Content-Type': types[extname(path)] || 'application/octet-stream' }); res.end(body); }
   catch { res.writeHead(404).end(); }
 }).listen(0);
 await new Promise((resolve) => server.once('listening', resolve));

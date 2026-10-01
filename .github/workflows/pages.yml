@@ -1,6 +1,8 @@
 name: Validate and deploy to GitHub Pages
 
 on:
+  pull_request:
+    branches: [main]
   push:
     branches: [main, codex/bunny-hop-trails]
   workflow_dispatch:
@@ -47,6 +49,10 @@ jobs:
         run: node scripts/check-trail-browser.mjs browser-artifacts
       - name: Test existing grid controls in Chromium
         run: node scripts/check-grid-browser.mjs browser-artifacts
+      - name: Test friend grid controls and exports in Chromium
+        env:
+          CHECK_SITE: _site
+        run: node scripts/check-friend-grid-browser.mjs browser-artifacts
       - uses: actions/upload-artifact@v4
         if: always()
         with:

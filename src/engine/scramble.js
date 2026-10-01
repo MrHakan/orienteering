@@ -6,7 +6,7 @@ import { Random } from './rng.js';
 
 /** Returns a copy of `quiz` with its options relabelled by `steps` scrambles. */
 export function scrambleLabels(quiz, steps) {
-  if (quiz.mode === 'grid') return quiz;
+  if (quiz.grid) return quiz;
   const labels = quiz.options.map((o) => o.label).sort();
   let current = quiz.options.map((o) => ({ ...o }));
   for (let s = 1; s <= steps; s++) {
