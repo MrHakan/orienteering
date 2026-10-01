@@ -175,6 +175,26 @@ The view-difference limit ranges from 3.8° on Easy to 2.3° on Master. If eight
 
 A rotated map is only a display transform. The north arrow always shows true north and the coordinates never rotate. Every preset lives in `src/engine/difficulty.js`.
 
+## Environment
+
+The **Environment** panel controls the live scene: clear skies, passing clouds,
+overcast, light drizzle, rain, rainstorms, morning mist, snowfall and golden hour.
+Choose calm air, a light breeze or a strong breeze independently. Wind has smooth
+gusts, bends vegetation and changes the direction of rain and drifting snow;
+clouds cast moving shadows. Snow also settles visually on flatter ground.
+
+**HD terrain texture** adds mipmapped grass/soil detail and exposed rock texture.
+**Foliage** adds swaying grass, shrubs and sparse trees. **Nature** adds rocks,
+wildflowers and distant birds. Vegetation is seeded from the terrain, rests on
+the rendered ground, and uses the terrain depth buffer. All three are optional
+and off by default. These settings never modify elevations, contours or answers.
+
+Preferences are remembered locally. Opening Export copies the current scene's
+environment; the dialog can adjust it for that image/video. Live views and exports
+share the same WebGL effects, seeded vegetation and frame-time animation. Ambient
+animation stops while the tab is hidden or the export dialog is open. Reduced-motion
+preferences freeze ambient animation in the game; video exports remain animated.
+
 ## Developer mode
 
 The **Developer** panel (sidebar) overrides the difficulty's thresholds without touching the defaults. The overrides are:

@@ -182,6 +182,17 @@
     </section>
 
     <aside class="panel">
+      <section class="box environment-controls">
+        <h2>Environment</h2>
+        <div class="environment-fields">
+          <label class="field"><span>Weather</span><select id="scene-weather" aria-label="Scene weather"></select></label>
+          <label class="field"><span>Wind</span><select id="scene-wind" aria-label="Scene wind strength"></select></label>
+        </div>
+        <label class="toggle"><input type="checkbox" id="scene-hd"> HD terrain texture</label>
+        <label class="toggle"><input type="checkbox" id="scene-foliage"> Foliage <small>grass, shrubs &amp; trees</small></label>
+        <label class="toggle"><input type="checkbox" id="scene-nature"> Nature <small>rocks, flowers &amp; birds</small></label>
+        <p class="dev-note">Settings carry into image and video exports.</p>
+      </section>
       <section class="box">
         <h2>Score</h2>
         <div class="score">
@@ -259,11 +270,15 @@
           <label class="toggle"><input type="radio" name="format" value="post"> Post 4:5 <small>1080×1350</small></label>
         </fieldset>
         <fieldset>
-          <legend>Weather (animated)</legend>
-          <label class="toggle"><input type="checkbox" name="weather" value="wind"> Wind</label>
-          <label class="toggle"><input type="checkbox" name="weather" value="rain"> Rain</label>
-          <label class="toggle"><input type="checkbox" name="weather" value="clouds"> Clouds</label>
-          <label class="toggle"><input type="checkbox" name="weather" value="fog"> Fog</label>
+          <legend>Environment</legend>
+          <div class="environment-fields">
+            <label class="field"><span>Weather</span><select id="export-weather" aria-label="Export weather"></select></label>
+            <label class="field"><span>Wind</span><select id="export-wind" aria-label="Export wind strength"></select></label>
+          </div>
+          <label class="toggle"><input type="checkbox" id="export-hd"> HD terrain texture</label>
+          <label class="toggle"><input type="checkbox" id="export-foliage"> Foliage</label>
+          <label class="toggle"><input type="checkbox" id="export-nature"> Nature</label>
+          <p class="dev-note">Starts with your scene settings. Adjust here for this export.</p>
         </fieldset>
         <fieldset>
           <legend>Easter egg</legend>

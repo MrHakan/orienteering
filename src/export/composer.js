@@ -8,7 +8,7 @@ import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
 import { skylineScreenPoints } from '../render/skylineOverlay.js';
 import { createEasterEgg } from '../easter/index.js';
-import { Random } from '../engine/rng.js';
+import { normaliseEnvironment, environmentFromWeather, weatherParams } from '../render/environment.js';
 import { headingHidden } from '../engine/gridQuiz.js';
 import { friendSceneFrame } from './friendZoom.js';
 import { friendObserver } from '../engine/friendQuiz.js';
@@ -19,26 +19,8 @@ export const FORMATS = {
   post: { label: 'Post 4:5', width: 1080, height: 1350 },
 };
 
-export const WEATHER_TYPES = ['wind', 'rain', 'clouds', 'fog'];
-
-/** Shader + overlay parameters for a set of weather effects. */
-export function weatherParams(selected, heading) {
-  const has = (k) => selected.includes(k);
-  // Wind blows across the view so both clouds and grass visibly move.
-  const dir = ((heading + 75) * Math.PI) / 180;
-  let speed = 0;
-  if (has('clouds')) speed = 3;
-  if (has('rain')) speed = Math.max(speed, 4);
-  if (has('wind')) speed = 11;
-  return {
-    cloud: has('rain') ? 0.95 : has('clouds') ? 0.7 : 0,
-    wind: [Math.sin(dir) * speed, Math.cos(dir) * speed],
-    wet: has('rain') ? 1 : 0,
-    fog: has('fog') ? 1 : 0,
-    rain: has('rain'),
-    gusts: has('wind'),
-  };
-}
+export const WEATHER_TYPES = ['breeze', 'wind', 'clouds', 'overcast', 'drizzle', 'rain', 'storm', 'fog', 'snow', 'sunset'];
+export { weatherParams } from '../render/environment.js';
 
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
@@ -60,7 +42,7 @@ export class ExportComposer {
    * @param {import('../engine/terrainModel.js').TerrainModel} model
    * `easterEgg` is a plan from resolveEasterEgg() (or null): a decorative
    * seasonal layer chosen once per render, never per frame.
-   * @param {{canvas?:HTMLCanvasElement, easterEgg?:object|null, format?:string, weather?:string[], handle?:string, caption?:boolean, reveal?:boolean, tape?:boolean, northUp?:boolean, duration?:number}} options
+   * @param {{canvas?:HTMLCanvasElement, easterEgg?:object|null, format?:string, environment?:object, weather?:string[], handle?:string, caption?:boolean, reveal?:boolean, tape?:boolean, northUp?:boolean, duration?:number}} options
    */
   constructor(quiz, model, options = {}) {
     this.quiz = quiz;
@@ -79,6 +61,7 @@ export class ExportComposer {
     delete rest.canvas;
     const prev = this.options || {};
     this.options = { format: 'reels', weather: [], handle: '', caption: true, reveal: true, tape: true, northUp: false, duration: 15, ...prev, ...rest };
+    if ('weather' in rest && !('environment' in rest)) delete this.options.environment;
     const o = this.options;
     this.renderer.setViewmodel?.(this.quiz.mode === 'trail' ? o.appearance || this.quiz.appearance || {} : null);
     const f = FORMATS[o.format] || FORMATS.reels;
@@ -88,10 +71,10 @@ export class ExportComposer {
       this.canvas.height = f.height;
       this.layout = this.computeLayout(f);
       this.renderer.setFixedSize(this.layout.scene.w, this.layout.scene.h);
-      this.buildRain();
     }
     if (formatChanged || prev.northUp !== o.northUp) this.buildMaps();
-    this.weather = weatherParams(o.weather, this.quiz.camera.heading);
+    this.environment = o.environment ? normaliseEnvironment(o.environment) : environmentFromWeather(o.weather);
+    this.weather = weatherParams(o.environment ? this.environment : o.weather, this.quiz.camera.heading);
     if (formatChanged || 'easterEgg' in rest) this.buildEasterEgg();
   }
 
@@ -168,15 +151,6 @@ export class ExportComposer {
     this.mapRevealCanvas = make(true);
   }
 
-  buildRain() {
-    const rng = new Random(`${this.quiz.seed}|rain`);
-    const { w, h } = this.layout.scene;
-    this.drops = Array.from({ length: 520 }, () => {
-      const depth = rng.next(); // 0 far .. 1 near
-      return { x: rng.range(-0.2, 1.2) * w, y: rng.range(0, h), len: 10 + depth * 34, speed: 900 + depth * 1400, alpha: 0.12 + depth * 0.35, width: 0.8 + depth * 1.6 };
-    });
-  }
-
   /** Draw one frame. t = seconds since start. */
   drawFrame(t = 0, { reveal = false } = {}) {
     const { ctx, layout: L, quiz: q } = this;
@@ -205,13 +179,12 @@ export class ExportComposer {
 
     // Scene.
     const S = L.scene;
-    this.renderer.render(camera, { weather: this.weather, time: frame ? frame.motion.t : t,
+    this.renderer.render(camera, { weather: this.weather, environment: this.environment, environmentTime: t, time: frame ? frame.motion.t : t,
       personMotion: friendFrame.personMotion,
       motion: frame ? { ...frame.motion, clockRunning: this.animated } : {}, sunHeading: q.mode === 'trail' ? q.camera.heading : camera.heading });
     ctx.drawImage(this.glCanvas, S.x, S.y, S.w, S.h);
     ctx.save();
     ctx.beginPath(); ctx.rect(S.x, S.y, S.w, S.h); ctx.clip();
-    if (this.weather.rain) this.drawRain(t);
     // The bearing tape would reveal the answer in "Which way?" until the reveal.
     if (this.options.tape && (!headingHidden(q) || reveal)) drawCompassTape(null, camera, { exact: q.heading.mode === 'exact', target: { ctx, x: S.x, y: S.y, width: S.w, scale: S.w / 666 } });
     ctx.restore();
@@ -284,27 +257,6 @@ export class ExportComposer {
     ctx.fill();
     ctx.fillStyle = '#5fd08a';
     ctx.fillText(text, x, y + 10);
-  }
-
-  drawRain(t) {
-    const { ctx } = this;
-    const S = this.layout.scene;
-    // Screen-space slant from the wind component across the view.
-    const hd = (this.quiz.camera.heading * Math.PI) / 180;
-    const [we, wn] = this.weather.wind;
-    const across = we * Math.cos(hd) - wn * Math.sin(hd);
-    const slant = across * 0.035;
-    ctx.lineCap = 'round';
-    for (const d of this.drops) {
-      const y = (d.y + d.speed * t) % (S.h + d.len) - d.len;
-      const x = ((d.x + slant * d.speed * t) % (S.w * 1.4) + S.w * 1.4) % (S.w * 1.4) - S.w * 0.2;
-      ctx.strokeStyle = `rgba(215, 225, 235, ${d.alpha})`;
-      ctx.lineWidth = d.width;
-      ctx.beginPath();
-      ctx.moveTo(S.x + x, S.y + y);
-      ctx.lineTo(S.x + x + slant * d.len, S.y + y + d.len);
-      ctx.stroke();
-    }
   }
 
   /** PNG of a single frame. */

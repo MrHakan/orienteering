@@ -122,6 +122,9 @@ body {
 .credit { text-align: center; color: #6f7982; font-size: 12px; margin: 16px 0 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 .panel { display: flex; flex-direction: column; gap: 14px; }
+.environment-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0 0 10px; }
+.environment-fields select { width: 100%; min-width: 0; }
+.environment-controls .toggle { flex-wrap: wrap; }
 .box { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
 .box h2 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
 .score { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; }

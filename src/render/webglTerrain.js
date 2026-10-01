@@ -5,6 +5,9 @@
 import { personVertices } from './personMesh.js';
 import { KnifeViewModel } from './knifeViewModel.js';
 import { FriendSprite } from './friendSprite.js';
+import { windGust } from './environment.js';
+import { terrainDetailPixels } from './terrainDetail.js';
+import { buildNatureMeshes, NATURE_VERT, NATURE_FRAG } from './natureMesh.js';
 
 const PERSON_VERT = `
 attribute vec3 aPos;
@@ -59,7 +62,10 @@ uniform float uFogDensity;
 uniform float uTime;
 uniform float uCloud;   // 0..1 cloud cover (moving shadows)
 uniform vec2 uWind;     // wind vector, m/s (east, north)
+uniform vec2 uCloudWind;
 uniform float uWet;     // 0..1 rain darkening
+uniform float uHD, uSnow, uDusk, uGust;
+uniform sampler2D uDetail;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p) {
@@ -87,6 +93,17 @@ void main() {
             + (vnoise(vWorld.xz / 21.0) - 0.5) * 0.3 * (1.0 - smoothstep(400.0, 2000.0, d))
             + (vnoise(vWorld.xz / 75.0) - 0.5) * 0.25;
   col *= 1.0 + tex;
+  if (uHD > 0.0) {
+    // Real repeating detail texture, mipmapped to avoid distant shimmer.
+    vec4 detail = texture2D(uDetail, vWorld.xz / 4.0);
+    float close = 1.0 - smoothstep(25.0, 240.0, d);
+    col *= mix(vec3(1.0), detail.rgb * 2.0, close * .65);
+    float rock = smoothstep(.13, .42, slope) * .7;
+    vec3 stone = vec3(.39, .38, .34) * (.8 + .4 * detail.a);
+    stone *= .9 + .15 * sin(vWorld.y * 2.3 + vnoise(vWorld.xz / 9.0) * 4.0);
+    col = mix(col, stone, rock);
+  }
+  col = mix(col, vec3(.78, .83, .83), uSnow * smoothstep(.35, .92, n.y) * .72);
 
   // Wind: bands of bent grass sweeping downwind.
   float windSpeed = length(uWind);
@@ -94,7 +111,7 @@ void main() {
     vec2 wd = uWind / windSpeed;
     vec2 ground = vec2(vWorld.x, -vWorld.z);
     float phase = dot(ground, wd) / 7.0 - uTime * (1.2 + windSpeed * 0.25) + vnoise(ground / 35.0) * 5.0;
-    col *= 1.0 + 0.07 * sin(phase) * min(1.0, windSpeed / 8.0) * (1.0 - smoothstep(80.0, 700.0, d));
+    col *= 1.0 + 0.07 * sin(phase) * min(1.0, windSpeed / 8.0) * uGust * (1.0 - smoothstep(80.0, 700.0, d));
   }
   col *= 1.0 - 0.2 * uWet;
 
@@ -103,12 +120,13 @@ void main() {
   // Moving cloud shadows (and a duller, flatter light under overcast skies).
   float shadow = 0.0;
   if (uCloud > 0.0) {
-    vec2 cp = (vec2(vWorld.x, -vWorld.z) - uWind * uTime * 6.0) / 520.0;
+    vec2 cp = (vec2(vWorld.x, -vWorld.z) - uCloudWind * uTime * 6.0) / 520.0;
     float c = vnoise(cp) * 0.6 + vnoise(cp * 2.3) * 0.3 + vnoise(cp * 5.1) * 0.1;
     shadow = smoothstep(0.62 - 0.35 * uCloud, 0.8 - 0.3 * uCloud, c) * uCloud;
   }
   float sun = 0.95 * (1.0 - 0.35 * uWet) * (1.0 - 0.6 * shadow);
   vec3 lit = col * ((0.42 + 0.12 * uWet) * hemi + sun * diff);
+  lit *= mix(vec3(1.0), vec3(1.14, .9, .71), uDusk);
 
   float fog = 1.0 - exp(-pow(d * uFogDensity, 1.35));
   gl_FragColor = vec4(mix(lit, uFogColor, clamp(fog, 0.0, 1.0)), 1.0);
@@ -132,6 +150,7 @@ uniform float uTime;
 uniform float uCloud;
 uniform vec2 uWind;
 uniform float uWet;
+uniform float uNature, uBirdHeading;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p) {
@@ -160,7 +179,61 @@ void main() {
     vec3 cloudCol = mix(vec3(0.86, 0.87, 0.88), vec3(0.52, 0.55, 0.58), uWet * 0.8 + 0.25 * (1.0 - n));
     c = mix(c, cloudCol, cover * smoothstep(0.0, 0.08, elev) * 0.95);
   }
+  // A small flock in the world sky, never over the ground or map.
+  if (uNature > 0.0 && elev > .03) {
+    float az = uHeading + atan(vNdc.x * uTanHalfH);
+    for (int i = 0; i < 4; i++) {
+      float fi = float(i);
+      float birdAz = uBirdHeading - .12 + fi * .027 + uTime * .006;
+      float dx = atan(sin(az - birdAz), cos(az - birdAz));
+      float dy = elev - (.20 + fi * .012 + sin(uTime * .45 + fi) * .008);
+      float wing = abs(dx) * (.4 + .45 * sin(uTime * 5.0 + fi));
+      float bird = (1.0 - smoothstep(.0012, .0028, abs(dy - wing))) * (1.0 - smoothstep(.006, .009, abs(dx)));
+      c = mix(c, vec3(.17, .2, .22), bird * .6);
+    }
+  }
   gl_FragColor = vec4(c, 1.0);
+}`;
+
+// One precipitation layer for both live play and exports. Far, middle and near
+// particles fall at different speeds, with camera-relative wind and soft edges.
+const WEATHER_FRAG = `
+precision highp float;
+varying vec2 vNdc;
+uniform vec2 uResolution;
+uniform float uTime, uRain, uSnow, uAcross, uGust, uMist;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+void main() {
+  vec2 uv = vNdc * .5 + .5;
+  vec2 screen = vec2(uv.x * uResolution.x / uResolution.y, uv.y);
+  float rain = 0.0, snow = 0.0;
+  for (int i = 0; i < 3; i++) {
+    float layer = float(i), scale = 22.0 + layer * 12.0;
+    float speed = .65 + layer * .35;
+    float slant = uAcross * .025 * uGust;
+    vec2 p = vec2(screen.x + screen.y * slant, screen.y + uTime * speed);
+    vec2 id = floor(p * vec2(scale, scale * .6));
+    vec2 cell = fract(p * vec2(scale, scale * .6));
+    float seed = hash(id + layer * 73.0);
+    float cx = .2 + .6 * hash(id + 11.7), cy = .1 + .65 * hash(id + 29.3);
+    float streak = (1.0 - smoothstep(.012, .038, abs(cell.x - cx)))
+                 * (1.0 - smoothstep(.09, .3, abs(cell.y - cy)));
+    rain += streak * step(seed, uRain * .38) * (.16 + .08 * layer);
+
+    vec2 sp = screen;
+    sp.x -= uAcross * uTime * .012;
+    sp.x += sin(uTime * .65 + screen.y * 5.0 + layer) * .025 * (1.0 + abs(uAcross) * .06);
+    sp.y += uTime * (.09 + layer * .075);
+    vec2 sid = floor(sp * scale), sc = fract(sp * scale);
+    vec2 center = vec2(.25 + .5 * hash(sid + 13.0), .25 + .5 * hash(sid + 31.0));
+    float radius = .025 + .045 * hash(sid + 17.0);
+    snow += (1.0 - smoothstep(radius, radius + .026, length(sc - center)))
+          * step(hash(sid + layer * 57.0), .34 * uSnow) * (.4 + .16 * layer);
+  }
+  float mist = uMist * .045 * (1.0 - uv.y)
+    * (.5 + .5 * sin(screen.x * 4.0 + sin(screen.y * 8.0 + uTime * .13) + uTime * .07));
+  float alpha = clamp(rain + snow + mist, 0.0, .75);
+  gl_FragColor = vec4(mix(vec3(.73, .8, .85), vec3(.94, .97, 1.0), min(1.0, snow * 3.0)), alpha);
 }`;
 
 /** [near, far] view-depth ranges, drawn in order (see render()). */
@@ -209,6 +282,14 @@ export class TerrainRenderer {
     this.prog = program(gl, VERT, FRAG);
     this.sky = program(gl, SKY_VERT, SKY_FRAG);
     this.personProg = program(gl, PERSON_VERT, PERSON_FRAG);
+    this.weatherProg = program(gl, SKY_VERT, WEATHER_FRAG);
+    this.natureProg = program(gl, NATURE_VERT, NATURE_FRAG);
+    // Keep the sampler complete even when HD detail is disabled.
+    this.detailTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.detailTexture);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([128, 128, 128, 128]));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     this.personBuf = gl.createBuffer();
     this.skyBuf = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.skyBuf);
@@ -282,6 +363,8 @@ export class TerrainRenderer {
   /** @param {import('../engine/terrainModel.js').TerrainModel} model */
   setTerrain(model) {
     const gl = this.gl;
+    if (this.natureMeshes) for (const mesh of Object.values(this.natureMeshes)) gl.deleteBuffer(mesh.buffer);
+    this.natureMeshes = null;
     for (const m of this.meshes) { gl.deleteBuffer(m.vbo); gl.deleteBuffer(m.ibo); }
     this.model = model;
     const L = model.size, n = model.n;
@@ -299,6 +382,66 @@ export class TerrainRenderer {
     const axis = [...out.map((d) => -d), ...inner, ...out.slice().reverse().map((d) => L + d)];
     const s = stride * model.cell;
     this.meshes.push(this.buildMesh(axis, axis, (x0, y0, x1, y1) => x0 >= s && y0 >= s && x1 <= L - s && y1 <= L - s, 0.6));
+  }
+
+  prepareEnvironment(environment) {
+    const gl = this.gl;
+    if (environment.hd && !this.detailReady) {
+      gl.bindTexture(gl.TEXTURE_2D, this.detailTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 512, 512, 0, gl.RGBA, gl.UNSIGNED_BYTE, terrainDetailPixels());
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+      gl.generateMipmap(gl.TEXTURE_2D);
+      const ext = gl.getExtension('EXT_texture_filter_anisotropic');
+      if (ext) gl.texParameterf(gl.TEXTURE_2D, ext.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(4, gl.getParameter(ext.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
+      this.detailReady = true;
+    }
+    if ((environment.foliage || environment.nature) && !this.natureMeshes) {
+      const data = buildNatureMeshes(this.model);
+      this.natureMeshes = {};
+      for (const key of ['foliage', 'nature']) {
+        const buffer = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(gl.ARRAY_BUFFER, data[key], gl.STATIC_DRAW);
+        this.natureMeshes[key] = { buffer, count: data[key].length / 13 };
+      }
+    }
+  }
+
+  drawNature(projection, view, eye, sun, horizon, fogDensity, environment, weather, time, gust) {
+    if (!this.natureMeshes || (!environment.foliage && !environment.nature)) return;
+    const gl = this.gl, p = this.natureProg;
+    gl.useProgram(p);
+    gl.uniformMatrix4fv(gl.getUniformLocation(p, 'uProj'), false, projection);
+    gl.uniformMatrix4fv(gl.getUniformLocation(p, 'uView'), false, view);
+    for (const [key, value] of Object.entries({ uEye: eye, uSunDir: sun, uFogColor: horizon })) gl.uniform3fv(gl.getUniformLocation(p, key), value);
+    for (const [key, value] of Object.entries({ uFogDensity: fogDensity, uTime: time, uGust: gust,
+      uWet: weather.wet || 0, uSnow: weather.snow || 0, uDusk: weather.dusk || 0 })) gl.uniform1f(gl.getUniformLocation(p, key), value);
+    gl.uniform2fv(gl.getUniformLocation(p, 'uWind'), weather.wind || [0, 0]);
+    const attrs = ['aPos', 'aNormal', 'aColor', 'aRoot', 'aSway'].map(name => gl.getAttribLocation(p, name));
+    gl.disable(gl.CULL_FACE);
+    for (const key of ['foliage', 'nature']) if (environment[key]) {
+      const mesh = this.natureMeshes[key]; gl.bindBuffer(gl.ARRAY_BUFFER, mesh.buffer);
+      attrs.forEach((a, i) => { gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, i === 4 ? 1 : 3, gl.FLOAT, false, 52, i * 12); });
+      gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
+    }
+    attrs.forEach(a => gl.disableVertexAttribArray(a)); gl.enable(gl.CULL_FACE);
+  }
+
+  drawWeather(weather, camera, time, gust) {
+    const rain = weather.precipitation ?? (weather.rain ? .72 : 0), snow = weather.snow || 0, mist = weather.fog || 0;
+    if (!rain && !snow && !mist) return;
+    const gl = this.gl, p = this.weatherProg;
+    gl.disable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE);
+    gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
+    gl.useProgram(p); gl.bindBuffer(gl.ARRAY_BUFFER, this.skyBuf);
+    const a = gl.getAttribLocation(p, 'aPos'); gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform2f(gl.getUniformLocation(p, 'uResolution'), this.canvas.width, this.canvas.height);
+    const hd = camera.heading * Math.PI / 180, wind = weather.wind || [0, 0];
+    const across = wind[0] * Math.cos(hd) - wind[1] * Math.sin(hd);
+    for (const [key, value] of Object.entries({ uTime: time, uRain: rain, uSnow: snow, uAcross: across, uGust: gust, uMist: mist })) gl.uniform1f(gl.getUniformLocation(p, key), value);
+    gl.drawArrays(gl.TRIANGLES, 0, 3); gl.disableVertexAttribArray(a); gl.disable(gl.BLEND);
   }
 
   buildMesh(xs, ys, skipQuad, sink) {
@@ -362,12 +505,14 @@ export class TerrainRenderer {
 
   /**
    * camera: { x, y, z (eye elevation), heading, fov (horizontal), pitch } in metres / degrees.
-   * weather: { cloud 0..1, wind [east, north] m/s, wet 0..1, fog 0..1 }, time in seconds.
+   * weather: { cloud, wind [east, north] m/s, wet, fog, precipitation, snow, dusk }.
+   * environment: optional hd / foliage / nature flags; environmentTime in seconds.
    * Weather is purely visual: it never changes the terrain geometry.
    */
-  render(camera, { weather = {}, time = 0, motion = {}, personMotion = {}, sunHeading = camera.heading } = {}) {
+  render(camera, { weather = {}, environment = {}, time = 0, environmentTime = time, motion = {}, personMotion = {}, sunHeading = camera.heading } = {}) {
     if (!this.model) return;
-    this.lastFrame = { camera, options: { weather, time, motion, personMotion, sunHeading } };
+    this.lastFrame = { camera, options: { weather, environment, time, environmentTime, motion, personMotion, sunHeading } };
+    this.prepareEnvironment(environment);
     this.personMotion = personMotion;
     this.updatePersonMotion({ wave: personMotion.wave, time });
     this.resize();
@@ -381,14 +526,19 @@ export class TerrainRenderer {
     const eye = [camera.x, camera.z, -camera.y];
     const fwd = [Math.sin(hd) * Math.cos(pt), Math.sin(pt), -Math.cos(hd) * Math.cos(pt)];
     const { cloud = 0, wind = [0, 0], wet = 0, fog = 0 } = weather;
+    const { snow = 0, dusk = 0 } = weather;
+    const gust = weather.gusts ? windGust(environmentTime, Math.hypot(...wind) > 5) : 1;
     const grey = [0.52, 0.55, 0.58];
     const mixc = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
     let horizon = [0.36, 0.43, 0.5], zenith = [0.23, 0.34, 0.47];
     const overcast = Math.max(wet * 0.9, cloud * 0.35);
     horizon = mixc(horizon, grey, overcast); zenith = mixc(zenith, [0.38, 0.42, 0.46], overcast);
     if (fog > 0) { horizon = mixc(horizon, [0.66, 0.69, 0.71], fog); zenith = mixc(zenith, [0.55, 0.59, 0.62], fog * 0.8); }
+    if (dusk) { horizon = mixc(horizon, [.78, .53, .34], dusk * .8); zenith = mixc(zenith, [.29, .34, .47], dusk); }
+    if (weather.storm) { horizon = mixc(horizon, [.31, .36, .4], .6); zenith = mixc(zenith, [.23, .28, .33], .65); }
 
     gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
     gl.useProgram(this.sky);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.skyBuf);
     const sp = gl.getAttribLocation(this.sky, 'aPos');
@@ -400,10 +550,12 @@ export class TerrainRenderer {
     gl.uniform3fv(gl.getUniformLocation(this.sky, 'uZenith'), zenith);
     gl.uniform1f(gl.getUniformLocation(this.sky, 'uTanHalfH'), Math.tan(hf / 2));
     gl.uniform1f(gl.getUniformLocation(this.sky, 'uHeading'), hd);
-    gl.uniform1f(gl.getUniformLocation(this.sky, 'uTime'), time);
+    gl.uniform1f(gl.getUniformLocation(this.sky, 'uTime'), environmentTime);
     gl.uniform1f(gl.getUniformLocation(this.sky, 'uCloud'), Math.max(cloud, wet * 0.9));
-    gl.uniform2fv(gl.getUniformLocation(this.sky, 'uWind'), wind);
+    gl.uniform2fv(gl.getUniformLocation(this.sky, 'uWind'), weather.cloudWind || wind);
     gl.uniform1f(gl.getUniformLocation(this.sky, 'uWet'), wet);
+    gl.uniform1f(gl.getUniformLocation(this.sky, 'uNature'), environment.nature ? 1 : 0);
+    gl.uniform1f(gl.getUniformLocation(this.sky, 'uBirdHeading'), (weather.skyHeading ?? sunHeading) * Math.PI / 180);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.disableVertexAttribArray(sp);
 
@@ -417,7 +569,7 @@ export class TerrainRenderer {
     gl.uniformMatrix4fv(gl.getUniformLocation(p, 'uView'), false, view);
     gl.uniform3fv(gl.getUniformLocation(p, 'uEye'), eye);
     // Low sun from the side of the view direction: cross-lighting reveals slopes.
-    const sunAz = ((sunHeading + 125) * Math.PI) / 180, sunEl = (27 * Math.PI) / 180;
+    const sunAz = ((sunHeading + 125) * Math.PI) / 180, sunEl = ((27 - dusk * 17) * Math.PI) / 180;
     const sun = [Math.sin(sunAz) * Math.cos(sunEl), Math.sin(sunEl), -Math.cos(sunAz) * Math.cos(sunEl)];
     gl.uniform3fv(gl.getUniformLocation(p, 'uSunDir'), sun);
     gl.uniform2fv(gl.getUniformLocation(p, 'uHeightRange'), [m.min, m.max]);
@@ -425,10 +577,17 @@ export class TerrainRenderer {
     // Fog shortens visibility to ~1.5 km but keeps the near and middle distance readable.
     const fogDensity = 1 / Math.max(1400, 5200 - 3700 * fog - 1200 * wet);
     gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), fogDensity);
-    gl.uniform1f(gl.getUniformLocation(p, 'uTime'), time);
+    gl.uniform1f(gl.getUniformLocation(p, 'uTime'), environmentTime);
     gl.uniform1f(gl.getUniformLocation(p, 'uCloud'), Math.max(cloud, wet * 0.6));
     gl.uniform2fv(gl.getUniformLocation(p, 'uWind'), wind);
+    gl.uniform2fv(gl.getUniformLocation(p, 'uCloudWind'), weather.cloudWind || wind);
     gl.uniform1f(gl.getUniformLocation(p, 'uWet'), wet);
+    gl.uniform1f(gl.getUniformLocation(p, 'uHD'), environment.hd ? 1 : 0);
+    gl.uniform1f(gl.getUniformLocation(p, 'uSnow'), snow);
+    gl.uniform1f(gl.getUniformLocation(p, 'uDusk'), dusk);
+    gl.uniform1f(gl.getUniformLocation(p, 'uGust'), gust);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.detailTexture || null);
+    gl.uniform1i(gl.getUniformLocation(p, 'uDetail'), 0);
     const aPos = gl.getAttribLocation(p, 'aPos'), aNor = gl.getAttribLocation(p, 'aNormal');
     const uProj = gl.getUniformLocation(p, 'uProj');
     // Two depth ranges, far first. A single 0.5 m - 16 km frustum needs a
@@ -441,6 +600,8 @@ export class TerrainRenderer {
       gl.clear(gl.DEPTH_BUFFER_BIT);
       const projection = perspective(vfov, aspect, near, far);
       gl.useProgram(p);
+      // A world-space friend sprite can bind its own texture in the far pass.
+      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.detailTexture);
       gl.uniformMatrix4fv(uProj, false, projection);
       for (const mesh of this.meshes) {
         gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vbo);
@@ -453,8 +614,10 @@ export class TerrainRenderer {
       }
       gl.disableVertexAttribArray(aPos);
       gl.disableVertexAttribArray(aNor);
+      this.drawNature(projection, view, eye, sun, horizon, fogDensity, environment, weather, environmentTime, gust);
       this.drawPerson(projection, view, eye, sun, horizon, fogDensity, camera);
     }
+    this.drawWeather(weather, camera, environmentTime, gust);
     if (this.viewmodelEnabled) this.viewmodel.render(W, H, time, motion);
   }
 }

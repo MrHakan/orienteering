@@ -14,6 +14,7 @@ import { TRAIL_COLORS } from '../engine/trailQuiz.js';
 import { KNIVES, normaliseAppearance } from '../render/knifeClips.js';
 import { TrailPlayback } from './trailPlayback.js';
 import { TerrainRenderer } from '../render/webglTerrain.js';
+import { CONDITIONS, WINDS, normaliseEnvironment, weatherParams, environmentAnimated } from '../render/environment.js';
 import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
 import { drawSkylineOverlay } from '../render/skylineOverlay.js';
@@ -43,6 +44,8 @@ const state = {
   friendCinematicTime: 0,
   trailTime: 0,
   appearance: normaliseAppearance(store.get('otq.appearance', {})),
+  environment: normaliseEnvironment(store.get('otq.environment', {})),
+  environmentStart: performance.now(),
   loading: true,
   score: store.get('otq.score', { correct: 0, total: 0, streak: 0 }),
   settings: store.get('otq.settings', { northUp: false, tape: true, hillshade: false, landforms: false, drainage: false }),
@@ -51,6 +54,8 @@ const state = {
 
 let renderer = null;
 let friendWaveRaf = 0, friendWaveStart = 0, friendCinematicStart = 0;
+let lastAmbientFrame = 0;
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 try {
   renderer = new TerrainRenderer($('scene'));
 } catch (err) {
@@ -92,19 +97,51 @@ function stopFriendWave() {
   cancelAnimationFrame(friendWaveRaf); friendWaveRaf = 0;
 }
 function scheduleFriendWave() {
-  const active = state.quiz?.friend?.skin === 'conquest' ? state.friendCinematicPlaying : state.friendZoom;
-  if (friendWaveRaf || !renderer || !active || state.quiz?.mode !== 'friend'
+  const friendActive = state.quiz?.mode === 'friend' && (state.quiz?.friend?.skin === 'conquest' ? state.friendCinematicPlaying : state.friendZoom);
+  const ambientActive = !reducedMotion.matches && environmentAnimated(state.environment);
+  if (friendWaveRaf || !renderer || (!friendActive && !ambientActive)
     || state.loading || document.hidden || $('export-dialog').open) return;
-  friendWaveRaf = requestAnimationFrame(() => {
+  friendWaveRaf = requestAnimationFrame((now) => {
     friendWaveRaf = 0;
     if (state.friendCinematicPlaying) {
       state.friendCinematicTime = Math.min(15, (performance.now() - friendCinematicStart) / 1000);
       if (state.friendCinematicTime >= 15) state.friendCinematicPlaying = false;
     }
-    renderScene(currentCamera());
+    // Trail playback already renders its own frames. Static weather runs at
+    // 30 fps; friend gestures retain their existing smooth animation clock.
+    if ((friendActive || now - lastAmbientFrame >= 1000 / 30)
+      && !(state.quiz?.mode === 'trail' && (trailPlayer.playing || trailPlayer.inspectAt !== null))) {
+      lastAmbientFrame = now; renderScene(currentCamera());
+    }
     scheduleFriendWave();
   });
 }
+
+function setEnvironmentControls(prefix, value) {
+  const env = normaliseEnvironment(value);
+  $(`${prefix}-weather`).value = env.condition; $(`${prefix}-wind`).value = env.wind;
+  for (const key of ['hd', 'foliage', 'nature']) $(`${prefix}-${key}`).checked = env[key];
+}
+function readEnvironmentControls(prefix) {
+  return normaliseEnvironment({ condition: $(`${prefix}-weather`).value, wind: $(`${prefix}-wind`).value,
+    hd: $(`${prefix}-hd`).checked, foliage: $(`${prefix}-foliage`).checked, nature: $(`${prefix}-nature`).checked });
+}
+for (const prefix of ['scene', 'export']) {
+  $(`${prefix}-weather`).innerHTML = CONDITIONS.map(c => `<option value="${c.id}">${c.label}</option>`).join('');
+  $(`${prefix}-wind`).innerHTML = WINDS.map(w => `<option value="${w.id}">${w.label}</option>`).join('');
+  setEnvironmentControls(prefix, state.environment);
+}
+for (const key of ['weather', 'wind', 'hd', 'foliage', 'nature']) $(`scene-${key}`).addEventListener('change', () => {
+  state.environment = readEnvironmentControls('scene'); store.set('otq.environment', state.environment);
+  stopFriendWave();
+  if (state.quiz && !state.loading) renderScene(currentCamera());
+  scheduleFriendWave();
+});
+reducedMotion.addEventListener('change', () => {
+  stopFriendWave();
+  if (state.quiz && !state.loading) renderScene(currentCamera());
+  scheduleFriendWave();
+});
 
 function syncFriendAppearance() {
   if (state.quiz?.mode !== 'friend') return;
@@ -139,6 +176,7 @@ $('friend-skin').addEventListener('change', () => {
   $('friend-zoom').textContent = 'Zoom 3×'; $('friend-zoom').setAttribute('aria-pressed', 'false');
   syncFriendAppearance(); updateHash();
   if (skin === 'conquest') startFriendArrival(); else renderScene(currentCamera());
+  scheduleFriendWave();
 });
 $('friend-arrival').addEventListener('click', startFriendArrival);
 
@@ -315,6 +353,7 @@ function syncControls() {
 function show(quiz) {
   stopFriendWave();
   state.quiz = quiz;
+  state.environmentStart = performance.now();
   state.answered = false;
   state.chosen = null;
   state.viewing = null;
@@ -380,6 +419,7 @@ function show(quiz) {
   setAnswersEnabled(true);
   if (quiz.mode === 'friend' && quiz.friend.skin === 'conquest') startFriendArrival();
   if (quiz.mode === 'trail' && renderer && !window.matchMedia('(prefers-reduced-motion: reduce)').matches && !document.hidden) trailPlayer.play();
+  scheduleFriendWave();
 }
 
 const ROSE = ['NW', 'N', 'NE', 'W', '', 'E', 'SW', 'S', 'SE'];
@@ -437,6 +477,9 @@ function renderAnswerButtons() {
 
 function renderScene(camera, playback = {}) {
   if (!renderer) return;
+  const environmentOptions = { environment: state.environment,
+    weather: weatherParams(state.environment, state.quiz.camera.heading),
+    environmentTime: reducedMotion.matches ? 0 : Math.max(0, (performance.now() - state.environmentStart) / 1000) };
   let friendPerson = null;
   if (state.quiz.mode === 'friend') {
     const o = state.quiz.options.find((p) => p.label === state.viewing);
@@ -448,7 +491,7 @@ function renderScene(camera, playback = {}) {
     const frame = trailFrame(state.quiz, state.trailTime, state.viewing || state.quiz.correctLabel, state.model);
     camera = frame.camera;
     renderer.setViewmodel(state.appearance);
-    renderer.render(camera, { time: state.trailTime, sunHeading: state.quiz.camera.heading,
+    renderer.render(camera, { ...environmentOptions, time: state.trailTime, sunHeading: state.quiz.camera.heading,
       motion: { ...frame.motion, ...playback, clockRunning: trailPlayer.playing || Number.isFinite(playback.inspectElapsed) } });
     if (Math.abs(state.trailTime - (state.lastTrailMapTime ?? -1)) > .04
       || (!trailPlayer.playing && state.trailTime !== state.lastTrailMapTime)
@@ -464,7 +507,7 @@ function renderScene(camera, playback = {}) {
     const frame = conquest ? friendSceneFrame(state.quiz, state.friendCinematicTime,
       state.friendCinematicPlaying || state.friendCinematicTime > 0, { camera, person: friendPerson }) : null;
     if (frame) camera = frame.camera;
-    renderer.setViewmodel(null); renderer.render(camera, { time: conquest ? state.friendCinematicTime : elapsed,
+    renderer.setViewmodel(null); renderer.render(camera, { ...environmentOptions, time: conquest ? state.friendCinematicTime : elapsed,
       personMotion: frame ? frame.personMotion : { wave: state.friendZoom && state.quiz.mode === 'friend' ? lift * lift * (3 - 2 * lift) : 0 } });
   }
   // In "Which way?" the bearing tape would give the answer away.
@@ -905,7 +948,7 @@ function exportOptions() {
   const form = $('export-form');
   return {
     format: form.querySelector('[name="format"]:checked').value,
-    weather: [...form.querySelectorAll('[name="weather"]:checked')].map((el) => el.value),
+    environment: readEnvironmentControls('export'),
     handle: $('export-handle').value.trim(),
     caption: $('export-caption').checked,
     tape: $('export-tape').checked,
@@ -941,12 +984,12 @@ function persistableExportOptions(opts) {
 }
 
 function restoreExportOptions() {
+  setEnvironmentControls('export', state.environment);
   const saved = store.get('otq.export', null);
   if (!saved) return;
   const form = $('export-form');
   const fmt = form.querySelector(`[name="format"][value="${saved.format}"]`);
   if (fmt) fmt.checked = true;
-  form.querySelectorAll('[name="weather"]').forEach((el) => { el.checked = (saved.weather || []).includes(el.value); });
   $('export-handle').value = saved.handle || '';
   $('export-caption').checked = saved.caption !== false;
   $('export-tape').checked = saved.tape !== false;
