@@ -183,12 +183,19 @@ try {
     const read=()=>{const p=new Uint8Array(canvas.width*canvas.height*4);r.gl.readPixels(0,0,canvas.width,canvas.height,r.gl.RGBA,r.gl.UNSIGNED_BYTE,p);return p;};
     const frame=trailFrame(q,0,q.correctLabel,model);
     for(const aspect of [1.6,2]) {
-      r.setFixedSize(640,640/aspect);r.setViewmodel(null);
-      r.render(frame.camera,{time:0,sunHeading:q.camera.heading});const base=read();
+      r.setFixedSize(640,640/aspect);
       for(const knife of ['classic','default','butterfly'])for(const handedness of ['right','left'])for(const scale of [1,1.15]) {
-        r.setViewmodel({knife,handedness,scale});
+        const appearance={knife,handedness,scale};
+        r.setViewmodel(appearance);
         await r.prepareViewmodel(0,frame.motion);
+        // Compare only the overlay pass on this exact terrain framebuffer.
+        // Comparing against an earlier terrain render can count tiny raster
+        // differences after inspect/camera changes as knife occlusion.
+        r.setViewmodel(null);
         r.render(frame.camera,{time:0,motion:frame.motion,sunHeading:q.camera.heading});
+        const base=read();
+        r.setViewmodel(appearance);
+        r.viewmodel.render(canvas.width,canvas.height,0,frame.motion);
         const pixels=read();let changed=0,protectedPixels=0;
         for(let y=0;y<canvas.height;y++)for(let x=0;x<canvas.width;x++) {
           const i=(y*canvas.width+x)*4;
@@ -256,6 +263,7 @@ try {
   assert.deepEqual(errors,[]);
   console.log('Trail browser checks passed: versioned worker, playback, inspect, decoded clips, colours, segment selection, timed comparisons, mobile touch, PNG/video export and mode switching.');
 } catch(error) {
+  console.error('Trail browser check failed:',error?.stack || error);
   console.log('Browser page errors: '+JSON.stringify(errors));
   if(process.env.PRINT_PREVIEW==='1') {
     const preview=await page.locator('.card').screenshot({type:'jpeg',quality:60}).catch(()=>null);
