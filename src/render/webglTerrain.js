@@ -6,8 +6,8 @@ import { personVertices } from './personMesh.js';
 import { KnifeViewModel } from './knifeViewModel.js';
 import { FriendSprite } from './friendSprite.js';
 import { windGust } from './environment.js';
-import { terrainDetailPixels } from './terrainDetail.js';
-import { buildNatureMeshes, NATURE_VERT, NATURE_FRAG } from './natureMesh.js';
+import { EnvironmentTextures, terrainHeightPixels, TERRAIN_MATERIAL_GLSL } from './terrainDetail.js';
+import { buildNatureMeshes, buildGroundCover, NATURE_STRIDE, NATURE_VERT, NATURE_FRAG } from './natureMesh.js';
 import { WatchViewModel } from './watchViewModel.js';
 
 const PERSON_VERT = `
@@ -66,7 +66,6 @@ uniform vec2 uWind;     // wind vector, m/s (east, north)
 uniform vec2 uCloudWind;
 uniform float uWet;     // 0..1 rain darkening
 uniform float uHD, uSnow, uDusk, uGust;
-uniform sampler2D uDetail;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p) {
@@ -75,36 +74,32 @@ float vnoise(vec2 p) {
   return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
 }
 
+${TERRAIN_MATERIAL_GLSL}
+
 void main() {
   vec3 n = normalize(vNormal);
   float d = length(vWorld - uEye);
   float h = (vWorld.y - uHeightRange.x) / max(1.0, uHeightRange.y - uHeightRange.x);
   float slope = 1.0 - n.y;
 
-  vec3 grassLow = vec3(0.19, 0.28, 0.11);
-  vec3 grassHigh = vec3(0.33, 0.35, 0.16);
-  vec3 dry = vec3(0.46, 0.38, 0.21);
-  float patchN = vnoise(vWorld.xz / 160.0) - 0.5;
-  vec3 col = mix(grassLow, grassHigh, smoothstep(0.1, 0.6, h + patchN * 0.3));
-  col = mix(col, dry, smoothstep(0.35, 0.95, h + patchN * 0.2) * 0.85);
-  col = mix(col, dry * 0.92, smoothstep(0.1, 0.4, slope) * 0.45);
-
-  float fine = 1.0 - smoothstep(150.0, 900.0, d);
-  float tex = (vnoise(vWorld.xz / 5.0) - 0.5) * 0.35 * fine
-            + (vnoise(vWorld.xz / 21.0) - 0.5) * 0.3 * (1.0 - smoothstep(400.0, 2000.0, d))
-            + (vnoise(vWorld.xz / 75.0) - 0.5) * 0.25;
-  col *= 1.0 + tex;
-  if (uHD > 0.0) {
-    // Real repeating detail texture, mipmapped to avoid distant shimmer.
-    vec4 detail = texture2D(uDetail, vWorld.xz / 4.0);
-    float close = 1.0 - smoothstep(25.0, 240.0, d);
-    col *= mix(vec3(1.0), detail.rgb * 2.0, close * .65);
-    float rock = smoothstep(.13, .42, slope) * .7;
-    vec3 stone = vec3(.39, .38, .34) * (.8 + .4 * detail.a);
-    stone *= .9 + .15 * sin(vWorld.y * 2.3 + vnoise(vWorld.xz / 9.0) * 4.0);
-    col = mix(col, stone, rock);
+  vec3 col;
+  SurfaceMaterial material;
+  if (uHD > .5) {
+    material = surfaceMaterial(vWorld, n, d, h);
+    col = material.color;
+  } else {
+    vec3 grassLow = vec3(0.19, 0.28, 0.11), grassHigh = vec3(0.33, 0.35, 0.16), dry = vec3(0.46, 0.38, 0.21);
+    float patchN = vnoise(vWorld.xz / 160.0) - 0.5;
+    col = mix(grassLow, grassHigh, smoothstep(0.1, 0.6, h + patchN * 0.3));
+    col = mix(col, dry, smoothstep(0.35, 0.95, h + patchN * 0.2) * 0.85);
+    col = mix(col, dry * 0.92, smoothstep(0.1, 0.4, slope) * 0.45);
+    float fine = 1.0 - smoothstep(150.0, 900.0, d);
+    float tex = (vnoise(vWorld.xz / 5.0) - 0.5) * 0.35 * fine
+              + (vnoise(vWorld.xz / 21.0) - 0.5) * 0.3 * (1.0 - smoothstep(400.0, 2000.0, d))
+              + (vnoise(vWorld.xz / 75.0) - 0.5) * 0.25;
+    col *= 1.0 + tex;
   }
-  col = mix(col, vec3(.78, .83, .83), uSnow * smoothstep(.35, .92, n.y) * .72);
+  col = mix(col, uHD > .5 ? pow(vec3(.78, .83, .83), vec3(2.2)) : vec3(.78, .83, .83), uSnow * smoothstep(.35, .92, n.y) * .72);
 
   // Wind: bands of bent grass sweeping downwind.
   float windSpeed = length(uWind);
@@ -116,7 +111,8 @@ void main() {
   }
   col *= 1.0 - 0.2 * uWet;
 
-  float diff = max(dot(n, uSunDir), 0.0);
+  vec3 lightNormal = uHD > .5 ? material.normal : n;
+  float diff = max(dot(lightNormal, uSunDir), 0.0);
   float hemi = 0.55 + 0.45 * n.y;
   // Moving cloud shadows (and a duller, flatter light under overcast skies).
   float shadow = 0.0;
@@ -127,7 +123,16 @@ void main() {
   }
   float sun = 0.95 * (1.0 - 0.35 * uWet) * (1.0 - 0.6 * shadow);
   vec3 lit = col * ((0.42 + 0.12 * uWet) * hemi + sun * diff);
-  lit *= mix(vec3(1.0), vec3(1.14, .9, .71), uDusk);
+  if (uHD > .5) {
+    float visibility = terrainSunVisibility(vWorld, uSunDir);
+    vec3 skyLight = vec3(.32, .39, .47) * (.78 + .22 * lightNormal.y) * mix(.62, 1.0, material.ao);
+    vec3 direct = mix(vec3(1.10, 1.01, .87), vec3(1.25, .76, .44), uDusk) * sun * diff * visibility;
+    vec3 halfVector = normalize(uSunDir + normalize(uEye - vWorld));
+    float rough = clamp(material.roughness * (1.0 - .32 * uWet), .18, 1.0);
+    float spec = pow(max(0.0, dot(lightNormal, halfVector)), mix(72.0, 8.0, rough)) * (.018 + .08 * uWet);
+    lit = col * (skyLight + direct) + spec * sun * visibility;
+    lit = pow(lit / (vec3(1.0) + lit * .38), vec3(1.0 / 2.2));
+  } else lit *= mix(vec3(1.0), vec3(1.14, .9, .71), uDusk);
 
   float fog = 1.0 - exp(-pow(d * uFogDensity, 1.35));
   gl_FragColor = vec4(mix(lit, uFogColor, clamp(fog, 0.0, 1.0)), 1.0);
@@ -286,6 +291,20 @@ function lookDir(eye, fwd) {
   return new Float32Array([x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -dot(x), -dot(y), -dot(z), 1]);
 }
 
+function materialProgram(gl) {
+  const modern = typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext;
+  if (modern) {
+    const vs = '#version 300 es\n' + VERT.replace(/attribute/g, 'in').replace(/varying/g, 'out');
+    const fs = '#version 300 es\n#define MATERIAL_GRADIENTS\n#define MATERIAL_GRAD textureGrad\n'
+      + FRAG.replace('precision highp float;', 'precision highp float;\nout vec4 fragColor;')
+        .replace(/varying/g, 'in').replace(/texture2D/g, 'texture').replace(/gl_FragColor/g, 'fragColor');
+    return program(gl, vs, fs);
+  }
+  const gradients = gl.getExtension('EXT_shader_texture_lod') && gl.getExtension('OES_standard_derivatives');
+  const prefix = gradients ? '#extension GL_EXT_shader_texture_lod : enable\n#extension GL_OES_standard_derivatives : enable\n#define MATERIAL_GRADIENTS\n#define MATERIAL_GRAD texture2DGradEXT\n' : '';
+  return program(gl, VERT, prefix + FRAG);
+}
+
 export class TerrainRenderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -294,15 +313,15 @@ export class TerrainRenderer {
     if (!gl) throw new Error('WebGL is not available');
     this.gl = gl;
     this.uint32 = typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext ? true : !!gl.getExtension('OES_element_index_uint');
-    this.prog = program(gl, VERT, FRAG);
+    this.prog = materialProgram(gl);
     this.sky = program(gl, SKY_VERT, SKY_FRAG);
     this.personProg = program(gl, PERSON_VERT, PERSON_FRAG);
     this.weatherProg = program(gl, SKY_VERT, WEATHER_FRAG);
     this.natureProg = program(gl, NATURE_VERT, NATURE_FRAG);
-    // Keep the sampler complete even when HD detail is disabled.
-    this.detailTexture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, this.detailTexture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([128, 128, 128, 128]));
+    // Complete placeholder shared by disabled material samplers.
+    this.placeholder = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.placeholder);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([128, 128, 128, 255]));
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     this.personBuf = gl.createBuffer();
@@ -387,6 +406,10 @@ export class TerrainRenderer {
     const gl = this.gl;
     if (this.natureMeshes) for (const mesh of Object.values(this.natureMeshes)) gl.deleteBuffer(mesh.buffer);
     this.natureMeshes = null;
+    if (this.groundCover) gl.deleteBuffer(this.groundCover.buffer);
+    this.groundCover = null;
+    if (this.heightTexture) gl.deleteTexture(this.heightTexture);
+    this.heightTexture = null;
     for (const m of this.meshes) { gl.deleteBuffer(m.vbo); gl.deleteBuffer(m.ibo); }
     this.model = model;
     const L = model.size, n = model.n;
@@ -406,49 +429,84 @@ export class TerrainRenderer {
     this.meshes.push(this.buildMesh(axis, axis, (x0, y0, x1, y1) => x0 >= s && y0 >= s && x1 <= L - s && y1 <= L - s, 0.6));
   }
 
-  prepareEnvironment(environment) {
+  prepareEnvironment(environment, camera = null) {
     const gl = this.gl;
-    if (environment.hd && !this.detailReady) {
-      gl.bindTexture(gl.TEXTURE_2D, this.detailTexture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 512, 512, 0, gl.RGBA, gl.UNSIGNED_BYTE, terrainDetailPixels());
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    const redraw = () => { if (this.lastFrame && !this.disposed) this.render(this.lastFrame.camera, this.lastFrame.options); };
+    if (environment.hd && !this.surfaceTextures) this.surfaceTextures = new EnvironmentTextures(gl, {
+      albedo: 'surface-albedo-roughness.webp', normal: 'surface-normal-ao.webp',
+    }, redraw);
+    if (environment.hd && !this.heightTexture) {
+      this.heightTexture = gl.createTexture();
+      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.heightTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 256, 256, 0, gl.RGBA, gl.UNSIGNED_BYTE, terrainHeightPixels(this.model));
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
-      gl.generateMipmap(gl.TEXTURE_2D);
-      const ext = gl.getExtension('EXT_texture_filter_anisotropic');
-      if (ext) gl.texParameterf(gl.TEXTURE_2D, ext.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(4, gl.getParameter(ext.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
-      this.detailReady = true;
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     }
+    if ((environment.foliage || environment.nature) && !this.plantTextures)
+      this.plantTextures = new EnvironmentTextures(gl, { foliage: 'foliage-atlas.webp' }, redraw);
     if ((environment.foliage || environment.nature) && !this.natureMeshes) {
       const data = buildNatureMeshes(this.model);
       this.natureMeshes = {};
       for (const key of ['foliage', 'nature']) {
         const buffer = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
         gl.bufferData(gl.ARRAY_BUFFER, data[key], gl.STATIC_DRAW);
-        this.natureMeshes[key] = { buffer, count: data[key].length / 13 };
+        this.natureMeshes[key] = { buffer, count: data[key].length / NATURE_STRIDE };
+      }
+    }
+    if (environment.foliage && camera) {
+      const key = `${Math.floor(camera.x / 16)}:${Math.floor(camera.y / 16)}`;
+      if (key !== this.groundCover?.key) {
+        const data = buildGroundCover(this.model, camera);
+        const buffer = this.groundCover?.buffer || gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer); gl.bufferData(gl.ARRAY_BUFFER, data.vertices, gl.DYNAMIC_DRAW);
+        this.groundCover = { buffer, count: data.vertices.length / NATURE_STRIDE, key };
       }
     }
   }
 
+  async prepareEnvironmentReady(environment) {
+    this.prepareEnvironment(environment);
+    await Promise.all([environment.hd ? this.surfaceTextures?.ready : null,
+      environment.foliage || environment.nature ? this.plantTextures?.ready : null]);
+  }
+
   drawNature(projection, view, eye, sun, horizon, fogDensity, environment, weather, time, gust) {
-    if (!this.natureMeshes || (!environment.foliage && !environment.nature)) return;
+    if (!this.natureMeshes || (!environment.foliage && !environment.nature) || !this.plantTextures?.loaded) return;
     const gl = this.gl, p = this.natureProg;
     gl.useProgram(p);
     gl.uniformMatrix4fv(gl.getUniformLocation(p, 'uProj'), false, projection);
     gl.uniformMatrix4fv(gl.getUniformLocation(p, 'uView'), false, view);
-    for (const [key, value] of Object.entries({ uEye: eye, uSunDir: sun, uFogColor: horizon })) gl.uniform3fv(gl.getUniformLocation(p, key), value);
+    for (const [key, value] of Object.entries({ uEye: eye, uSunDir: sun, uFogColor: horizon,
+      uFriend: this.person ? [this.person.x, -this.person.y, 1] : [0, 0, 0] })) gl.uniform3fv(gl.getUniformLocation(p, key), value);
     for (const [key, value] of Object.entries({ uFogDensity: fogDensity, uTime: time, uGust: gust,
-      uWet: weather.wet || 0, uSnow: weather.snow || 0, uDusk: weather.dusk || 0 })) gl.uniform1f(gl.getUniformLocation(p, key), value);
+      uWet: weather.wet || 0, uSnow: weather.snow || 0, uDusk: weather.dusk || 0,
+      uHD: environment.hd && this.surfaceTextures?.loaded ? 1 : 0 })) gl.uniform1f(gl.getUniformLocation(p, key), value);
     gl.uniform2fv(gl.getUniformLocation(p, 'uWind'), weather.wind || [0, 0]);
-    const attrs = ['aPos', 'aNormal', 'aColor', 'aRoot', 'aSway'].map(name => gl.getAttribLocation(p, name));
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.plantTextures.textures.foliage);
+    gl.uniform1i(gl.getUniformLocation(p, 'uFoliage'), 0);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.surfaceTextures?.textures.albedo || this.placeholder);
+    gl.uniform1i(gl.getUniformLocation(p, 'uSurface'), 1);
+    const names = ['aPos', 'aNormal', 'aColor', 'aRoot', 'aSway', 'aUV', 'aKind'];
+    const sizes = [3, 3, 3, 3, 1, 2, 1], offsets = [0, 3, 6, 9, 12, 13, 15];
+    const attrs = names.map(name => gl.getAttribLocation(p, name));
     gl.disable(gl.CULL_FACE);
-    for (const key of ['foliage', 'nature']) if (environment[key]) {
-      const mesh = this.natureMeshes[key]; gl.bindBuffer(gl.ARRAY_BUFFER, mesh.buffer);
-      attrs.forEach((a, i) => { gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, i === 4 ? 1 : 3, gl.FLOAT, false, 52, i * 12); });
+    const meshes = ['foliage', 'nature'].filter(key => environment[key]).map(key => this.natureMeshes[key]);
+    if (environment.foliage && this.groundCover) meshes.push(this.groundCover);
+    for (const mesh of meshes) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, mesh.buffer);
+      attrs.forEach((a, i) => { gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, sizes[i], gl.FLOAT, false, NATURE_STRIDE * 4, offsets[i] * 4); });
       gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
     }
     attrs.forEach(a => gl.disableVertexAttribArray(a)); gl.enable(gl.CULL_FACE);
+  }
+
+  dispose() {
+    this.disposed = true; this.lastFrame = null;
+    this.surfaceTextures?.dispose(); this.plantTextures?.dispose();
+    this.viewmodel?.dispose(); this.friendSprite?.dispose(); this.watchViewmodel?.dispose();
+    this.gl.getExtension('WEBGL_lose_context')?.loseContext();
   }
 
   drawWeather(weather, camera, time, gust) {
@@ -534,7 +592,7 @@ export class TerrainRenderer {
   render(camera, { weather = {}, environment = {}, time = 0, environmentTime = time, motion = {}, personMotion = {}, sunHeading = camera.heading, solar = null, watch = null } = {}) {
     if (!this.model) return;
     this.lastFrame = { camera, options: { weather, environment, time, environmentTime, motion, personMotion, sunHeading, solar, watch } };
-    this.prepareEnvironment(environment);
+    this.prepareEnvironment(environment, camera);
     this.personMotion = personMotion;
     this.updatePersonMotion({ wave: personMotion.wave, time });
     this.resize();
@@ -606,12 +664,14 @@ export class TerrainRenderer {
     gl.uniform2fv(gl.getUniformLocation(p, 'uWind'), wind);
     gl.uniform2fv(gl.getUniformLocation(p, 'uCloudWind'), weather.cloudWind || wind);
     gl.uniform1f(gl.getUniformLocation(p, 'uWet'), wet);
-    gl.uniform1f(gl.getUniformLocation(p, 'uHD'), environment.hd ? 1 : 0);
+    gl.uniform1f(gl.getUniformLocation(p, 'uHD'), environment.hd && this.surfaceTextures?.loaded ? 1 : 0);
+    gl.uniform1f(gl.getUniformLocation(p, 'uMapSize'), m.size);
     gl.uniform1f(gl.getUniformLocation(p, 'uSnow'), snow);
     gl.uniform1f(gl.getUniformLocation(p, 'uDusk'), dusk);
     gl.uniform1f(gl.getUniformLocation(p, 'uGust'), gust);
-    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.detailTexture || null);
-    gl.uniform1i(gl.getUniformLocation(p, 'uDetail'), 0);
+    gl.uniform1i(gl.getUniformLocation(p, 'uAlbedo'), 0);
+    gl.uniform1i(gl.getUniformLocation(p, 'uNormalMap'), 1);
+    gl.uniform1i(gl.getUniformLocation(p, 'uTerrainHeight'), 2);
     const aPos = gl.getAttribLocation(p, 'aPos'), aNor = gl.getAttribLocation(p, 'aNormal');
     const uProj = gl.getUniformLocation(p, 'uProj');
     // Two depth ranges, far first. A single 0.5 m - 16 km frustum needs a
@@ -624,8 +684,9 @@ export class TerrainRenderer {
       gl.clear(gl.DEPTH_BUFFER_BIT);
       const projection = perspective(vfov, aspect, near, far);
       gl.useProgram(p);
-      // A world-space friend sprite can bind its own texture in the far pass.
-      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.detailTexture);
+      // Plants and friend sprites bind textures too: restore all material units in BOTH passes.
+      const textures = [this.surfaceTextures?.textures.albedo, this.surfaceTextures?.textures.normal, this.heightTexture];
+      textures.forEach((texture, unit) => { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, texture || this.placeholder); });
       gl.uniformMatrix4fv(uProj, false, projection);
       for (const mesh of this.meshes) {
         gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vbo);

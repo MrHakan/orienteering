@@ -74,6 +74,7 @@ export class ExportComposer {
       this.canvas.height = f.height;
       this.layout = this.computeLayout(f);
       this.renderer.setFixedSize(this.layout.scene.w, this.layout.scene.h);
+      this.previewResolution = false;
     }
     if (formatChanged || prev.northUp !== o.northUp) this.buildMaps();
     this.environment = o.environment ? normaliseEnvironment(o.environment) : environmentFromWeather(o.weather);
@@ -155,7 +156,7 @@ export class ExportComposer {
   }
 
   /** Draw one frame. t = seconds since start. */
-  drawFrame(t = 0, { reveal = false } = {}) {
+  drawFrame(t = 0, { reveal = false, preview = false } = {}) {
     const { ctx, layout: L, quiz: q } = this;
     const frame = q.mode === 'trail' ? trailFrame(q, t, q.correctLabel, this.model) : null;
     const friendFrame = friendSceneFrame(q, t, this.animated || (!reveal && usesSunWatch(q)));
@@ -184,6 +185,11 @@ export class ExportComposer {
 
     // Scene.
     const S = L.scene;
+    if (this.previewResolution !== preview && this.renderer.setFixedSize) {
+      const scale = preview ? Math.min(1, 720 / S.w) : 1;
+      this.renderer.setFixedSize(Math.round(S.w * scale), Math.round(S.h * scale));
+      this.previewResolution = preview;
+    }
     this.renderer.render(camera, { weather: this.weather, environment: this.environment, environmentTime: t, time: frame ? frame.motion.t : t,
       personMotion: friendFrame.personMotion,
       solar: watchFrame?.solar, watch: watchFrame?.watch,
@@ -273,13 +279,11 @@ export class ExportComposer {
   }
 
   dispose() {
-    this.renderer.viewmodel?.dispose();
-    this.renderer.friendSprite?.dispose();
-    this.renderer.watchViewmodel?.dispose();
-    this.renderer.gl.getExtension('WEBGL_lose_context')?.loseContext();
+    this.renderer.dispose();
   }
 
   async drawFrameReady(time = 0, options = {}) {
+    await this.renderer.prepareEnvironmentReady(this.environment);
     if (usesSunWatch(this.quiz)) await this.renderer.prepareWatch();
     if (this.quiz.mode === 'friend' && this.quiz.friend.skin === 'conquest') await this.renderer.friendSprite?.ready;
     if (this.quiz.mode === 'trail') {

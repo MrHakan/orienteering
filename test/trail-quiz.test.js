@@ -158,7 +158,7 @@ test('both video formats share the live route sampler and freeze at the end for 
     c.ctx=new Proxy({measureText:()=>({width:20})},{get:(o,k)=>o[k]??(()=>{}),set:(o,k,v)=>{o[k]=v;return true;}});
     c.layout=c.computeLayout(FORMATS[format]);c.options={duration:15,caption:true,tape:false,handle:''};
     c.weather={rain:false};c.animated=true;
-    c.renderer={render:(camera,options)=>calls.push({camera,options})};
+    c.renderer={prepareEnvironmentReady:async()=>{},render:(camera,options)=>calls.push({camera,options})};
     c.glCanvas={};c.mapCanvas={};c.mapRevealCanvas={};
     const mapCalls=[];c.trailRevealMap={setViewing:camera=>mapCalls.push(camera)};c.trailRevealMapTime=-1;
     for(const t of [0,2.5,6,10.75,12,14.95]) {

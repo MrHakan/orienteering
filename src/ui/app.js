@@ -1062,16 +1062,21 @@ function restoreExportOptions() {
 function previewLoop() {
   const c = exportUi.composer;
   if (!c) return;
-  const d = c.options.duration;
-  const t = ((performance.now() - exportUi.start) / 1000) % d;
-  c.animated = true;
-  c.drawFrame(t, { reveal: c.options.reveal && t >= d - 3 });
+  const now = performance.now();
+  if (now >= exportUi.nextFrame) {
+    const d = c.options.duration, t = ((now - exportUi.start) / 1000) % d;
+    c.animated = true;
+    // The dialog displays a small preview; PNG/video capture restores native resolution.
+    c.drawFrame(t, { reveal: c.options.reveal && t >= d - 3, preview: true });
+    exportUi.nextFrame = now + 50;
+  }
   exportUi.raf = requestAnimationFrame(previewLoop);
 }
 
 function startPreview() {
   cancelAnimationFrame(exportUi.raf);
   exportUi.start = performance.now();
+  exportUi.nextFrame = 0;
   exportUi.raf = requestAnimationFrame(previewLoop);
 }
 

@@ -1,0 +1,64 @@
+{
+  "license": "CC0-1.0",
+  "source": "https://polyhaven.com",
+  "atlas": {
+    "size": 2048,
+    "cellSize": 1024,
+    "padding": 8
+  },
+  "materials": [
+    {
+      "id": "grass_ground",
+      "url": "https://polyhaven.com/a/grass_ground",
+      "authors": {
+        "Charlotte Baglioni": "All"
+      },
+      "sourceResolution": 1024,
+      "physicalSizeMm": [
+        2509.999990463257,
+        2509.999990463257
+      ],
+      "slot": 0
+    },
+    {
+      "id": "rock_boulder_dry",
+      "url": "https://polyhaven.com/a/rock_boulder_dry",
+      "authors": {
+        "Dimitrios Savva": "Photography",
+        "Rico Cilliers": "Processing"
+      },
+      "sourceResolution": 1024,
+      "physicalSizeMm": [
+        1799.9999523162842,
+        1800.0001907348633
+      ],
+      "slot": 1
+    },
+    {
+      "id": "brown_mud_rocks_01",
+      "url": "https://polyhaven.com/a/brown_mud_rocks_01",
+      "authors": {
+        "Rob Tuytel": "All"
+      },
+      "sourceResolution": 1024,
+      "physicalSizeMm": [
+        1299.996018409729,
+        1299.996018409729
+      ],
+      "slot": 2
+    },
+    {
+      "id": "rocky_terrain_02",
+      "url": "https://polyhaven.com/a/rocky_terrain_02",
+      "authors": {
+        "Amal Kumar": "All"
+      },
+      "sourceResolution": 1024,
+      "physicalSizeMm": [
+        90000,
+        90000
+      ],
+      "slot": 3
+    }
+  ]
+}

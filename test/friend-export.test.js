@@ -44,7 +44,7 @@ function composer(format='reels') {
   c.layout=c.computeLayout(FORMATS[format]);
   c.options={duration:15,caption:false,tape:true,handle:''};
   c.weather={rain:false};c.animated=true;
-  c.renderer={render:(camera,options)=>calls.push({camera,options})};
+  c.renderer={prepareEnvironmentReady:async()=>{},render:(camera,options)=>calls.push({camera,options})};
   c.glCanvas={};c.mapCanvas={};c.mapRevealCanvas={};
   return {c,calls};
 }

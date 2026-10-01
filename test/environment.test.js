@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CONDITIONS, normaliseEnvironment, environmentFromWeather, weatherParams, windGust } from '../src/render/environment.js';
-import { buildNatureMeshes } from '../src/render/natureMesh.js';
+import { buildNatureMeshes, buildGroundCover, NATURE_STRIDE } from '../src/render/natureMesh.js';
 import { TerrainModel } from '../src/engine/terrainModel.js';
 import { surfaceElevation } from '../src/engine/terrainSurface.js';
+import { terrainHeightPixels } from '../src/render/terrainDetail.js';
 
 test('environment preferences recover safely from stale or malformed storage', () => {
   for (const input of [null, false, '', { condition: 'lava', wind: 'hurricane', hd: 'true' }]) {
@@ -56,18 +57,56 @@ test('nature is seeded, bounded, and anchored on rendered ground without changin
   assert.deepEqual(a.foliage, b.foliage); assert.deepEqual(a.nature, b.nature);
   assert.deepEqual(heights, before);
   assert.ok(a.roots.length <= 56 * 56);
-  assert.ok(a.foliage.length / 13 > 10000 && a.foliage.length / 13 < 150000);
-  assert.ok(a.nature.length > 0 && a.nature.length / 13 < 100000);
+  assert.ok(a.foliage.length / NATURE_STRIDE > 10000 && a.foliage.length / NATURE_STRIDE < 150000);
+  assert.ok(a.nature.length > 0 && a.nature.length / NATURE_STRIDE < 100000);
   for (const root of a.roots) {
     assert.ok(model.inside(root.x, root.y));
     assert.equal(root.z, surfaceElevation(model, root.x, root.y));
   }
   for (const mesh of [a.foliage, a.nature]) {
-    assert.equal(mesh.length % 39, 0);
-    for (let i = 0; i < mesh.length; i += 13) {
+    assert.equal(mesh.length % (NATURE_STRIDE * 3), 0);
+    for (let i = 0; i < mesh.length; i += NATURE_STRIDE) {
       const [x, z, south] = mesh.subarray(i + 9, i + 12);
       assert.ok(Math.abs(z - surfaceElevation(model, x, -south)) < .001);
-      for (const value of mesh.subarray(i, i + 13)) assert.ok(Number.isFinite(value));
+      for (const value of mesh.subarray(i, i + NATURE_STRIDE)) assert.ok(Number.isFinite(value));
     }
   }
+});
+
+test('nearby meadow cells remain identical after movement, scrubbing and returning', () => {
+  const n = 17, size = 1024, heights = new Float32Array(n * n).fill(30);
+  const model = new TerrainModel({ size, n, heights, seed: 'meadow-check' });
+  const a = buildGroundCover(model, { x: 512, y: 512 });
+  assert.ok(a.roots.length > 1000 && a.vertices.length / NATURE_STRIDE < 50000);
+  assert.deepEqual(a.vertices, buildGroundCover(model, { x: 520, y: 520 }).vertices);
+  const moved = buildGroundCover(model, { x: 540, y: 512 });
+  const shared = new Map();
+  for (let i = 0; i < a.vertices.length; i += NATURE_STRIDE * 3) {
+    const key = [...a.vertices.subarray(i + 9, i + 12)].join(',');
+    const triangles = shared.get(key) || []; triangles.push([...a.vertices.subarray(i, i + NATURE_STRIDE * 3)]); shared.set(key, triangles);
+  }
+  let matched = 0;
+  for (let i = 0; i < moved.vertices.length; i += NATURE_STRIDE * 3) {
+    const key = [...moved.vertices.subarray(i + 9, i + 12)].join(',');
+    if (shared.has(key)) {
+      assert.ok(shared.get(key).some(t => t.every((v, k) => v === moved.vertices[i + k]))); matched++;
+    }
+  }
+  assert.ok(matched > 5000);
+  assert.deepEqual(a.vertices, buildGroundCover(model, { x: 512, y: 512 }).vertices);
+  const edge = buildGroundCover(model, { x: 2, y: 2 });
+  assert.ok(edge.roots.every(r => model.inside(r.x, r.y) && r.z === surfaceElevation(model, r.x, r.y)));
+});
+
+test('HD lighting height texture preserves elevations and leaves geometry unchanged', () => {
+  const n = 17, size = 1024, heights = Float32Array.from({ length: n * n }, (_, k) => 22 + Math.sin(k * .5) * 15);
+  const before = heights.slice(), model = new TerrainModel({ size, n, heights, seed: 'hd-height' });
+  const pixels = terrainHeightPixels(model);
+  for (let y = 0; y < 256; y += 7) for (let x = 0; x < 256; x += 7) {
+    const k = (y * 256 + x) * 4;
+    const reconstructed = model.min + ((pixels[k] << 8) + pixels[k + 1]) / 65535 * (model.max - model.min);
+    assert.ok(Math.abs(reconstructed - surfaceElevation(model, x / 255 * size, y / 255 * size)) < .001);
+    assert.equal(pixels[k + 3], 255);
+  }
+  assert.deepEqual(heights, before);
 });

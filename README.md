@@ -221,11 +221,20 @@ Choose calm air, a light breeze or a strong breeze independently. Wind has smoot
 gusts, bends vegetation and changes the direction of rain and drifting snow;
 clouds cast moving shadows. Snow also settles visually on flatter ground.
 
-**HD terrain texture** adds mipmapped grass/soil detail and exposed rock texture.
-**Foliage** adds swaying grass, shrubs and sparse trees. **Nature** adds rocks,
-wildflowers and distant birds. Vegetation is seeded from the terrain, rests on
-the rendered ground, and uses the terrain depth buffer. All three are optional
+**HD terrain texture** uses local 2K atlases of CC0 scanned grass, rock, soil and
+rocky meadow surfaces. Slope-dependent blending, world-space cliff projection,
+normal/roughness/AO maps and terrain shadows keep detail visible at several
+distances. **Foliage** adds textured meadow grasses, ferns, leafy shrubs and pine
+trees, with dense nearby ground cover and anchored wind motion. **Nature** adds
+irregular boulders, ferns, wildflowers and distant birds. Vegetation is seeded from
+the terrain, rests on the rendered ground, and uses the terrain depth buffer. All three are optional
 and off by default. These settings never modify elevations, contours or answers.
+
+HD and plant assets load only when selected; exports wait for all selected
+materials before capturing a frame. Ground cover streams in bounded, seeded world
+cells, so replaying or seeking a clip restores the same plants. Surface asset
+sources and licenses are recorded in `src/assets/environment/README.md`. The export
+dialog uses a smaller scene preview; PNG/video captures restore native resolution.
 
 Preferences are remembered locally. Opening Export copies the current scene's
 environment; the dialog can adjust it for that image/video. Live views and exports
