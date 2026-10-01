@@ -159,7 +159,26 @@ The terrain stays the same; only the chosen viewpoint and heading change.
 
 ### "Which way are you facing?" mode
 
-`Mode → Which way are you facing?` (`&m=facing`) marks where you stand on the map and hides the heading. You pick one of 8 compass directions from a rose (keys `Q W E / A D / Z X C`). For each candidate point the generator renders the view descriptor in all 8 directions. The point is accepted only if the most similar wrong direction still differs by a difficulty-dependent margin: from 3.2° on Easy down to 1.0° on Master. On Master that nearest wrong direction must also differ visibly somewhere in the frame, and the hardest of ~40 evaluated points is chosen. The bearing tape stays hidden until you answer, and the sun always lights the scene from the same side relative to the view, so neither gives the heading away. The same seed gives the same terrain in both modes, and exports switch to a "WHICH WAY?" frame.
+`Mode → Which way are you facing?` (`&m=facing`) marks your position and asks
+which of eight directions you faced at the start. The camera begins looking at
+the terrain, lowers at 2 seconds, and holds a readable analog wristwatch for
+three seconds (2.5–5.5 s). It then looks up, checks both sides, holds the sun in
+view briefly, and returns to the original view at 12 seconds. Replay, pause,
+Space and the timeline repeat or inspect the sequence.
+
+No heading text, bearing tape, tutorial, developer overlay or pre-answer
+question diagnostics are shown. The clock and sun provide the physical scene;
+the game does not explain how to interpret them. The answer and comparisons
+appear after the player submits a direction.
+
+The seeded watch uses simulated local solar time, an equinox and 40°N latitude.
+Morning and afternoon times are drawn independently of the correct answer.
+Solar azimuth/elevation drive both the visible sun and terrain illumination;
+the generator checks that the sun clears the skyline. The camera sequence never
+moves the observer or changes the answer. Existing terrain/view validation still
+compares every wrong direction. Video exports use the identical sequence; PNG
+exports capture a single frame. Reduced-motion preferences start the sequence
+paused so the player can start it manually.
 
 ### Look-alikes (A / B / C)
 

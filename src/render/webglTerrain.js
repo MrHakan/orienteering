@@ -8,6 +8,7 @@ import { FriendSprite } from './friendSprite.js';
 import { windGust } from './environment.js';
 import { terrainDetailPixels } from './terrainDetail.js';
 import { buildNatureMeshes, NATURE_VERT, NATURE_FRAG } from './natureMesh.js';
+import { WatchViewModel } from './watchViewModel.js';
 
 const PERSON_VERT = `
 attribute vec3 aPos;
@@ -151,6 +152,8 @@ uniform float uCloud;
 uniform vec2 uWind;
 uniform float uWet;
 uniform float uNature, uBirdHeading;
+uniform float uSolar;
+uniform vec3 uSolarSun;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p) {
@@ -165,7 +168,12 @@ float fbm(vec2 p) {
 }
 
 void main() {
+  vec3 fwd = vec3(sin(uHeading) * cos(uPitch), sin(uPitch), -cos(uHeading) * cos(uPitch));
+  vec3 right = vec3(cos(uHeading), 0.0, sin(uHeading));
+  vec3 up = vec3(-sin(uHeading) * sin(uPitch), cos(uPitch), cos(uHeading) * sin(uPitch));
+  vec3 ray = normalize(fwd + right * vNdc.x * uTanHalfH + up * vNdc.y * uTanHalfV);
   float elev = uPitch + atan(vNdc.y * uTanHalfV);
+  if (uSolar > .5) elev = asin(clamp(ray.y, -1.0, 1.0));
   float t = smoothstep(-0.02, 0.6, elev);
   vec3 c = mix(uHorizon, uZenith, pow(t, 0.8));
   if (uCloud > 0.0 && elev > 0.0) {
@@ -178,6 +186,13 @@ void main() {
     float cover = smoothstep(0.62 - 0.4 * uCloud, 0.9 - 0.3 * uCloud, n);
     vec3 cloudCol = mix(vec3(0.86, 0.87, 0.88), vec3(0.52, 0.55, 0.58), uWet * 0.8 + 0.25 * (1.0 - n));
     c = mix(c, cloudCol, cover * smoothstep(0.0, 0.08, elev) * 0.95);
+  }
+  if (uSolar > .5 && elev > 0.0) {
+    float angle = acos(clamp(dot(ray, normalize(uSolarSun)), -1.0, 1.0));
+    float disk = 1.0 - smoothstep(.007, .009, angle);
+    float halo = exp(-angle * angle / .0018) * .26;
+    c += vec3(1.0, .76, .42) * halo;
+    c = mix(c, vec3(1.0, .95, .76), disk);
   }
   // A small flock in the world sky, never over the ground or map.
   if (uNature > 0.0 && elev > .03) {
@@ -310,6 +325,13 @@ export class TerrainRenderer {
 
   async prepareViewmodel(time, motion = {}) {
     if (this.viewmodelEnabled) await this.viewmodel.prepare(time, motion);
+  }
+
+  async prepareWatch() {
+    if (!this.watchViewmodel) this.watchViewmodel = new WatchViewModel(this.gl, () => {
+      if (this.lastFrame?.options.watch) this.render(this.lastFrame.camera, this.lastFrame.options);
+    });
+    await this.watchViewmodel.ready;
   }
 
   setPerson(person = null) {
@@ -509,9 +531,9 @@ export class TerrainRenderer {
    * environment: optional hd / foliage / nature flags; environmentTime in seconds.
    * Weather is purely visual: it never changes the terrain geometry.
    */
-  render(camera, { weather = {}, environment = {}, time = 0, environmentTime = time, motion = {}, personMotion = {}, sunHeading = camera.heading } = {}) {
+  render(camera, { weather = {}, environment = {}, time = 0, environmentTime = time, motion = {}, personMotion = {}, sunHeading = camera.heading, solar = null, watch = null } = {}) {
     if (!this.model) return;
-    this.lastFrame = { camera, options: { weather, environment, time, environmentTime, motion, personMotion, sunHeading } };
+    this.lastFrame = { camera, options: { weather, environment, time, environmentTime, motion, personMotion, sunHeading, solar, watch } };
     this.prepareEnvironment(environment);
     this.personMotion = personMotion;
     this.updatePersonMotion({ wave: personMotion.wave, time });
@@ -556,6 +578,8 @@ export class TerrainRenderer {
     gl.uniform1f(gl.getUniformLocation(this.sky, 'uWet'), wet);
     gl.uniform1f(gl.getUniformLocation(this.sky, 'uNature'), environment.nature ? 1 : 0);
     gl.uniform1f(gl.getUniformLocation(this.sky, 'uBirdHeading'), (weather.skyHeading ?? sunHeading) * Math.PI / 180);
+    gl.uniform1f(gl.getUniformLocation(this.sky, 'uSolar'), solar ? 1 : 0);
+    gl.uniform3fv(gl.getUniformLocation(this.sky, 'uSolarSun'), solar?.direction || [0, 1, 0]);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.disableVertexAttribArray(sp);
 
@@ -570,7 +594,7 @@ export class TerrainRenderer {
     gl.uniform3fv(gl.getUniformLocation(p, 'uEye'), eye);
     // Low sun from the side of the view direction: cross-lighting reveals slopes.
     const sunAz = ((sunHeading + 125) * Math.PI) / 180, sunEl = ((27 - dusk * 17) * Math.PI) / 180;
-    const sun = [Math.sin(sunAz) * Math.cos(sunEl), Math.sin(sunEl), -Math.cos(sunAz) * Math.cos(sunEl)];
+    const sun = solar?.direction || [Math.sin(sunAz) * Math.cos(sunEl), Math.sin(sunEl), -Math.cos(sunAz) * Math.cos(sunEl)];
     gl.uniform3fv(gl.getUniformLocation(p, 'uSunDir'), sun);
     gl.uniform2fv(gl.getUniformLocation(p, 'uHeightRange'), [m.min, m.max]);
     gl.uniform3fv(gl.getUniformLocation(p, 'uFogColor'), horizon);
@@ -618,6 +642,7 @@ export class TerrainRenderer {
       this.drawPerson(projection, view, eye, sun, horizon, fogDensity, camera);
     }
     this.drawWeather(weather, camera, environmentTime, gust);
+    if (watch && this.watchViewmodel) this.watchViewmodel.render(W, H, watch);
     if (this.viewmodelEnabled) this.viewmodel.render(W, H, time, motion);
   }
 }

@@ -59,6 +59,7 @@ body {
 .facing .arrow { display: inline-block; color: var(--accent); }
 
 .scene-wrap { position: relative; aspect-ratio: 16 / 10; background: #3a4b5c; border-radius: 3px; overflow: hidden; }
+.sun-watch .scene-wrap { margin-top: 14px; }
 .scene-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #tape { pointer-events: none; }
 .badge {

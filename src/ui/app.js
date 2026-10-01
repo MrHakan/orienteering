@@ -13,6 +13,7 @@ import { normaliseMovement, trailFrame } from '../engine/trailMotion.js';
 import { TRAIL_COLORS } from '../engine/trailQuiz.js';
 import { KNIVES, normaliseAppearance } from '../render/knifeClips.js';
 import { TrailPlayback } from './trailPlayback.js';
+import { usesSunWatch, sunWatchFrame, SUN_WATCH_DURATION } from '../engine/sunWatch.js';
 import { TerrainRenderer } from '../render/webglTerrain.js';
 import { CONDITIONS, WINDS, normaliseEnvironment, weatherParams, environmentAnimated } from '../render/environment.js';
 import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
@@ -43,6 +44,7 @@ const state = {
   friendCinematicPlaying: false,
   friendCinematicTime: 0,
   trailTime: 0,
+  sunTime: 0,
   appearance: normaliseAppearance(store.get('otq.appearance', {})),
   environment: normaliseEnvironment(store.get('otq.environment', {})),
   environmentStart: performance.now(),
@@ -83,6 +85,22 @@ const trailPlayer = new TrailPlayback({
     $('trail-scrub').value = String(time); $('trail-scrub').max = String(duration);
   },
 });
+const sunPlayer = new TrailPlayback({ duration: SUN_WATCH_DURATION,
+  draw: (t) => { if (usesSunWatch(state.quiz) && !state.loading) { state.sunTime = t; renderScene(currentCamera()); } },
+  onState: ({ time, playing, duration }) => {
+    state.sunTime = time;
+    $('direction-play').textContent = playing ? 'Pause' : time >= duration ? 'Replay' : 'Play';
+    $('direction-play').setAttribute('aria-pressed', String(playing));
+    $('direction-time').textContent = `${time.toFixed(1)} / ${duration.toFixed(1)} s`;
+    $('direction-scrub').value = String(time);
+  },
+});
+$('direction-play').addEventListener('click', () => {
+  if (!usesSunWatch(state.quiz) || state.loading) return;
+  if (sunPlayer.playing) sunPlayer.pause(); else sunPlayer.play();
+});
+$('direction-replay').addEventListener('click', () => { if (usesSunWatch(state.quiz) && !state.loading) sunPlayer.replay(); });
+$('direction-scrub').addEventListener('input', () => { if (usesSunWatch(state.quiz) && !state.loading) sunPlayer.seek(Number($('direction-scrub').value)); });
 $('trail-play').addEventListener('click', () => {
   if (state.loading || state.quiz?.mode !== 'trail') return;
   if (trailPlayer.playing) trailPlayer.pause(); else trailPlayer.play();
@@ -91,6 +109,7 @@ $('trail-replay').addEventListener('click', () => { if (!state.loading && state.
 $('trail-inspect').addEventListener('click', () => { if (!state.loading && state.quiz?.mode === 'trail') trailPlayer.inspect(); });
 $('trail-scrub').addEventListener('input', () => { if (!state.loading && state.quiz?.mode === 'trail') trailPlayer.seek(Number($('trail-scrub').value)); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && state.quiz?.mode === 'trail') trailPlayer.pause(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && usesSunWatch(state.quiz)) sunPlayer.pause(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) stopFriendWave(); else scheduleFriendWave(); });
 
 function stopFriendWave() {
@@ -111,6 +130,7 @@ function scheduleFriendWave() {
     // 30 fps; friend gestures retain their existing smooth animation clock.
     if ((friendActive || now - lastAmbientFrame >= 1000 / 30)
       && !(state.quiz?.mode === 'trail' && (trailPlayer.playing || trailPlayer.inspectAt !== null))) {
+      if (usesSunWatch(state.quiz) && sunPlayer.playing) { scheduleFriendWave(); return; }
       lastAmbientFrame = now; renderScene(currentCamera());
     }
     scheduleFriendWave();
@@ -139,6 +159,7 @@ for (const key of ['weather', 'wind', 'hd', 'foliage', 'nature']) $(`scene-${key
 });
 reducedMotion.addEventListener('change', () => {
   stopFriendWave();
+  if (reducedMotion.matches && usesSunWatch(state.quiz)) sunPlayer.pause();
   if (state.quiz && !state.loading) renderScene(currentCamera());
   scheduleFriendWave();
 });
@@ -259,6 +280,7 @@ async function load(req) {
   };
   stopFriendWave();
   state.friendCinematicPlaying = false;
+  sunPlayer.reset(); state.sunTime = 0;
   trailPlayer.reset(); state.trailTime = 0;
   if (r.mode === 'lookalike') r.headingMode = 'auto';
   if (r.mode === 'grid' && r.gridChallenge === 'lost-compass') r.headingMode = 'auto';
@@ -361,6 +383,8 @@ function show(quiz) {
   state.friendCinematicTime = 0;
   state.friendCinematicPlaying = quiz.mode === 'friend' && quiz.friend.skin === 'conquest';
   state.trailTime = 0; trailPlayer.reset(quiz.trail?.duration || 12);
+  state.sunTime = 0; sunPlayer.reset();
+  $('direction-tools').hidden = !usesSunWatch(quiz);
   $('trail-tools').hidden = quiz.mode !== 'trail';
   $('trail-legend').hidden = quiz.mode !== 'trail';
   $('friend-tools').hidden = quiz.mode !== 'friend';
@@ -380,7 +404,10 @@ function show(quiz) {
   $('quiz-title').classList.toggle('long', facing || ['friend', 'trail'].includes(quiz.mode));
   $('facing-text').textContent = quiz.mode === 'trail' ? 'BUNNY HOP · READ THE MOVING TERRAIN' : facing ? 'YOU ARE AT THE MARKED POINT' : headingHidden(quiz) ? 'LOST COMPASS · FIND YOUR CELL' : quiz.heading.text;
   $('facing-arrow').textContent = quiz.mode === 'trail' || headingHidden(quiz) || quiz.heading.mode === 'exact' ? '' : quiz.heading.arrow;
-  $('prompt').textContent = facing ? 'You stand at the marked point. Which of the 8 directions are you looking in?'
+  $('facing-text').closest('.facing').hidden = usesSunWatch(quiz);
+  document.querySelector('.card').classList.toggle('sun-watch', usesSunWatch(quiz));
+  document.querySelector('.about').hidden = usesSunWatch(quiz);
+  $('prompt').textContent = facing ? 'Which direction were you facing at the start?'
     : lookalike ? 'A, B and C have similar views in this direction. Match the ridge shapes and foreground to find your point.'
     : grid ? `${friendGrid ? "Locate your friend's cell" : 'Find your cell'}: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size} (row + column, e.g. B3).`
     : quiz.mode === 'trail' ? 'Which trail did you follow: A red, B green or C cyan? All three traces advance together. Match the slopes, ridges and hollows in the moving view. Circles mark the starts; arrows mark the ends.'
@@ -411,7 +438,7 @@ function show(quiz) {
     extent: quiz.mapExtent || null, trails: quiz.mode === 'trail', trailDuration: quiz.trail?.duration,
     observer: friendObserver(quiz), friendMode: quiz.mode === 'friend',
   });
-  map.setOverlays(state.settings);
+  map.setOverlays({ ...state.settings, landforms: usesSunWatch(quiz) ? false : state.settings.landforms });
 
   renderAnswerButtons();
   renderFacts();
@@ -419,6 +446,12 @@ function show(quiz) {
   setAnswersEnabled(true);
   if (quiz.mode === 'friend' && quiz.friend.skin === 'conquest') startFriendArrival();
   if (quiz.mode === 'trail' && renderer && !window.matchMedia('(prefers-reduced-motion: reduce)').matches && !document.hidden) trailPlayer.play();
+  if (usesSunWatch(quiz) && renderer) renderer.prepareWatch().then(() => {
+    if (state.quiz !== quiz || state.loading) return;
+    if (!state.answered && !reducedMotion.matches && !document.hidden && !$('export-dialog').open) sunPlayer.play();
+  }).catch(error => {
+    $('scene-error').textContent = error.message; $('scene-error').hidden = false;
+  });
   scheduleFriendWave();
 }
 
@@ -501,17 +534,20 @@ function renderScene(camera, playback = {}) {
       state.lastTrailMapTime = state.trailTime; state.lastTrailMapLabel = frame.route.label;
     }
   } else {
+    const watchFrame = usesSunWatch(state.quiz) ? sunWatchFrame(state.quiz, state.sunTime, { camera }) : null;
     const elapsed = state.quiz.mode === 'friend' && state.friendZoom ? Math.max(0, (performance.now() - friendWaveStart) / 1000) : 0;
     const lift = Math.min(1, elapsed / .35);
     const conquest = friendPerson?.skin === 'conquest';
     const frame = conquest ? friendSceneFrame(state.quiz, state.friendCinematicTime,
       state.friendCinematicPlaying || state.friendCinematicTime > 0, { camera, person: friendPerson }) : null;
     if (frame) camera = frame.camera;
-    renderer.setViewmodel(null); renderer.render(camera, { ...environmentOptions, time: conquest ? state.friendCinematicTime : elapsed,
+    if (watchFrame) camera = watchFrame.camera;
+    renderer.setViewmodel(null); renderer.render(camera, { ...environmentOptions, time: watchFrame ? state.sunTime : conquest ? state.friendCinematicTime : elapsed,
+      solar: watchFrame?.solar, watch: watchFrame?.watch,
       personMotion: frame ? frame.personMotion : { wave: state.friendZoom && state.quiz.mode === 'friend' ? lift * lift * (3 - 2 * lift) : 0 } });
   }
   // In "Which way?" the bearing tape would give the answer away.
-  const tapeAllowed = !headingHidden(state.quiz) || state.answered;
+  const tapeAllowed = !usesSunWatch(state.quiz) && (!headingHidden(state.quiz) || state.answered);
   const tape = $('tape');
   if (state.settings.tape && tapeAllowed) drawCompassTape(tape, camera, { exact: state.quiz.heading.mode === 'exact' });
   else {
@@ -574,6 +610,7 @@ function answer(label) {
   const quiz = state.quiz;
   if (!quiz.options.some((o) => o.label === label)) return;
   if (quiz.mode === 'trail') trailPlayer.pause();
+  if (usesSunWatch(quiz)) sunPlayer.seek(SUN_WATCH_DURATION);
   state.answered = true;
   state.chosen = label;
   const right = label === quiz.correctLabel;
@@ -764,9 +801,16 @@ function renderScore() {
 
 function renderFacts() {
   const q = state.quiz;
+  const sealed = usesSunWatch(q) && !state.answered;
+  $('facts').hidden = sealed;
+  $('facts').closest('.box').querySelectorAll('h2, details').forEach(el => { el.hidden = sealed; });
+  $('dev-enabled').closest('.box').hidden = sealed;
+  $('opt-landforms').closest('label').hidden = sealed;
+  $('opt-tape').closest('label').hidden = usesSunWatch(q);
+  $('legend').hidden = sealed || !state.settings.landforms;
   const facts = [
     ['Mode', q.mode === 'trail' ? 'Bunny-hop trails' : q.mode === 'friend' ? `Where is your friend?${q.friend.challenge === 'depth-trap' ? ' · Depth trap' : ''}` : q.mode === 'facing' ? 'Which way are you facing?' : q.mode === 'lookalike' ? 'Look-alikes (A / B / C)' : q.mode === 'grid' ? `Grid ${q.grid.size} × ${q.grid.size}${headingHidden(q) ? ' · Lost compass' : ''}` : 'Where are you?'],
-    ['Heading', headingHidden(q) && !state.answered ? 'hidden until you answer' : `${String(Math.round(q.camera.heading)).padStart(3, '0')}° (${q.mode === 'facing' ? 'one of 8 directions' : q.heading.mode})`],
+    ...(!sealed ? [['Heading', headingHidden(q) && !state.answered ? 'hidden until you answer' : `${String(Math.round(q.camera.heading)).padStart(3, '0')}° (${q.mode === 'facing' ? 'one of 8 directions' : q.heading.mode})`]] : []),
     ...(q.mode === 'trail' ? [['Run', `${q.trail.duration} s · ${Math.round(q.trail.plan.length)} m · three matched routes`],
       ['Movement', q.trail.movement === 'classic' ? 'CS 1.6 style' : 'CS:GO style']] : []),
     ...(q.mode === 'grid' ? [['Cells', `${q.options.length} · ${Math.round(q.grid.cellMetres)} m per side · observer at centre`]] : []),
@@ -893,7 +937,7 @@ for (const [id, key] of Object.entries(toggles)) {
     } else if (key === 'tape') {
       renderScene(currentCamera());
     } else {
-      map.setOverlays(state.settings);
+      map.setOverlays({ ...state.settings, landforms: usesSunWatch(state.quiz) && !state.answered ? false : state.settings.landforms });
     }
   });
 }
@@ -911,6 +955,9 @@ document.addEventListener('keydown', (e) => {
   if ($('export-dialog').open) return;
   if (e.target.matches('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key.toUpperCase();
+  if (usesSunWatch(state.quiz) && e.code === 'Space') {
+    e.preventDefault(); if (sunPlayer.playing) sunPlayer.pause(); else sunPlayer.play(); return;
+  }
   if (state.quiz?.mode === 'trail' && (e.code === 'Space' || k === 'F')) {
     e.preventDefault();
     if (k === 'F') trailPlayer.inspect(); else if (trailPlayer.playing) trailPlayer.pause(); else trailPlayer.play();
@@ -1018,6 +1065,9 @@ function stopPreview() { cancelAnimationFrame(exportUi.raf); }
 function openExport() {
   if (!state.quiz || !renderer) return;
   stopFriendWave();
+  exportUi.sunResume = usesSunWatch(state.quiz) && sunPlayer.playing;
+  if (usesSunWatch(state.quiz)) sunPlayer.pause();
+  $('export-sequence-note').hidden = !usesSunWatch(state.quiz);
   if (state.quiz.mode === 'trail') trailPlayer.pause();
   exportUi.now = new Date();
   $('export-easter').innerHTML = EASTER_CHOICES.map((c) => `<option value="${c.value}">${c.label}</option>`).join('');
@@ -1050,6 +1100,7 @@ function closeExport() {
   exportUi.composer?.dispose();
   exportUi.composer = null;
   $('export-dialog').close();
+  if (exportUi.sunResume && usesSunWatch(state.quiz) && !state.answered && !document.hidden && !reducedMotion.matches) sunPlayer.play();
   scheduleFriendWave();
 }
 

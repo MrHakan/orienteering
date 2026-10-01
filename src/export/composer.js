@@ -13,6 +13,7 @@ import { headingHidden } from '../engine/gridQuiz.js';
 import { friendSceneFrame } from './friendZoom.js';
 import { friendObserver } from '../engine/friendQuiz.js';
 import { trailFrame } from '../engine/trailMotion.js';
+import { usesSunWatch, sunWatchFrame } from '../engine/sunWatch.js';
 
 export const FORMATS = {
   reels: { label: 'Reels / Story 9:16', width: 1080, height: 1920 },
@@ -54,6 +55,7 @@ export class ExportComposer {
     this.renderer.setTerrain(model);
     this.renderer.setPerson(quiz.friend || null);
     this.setOptions(options);
+    if (usesSunWatch(quiz)) this.renderer.prepareWatch().catch(error => { this.watchError = error; });
   }
 
   setOptions(options) {
@@ -156,7 +158,8 @@ export class ExportComposer {
     const { ctx, layout: L, quiz: q } = this;
     const frame = q.mode === 'trail' ? trailFrame(q, t, q.correctLabel, this.model) : null;
     const friendFrame = friendSceneFrame(q, t, this.animated);
-    const camera = frame ? frame.camera : friendFrame.camera;
+    const watchFrame = usesSunWatch(q) ? sunWatchFrame(q, t, { active: !reveal }) : null;
+    const camera = watchFrame ? watchFrame.camera : frame ? frame.camera : friendFrame.camera;
     const W = this.canvas.width, H = this.canvas.height;
     const duration = this.options.duration;
     ctx.save();
@@ -174,19 +177,20 @@ export class ExportComposer {
     ctx.font = `500 ${L.facing.size}px ${FONT}`;
     ctx.fillStyle = '#cfd3d6';
     const facing = q.mode === 'trail' ? 'BUNNY HOP · READ THE MOVING TERRAIN' : facingMode ? 'YOU ARE AT THE MARKED POINT' : headingHidden(q) && !reveal ? 'LOST COMPASS · FIND YOUR CELL' : q.heading.mode === 'exact' ? q.heading.text : `${q.heading.text} ${q.heading.arrow}`;
-    ctx.fillText(q.mode === 'friend' ? `${q.friend.observerHidden && !reveal ? 'READ THE TERRAIN' : 'FROM YOU'} · ${facing}` : facing, W / 2, L.facing.y);
+    if (!usesSunWatch(q)) ctx.fillText(q.mode === 'friend' ? `${q.friend.observerHidden && !reveal ? 'READ THE TERRAIN' : 'FROM YOU'} · ${facing}` : facing, W / 2, L.facing.y);
     if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
 
     // Scene.
     const S = L.scene;
     this.renderer.render(camera, { weather: this.weather, environment: this.environment, environmentTime: t, time: frame ? frame.motion.t : t,
       personMotion: friendFrame.personMotion,
+      solar: watchFrame?.solar, watch: watchFrame?.watch,
       motion: frame ? { ...frame.motion, clockRunning: this.animated } : {}, sunHeading: q.mode === 'trail' ? q.camera.heading : camera.heading });
     ctx.drawImage(this.glCanvas, S.x, S.y, S.w, S.h);
     ctx.save();
     ctx.beginPath(); ctx.rect(S.x, S.y, S.w, S.h); ctx.clip();
     // The bearing tape would reveal the answer in "Which way?" until the reveal.
-    if (this.options.tape && (!headingHidden(q) || reveal)) drawCompassTape(null, camera, { exact: q.heading.mode === 'exact', target: { ctx, x: S.x, y: S.y, width: S.w, scale: S.w / 666 } });
+    if (!usesSunWatch(q) && this.options.tape && (!headingHidden(q) || reveal)) drawCompassTape(null, camera, { exact: q.heading.mode === 'exact', target: { ctx, x: S.x, y: S.y, width: S.w, scale: S.w / 666 } });
     ctx.restore();
 
     // Countdown bar under the scene (video only).
@@ -237,7 +241,7 @@ export class ExportComposer {
     // Inactive (and untouched) outside an event and after the fade-out.
     if (this.easter) {
       // Sky objects must still disappear behind the terrain as the lens zooms.
-      if (this.easterFov !== camera.fov || (['trail', 'friend'].includes(q.mode) && this.easterCameraKey !== JSON.stringify(camera))) {
+      if (this.easterFov !== camera.fov || ((usesSunWatch(q) || ['trail', 'friend'].includes(q.mode)) && this.easterCameraKey !== JSON.stringify(camera))) {
         this.easter.stage.setSkyline(skylineScreenPoints(camera, this.model, S.w, S.h));
         this.easterFov = camera.fov;
         this.easterCameraKey = JSON.stringify(camera);
@@ -269,10 +273,12 @@ export class ExportComposer {
   dispose() {
     this.renderer.viewmodel?.dispose();
     this.renderer.friendSprite?.dispose();
+    this.renderer.watchViewmodel?.dispose();
     this.renderer.gl.getExtension('WEBGL_lose_context')?.loseContext();
   }
 
   async drawFrameReady(time = 0, options = {}) {
+    if (usesSunWatch(this.quiz)) await this.renderer.prepareWatch();
     if (this.quiz.mode === 'friend' && this.quiz.friend.skin === 'conquest') await this.renderer.friendSprite?.ready;
     if (this.quiz.mode === 'trail') {
       const frame = trailFrame(this.quiz, time, this.quiz.correctLabel, this.model);
