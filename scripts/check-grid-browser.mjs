@@ -56,6 +56,19 @@ try {
   assert.equal(await page.locator('#grid-cell').isEnabled(), true);
   assert.equal(await page.locator('#result').isVisible(), false);
 
+  await page.locator('#grid-size').selectOption('6');
+  await ready(page);
+  assert.match(page.url(), /g=6/);
+  assert.equal(await page.locator('#quiz-title').textContent(), '6 × 6 GRID');
+  await page.reload(); await ready(page);
+  assert.equal(await page.locator('#grid-size').inputValue(), '6');
+  await page.locator('#grid-cell').fill('G1'); await page.locator('#grid-submit').click();
+  assert.equal(await page.locator('#grid-cell').getAttribute('aria-invalid'), 'true');
+  const q6 = await generate({ ...opts, gridSize: 6 });
+  await page.locator('#grid-cell').fill(q6.correctLabel.toLowerCase());
+  await page.locator('#grid-cell').press('Enter');
+  assert.match(await page.locator('#result .verdict').textContent(), /^Correct/);
+
   await page.locator('#grid-size').selectOption('8');
   await ready(page);
   assert.match(page.url(), /g=8/);

@@ -9,7 +9,7 @@ import { scrambleLabels } from '../src/engine/scramble.js';
 import { captionText } from '../src/export/composer.js';
 
 test('grid references run A1 west to east, then B1 north to south', () => {
-  for (const n of [4, 8, 16]) {
+  for (const n of [4, 6, 8, 16]) {
     const cells = gridCells(2000, n);
     assert.equal(cells.length, n * n);
     assert.equal(new Set(cells.map((p) => p.label)).size, n * n);
@@ -26,9 +26,13 @@ test('grid references run A1 west to east, then B1 north to south', () => {
 test('cell input accepts compact or spaced codes and rejects out-of-grid codes', () => {
   assert.equal(parseCell(' b 3 ', 4), 'B3');
   assert.equal(parseCell('p16', 16), 'P16');
+  assert.equal(parseCell('f6', 6), 'F6');
+  assert.equal(parseCell('G1', 6), null);
+  assert.equal(parseCell('A7', 6), null);
   for (const value of ['A0', 'A01', 'A5', 'E1', 'A1junk', '<b>A1</b>', '', '11']) assert.equal(parseCell(value, 4), null);
   assert.equal(parseCell('P17', 16), null);
   assert.equal(normaliseGridSize('8'), 8);
+  assert.equal(normaliseGridSize('6'), 6);
   assert.equal(normaliseGridSize('invalid'), 4);
 });
 
@@ -49,7 +53,7 @@ test('rotating the display preserves grid references and pointer hit testing', (
   }
 });
 
-for (const gridSize of [4, 8, 16]) for (const gridChallenge of ['standard', 'lost-compass']) {
+for (const gridSize of [4, 6, 8, 16]) for (const gridChallenge of ['standard', 'lost-compass']) {
   test(`${gridSize}×${gridSize} ${gridChallenge} creates a validated cell-centre question`, async () => {
     const q = await generate({ seed: 'grid-check', mode: 'grid', gridSize, gridChallenge, difficulty: 'medium' });
     assert.equal(q.mode, 'grid');

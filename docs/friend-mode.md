@@ -2,13 +2,13 @@
 
 Choose **Where is your friend?** in Mode. The orange-jacketed, 1.80 m person is seen from your own observation point. Choose his map position at A, B or C.
 
-Choose **Find friend by → Grid** to locate him by cell reference instead. Pick a **4 × 4**, **8 × 8** or **16 × 16** grid, tap his cell or type a code such as `B3`, then press **Check cell**. Selection does not submit immediately. Rows run north to south and columns west to east; references follow the terrain when the map rotates.
+Choose **Find friend by → Grid** to locate him by cell reference instead. Pick a **4 × 4**, **6 × 6**, **8 × 8** or **16 × 16** grid, tap his cell or type a code such as `B3`, then press **Check cell**. Selection does not submit immediately. Rows run north to south and columns west to east; references follow the terrain when the map rotates. Only the edge headers carry labels, leaving the contours inside each cell clear. The instruction appears once, between the view and map, in the app and in PNG/video exports.
 
 Grid scores the cell containing **your friend**, not the observer. The person keeps his real world position and may stand anywhere inside a cell. The answer highlights his cell green, a wrong choice red, and marks his exact location **FRIEND** alongside the observer **YOU**. Zoom remains available from the original viewpoint. Easy's grid covers the local map; higher levels cover the fixed full terrain. Point and Grid use the same qualified sighting and visibility checks, with Grid replacing the three marked choices with map cells.
 
-Replay links include `fa=grid&g=4|8|16`, for example `#seed=friend-demo&d=medium&m=friend&fa=grid&g=8`. New positions, both challenges, PNG and video exports also support Grid. Question exports hide FRIEND and retain the existing hidden-observer rule; answer exports show the correct cell and exact friend position. The existing **Point — A / B / C** setting remains available.
+Replay links include `fa=grid&g=4|6|8|16`, for example `#seed=friend-demo&d=medium&m=friend&fa=grid&g=6`. New positions, both challenges, PNG and video exports also support Grid. Question exports hide FRIEND and retain the existing hidden-observer rule; answer exports show the correct cell and exact friend position, with the answer remark replacing the question above the map. The existing **Point — A / B / C** setting remains available.
 
-![Friend grid answer preview](friend-grid.png)
+![6 × 6 friend grid question preview](friend-grid.png)
 
 - **Easy** marks your observation point as YOU on a local map. Use bearing, apparent size, elevation and the surrounding contours. Answer comparisons move the person while keeping the camera fixed.
 - **Medium and above** leave your position unmarked until the answer. All three candidate targets have plausible observation points at the same range and bearing, with almost identical apparent body heights. Distance alone cannot eliminate a letter: match the skyline, slopes and hollows to infer where you stand and where your friend is.

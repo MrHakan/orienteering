@@ -1,6 +1,6 @@
 # Grid method
 
-Choose **Grid method** in the Mode menu, then select **4 × 4**, **8 × 8** or
+Choose **Grid method** in the Mode menu, then select **4 × 4**, **6 × 6**, **8 × 8** or
 **16 × 16**. Difficulty still controls the terrain, field of view, heading style,
 map rotation and the minimum view difference between answers.
 
@@ -20,8 +20,10 @@ ground. Match the first-person terrain to the contour map, then:
 
 Tapping only selects; it does not submit. The text input also provides a keyboard
 alternative to the canvas and makes 16 × 16 practical on a small phone.
-Dense maps show row and column headers instead of placing tiny codes over every
-contour. Hovering or selecting displays the full cell code.
+All grid sizes use row and column headers, keeping cell interiors clear of codes
+so the contours stay readable. A single instruction between the view and map
+explains the cell reference. Selection highlights the cell and shows its code in
+the answer input.
 
 The result highlights the true cell green and a wrong choice red. The view cone
 shows the true camera's field of view. Compare the true origin, your chosen cell
@@ -64,7 +66,7 @@ answer set finite and explicit.
 
 ## Replay and export
 
-Grid links add `m=grid&g=4|8|16` to the hash. Lost compass adds
+Grid links add `m=grid&g=4|6|8|16` to the hash. Lost compass adds
 `gc=lost-compass`. Standard heading overrides use the existing `h` field. Seed,
 difficulty, position variant and developer tuning continue to travel in links.
 Cell references cannot be scrambled. **New positions** keeps the seed and draws

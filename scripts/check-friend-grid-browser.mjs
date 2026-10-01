@@ -41,6 +41,8 @@ try {
   assert.equal(await page.locator('#answers button').count(), 0);
   assert.equal(await page.locator('#grid-cell-label').textContent(), "Friend's cell");
   assert.match(await page.locator('#prompt').textContent(), /Locate your friend/);
+  const promptBox = await page.locator('#prompt').boundingBox(), mapBox = await page.locator('#map').boundingBox();
+  assert.ok(promptBox.y + promptBox.height <= mapBox.y);
   await page.locator('#grid-cell').fill('P16'); await page.locator('#grid-submit').click();
   assert.equal(await page.locator('#grid-cell').getAttribute('aria-invalid'), 'true');
   assert.equal(await page.locator('#result').isVisible(), false);
@@ -74,6 +76,19 @@ try {
   await page.locator('#friend-answer').selectOption('grid'); await ready(page);
   assert.equal(await page.locator('#grid-answer').isVisible(), true);
   assert.match(page.url(), /fa=grid/);
+  await page.locator('#grid-size').selectOption('6'); await ready(page);
+  assert.match(page.url(), /g=6/);
+  await page.reload(); await ready(page);
+  assert.equal(await page.locator('#grid-size').inputValue(), '6');
+  assert.match(await page.locator('#prompt').textContent(), /A1–F6/);
+  await page.locator('#grid-cell').fill('A7'); await page.locator('#grid-submit').click();
+  assert.equal(await page.locator('#grid-cell').getAttribute('aria-invalid'), 'true');
+  const q6 = await generate({ ...opts, gridSize: 6 });
+  await page.locator('#map').click({ position: await position(page, q6, q6.friend) });
+  assert.equal(await page.locator('#grid-cell').inputValue(), q6.correctLabel);
+  if (out) await page.locator('.card').screenshot({ path: join(out, 'friend-grid6-question.png') });
+  await page.locator('#grid-submit').click();
+  assert.match(await page.locator('#result .verdict').textContent(), /^Correct/);
 
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }); watch(mobile);
   const qm = await generate({ ...opts, difficulty: 'medium', gridSize: 16, friendChallenge: 'depth-trap' });
@@ -98,28 +113,33 @@ try {
     const { TerrainModel } = await import(new URL('engine/terrainModel.js', src));
     const { ExportComposer } = await import(new URL('export/composer.js', src));
     const { encodeCanvasVideo } = await import(new URL('export/recorder.js', src));
-    const q = await generate({ seed: 'friend-demo', difficulty: 'medium', mode: 'friend', friendAnswer: 'grid', gridSize: 16 });
+    const q = await generate({ seed: 'friend-demo', difficulty: 'medium', mode: 'friend', friendAnswer: 'grid', gridSize: 6 });
     const model = new TerrainModel({ ...q.terrain, seed: q.terrain.modelSeed }), result = [];
     for (const format of ['reels', 'post']) {
       const c = new ExportComposer(q, model, { format, northUp: false });
-      const texts = [], fillText = c.ctx.fillText.bind(c.ctx);
-      c.ctx.fillText = (...args) => { texts.push(args[0]); fillText(...args); };
+      const texts = [], positions = [], fillText = c.ctx.fillText.bind(c.ctx);
+      c.ctx.fillText = (...args) => { texts.push(args[0]); positions.push({ text: args[0], y: args[2] }); fillText(...args); };
       await c.toImage(); const question = c.canvas.toDataURL(), questionTexts = [...texts];
       texts.length = 0; await c.toImage({ reveal: true }); const answer = c.canvas.toDataURL(), answerTexts = [...texts];
       c.animated = true; c.drawFrame(7); c.drawFrame(13, { reveal: true });
       const clip = await encodeCanvasVideo(c.canvas, t => c.drawFrameReady(t), { duration: .2, fps: 10 });
-      result.push({ format, question, answer, questionTexts, answerTexts, correctLabel: q.correctLabel, bytes: clip.blob.size, type: clip.blob.type });
+      result.push({ format, question, answer, questionTexts, answerTexts, positions, layout: c.layout, correctLabel: q.correctLabel, bytes: clip.blob.size, type: clip.blob.type });
       c.dispose();
     }
     return result;
   });
   for (const e of exports) {
     assert.notEqual(e.question, e.answer);
-    if (e.format === 'reels') assert.ok(e.questionTexts.includes("Find your friend's cell: A1–P16."));
-    assert.ok(e.answerTexts.includes(`Answer: ${e.correctLabel}`));
+    const questionRemark = "Find your friend's cell: A1–F6.", answerRemark = `Answer: ${e.correctLabel}`;
+    assert.equal(e.questionTexts.filter(text => text === questionRemark).length, 1);
+    assert.equal(e.answerTexts.filter(text => text === answerRemark).length, 1);
+    for (const remark of e.positions.filter(p => [questionRemark, answerRemark].includes(p.text))) {
+      assert.ok(remark.y > e.layout.scene.y + e.layout.scene.h + 14);
+      assert.ok(remark.y < e.layout.map.y + 34); // above the row/column headers
+    }
     assert.ok(e.bytes > 1000); assert.equal(e.type, 'video/mp4');
-    if (out) for (const stage of ['question', 'answer']) await writeFile(join(out, `friend-grid16-export-${e.format}-${stage}.png`), Buffer.from(e[stage].split(',')[1], 'base64'));
+    if (out) for (const stage of ['question', 'answer']) await writeFile(join(out, `friend-grid6-export-${e.format}-${stage}.png`), Buffer.from(e[stage].split(',')[1], 'base64'));
   }
   assert.deepEqual(errors, []);
-  console.log('Friend grid browser checks passed: cropped selection, observer-cell rejection, keyboard input, replay, variants, point switching, mobile touch, hash changes, PNGs and encoded video in both formats.');
+  console.log('Friend grid browser checks passed: 6×6 selection/replay, cropped selection, observer-cell rejection, keyboard input, variants, point switching, mobile touch, hash changes, single remarks, PNGs and encoded video in both formats.');
 } finally { await browser.close(); server.close(); }

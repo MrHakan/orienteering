@@ -9,7 +9,7 @@ import { distinguishingCue } from './quizCandidates.js';
 import { buildTerrain, terrainSummary, landmarkSummary, framingPitch, now } from './quiz.js';
 import { saturate } from './grid.js';
 
-export const GRID_SIZES = [4, 8, 16];
+export const GRID_SIZES = [4, 6, 8, 16];
 export const normaliseGridSize = (value) => GRID_SIZES.includes(Number(value)) ? Number(value) : 4;
 export const normaliseGridChallenge = (value) => value === 'lost-compass' ? value : 'standard';
 export const headingHidden = (quiz) => quiz.mode === 'facing' || (quiz.mode === 'grid' && quiz.grid.challenge === 'lost-compass');

@@ -124,6 +124,7 @@ export class ExportComposer {
         title: { y: 150, size: 88 }, facing: { y: 222, size: 38 },
         scene: { x: m, y: 270, w: sceneW, h: sceneH },
         rule: 270 + sceneH + 32,
+        remark: { y: 270 + sceneH + 50, size: 28 },
         map: { x: (W - map) / 2, y: 270 + sceneH + 58, s: map },
         caption: { y: H - 118, size: 38 }, handle: { y: H - 56, size: 28 },
       };
@@ -135,6 +136,7 @@ export class ExportComposer {
       title: { y: 100, size: 66 }, facing: { y: 152, size: 30 },
       scene: { x: m, y: 185, w: sceneW, h: sceneH },
       rule: 185 + sceneH + 18,
+      remark: { y: 185 + sceneH + 46, size: 26 },
       map: { x: (W - map) / 2, y: 185 + sceneH + 30, s: map },
       caption: null, handle: { y: H - 22, size: 24 },
     };
@@ -221,8 +223,10 @@ export class ExportComposer {
       ctx.fillRect(S.x, S.y + S.h + 8, S.w * p, 6);
     }
 
-    ctx.fillStyle = 'rgba(230, 226, 214, 0.14)';
-    ctx.fillRect(S.x, L.rule, S.w, 2);
+    if (!q.grid) {
+      ctx.fillStyle = 'rgba(230, 226, 214, 0.14)';
+      ctx.fillRect(S.x, L.rule, S.w, 2);
+    }
 
     const M = L.map;
     if (frame) {
@@ -236,11 +240,17 @@ export class ExportComposer {
     ctx.drawImage(reveal ? this.mapRevealCanvas : this.mapCanvas, M.x, M.y, M.s, M.s);
 
     ctx.textAlign = 'center';
-    if (L.caption && this.options.caption) {
+    if (q.grid && (this.options.caption || reveal)) {
+      // One remark above the grid in both formats, including video frames.
+      // Draw after the map so its empty header margin cannot erase the text.
+      ctx.font = `500 ${L.remark.size}px ${FONT}`;
+      ctx.fillStyle = reveal ? '#5fd08a' : '#e9e4d8';
+      ctx.fillText(reveal ? `Answer: ${q.correctLabel}` : captionText(q), W / 2, L.remark.y, W - 80);
+    } else if (!q.grid && L.caption && this.options.caption) {
       ctx.font = `500 ${L.caption.size}px ${FONT}`;
       ctx.fillStyle = reveal ? '#5fd08a' : '#e9e4d8';
       ctx.fillText(reveal ? `Answer: ${q.correctLabel}` : captionText(q), W / 2, L.caption.y);
-    } else if (reveal) {
+    } else if (!q.grid && reveal) {
       this.drawBadge(`Answer: ${q.correctLabel}`, W / 2, M.y + 34);
     }
     if (this.options.handle) {

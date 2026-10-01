@@ -6,7 +6,7 @@ import { MapRenderer, quizMarkers } from '../src/render/mapRenderer.js';
 import { ExportComposer, captionText } from '../src/export/composer.js';
 import { scrambleLabels } from '../src/engine/scramble.js';
 
-for (const difficulty of ['easy', 'medium']) for (const gridSize of [4, 8, 16]) {
+for (const difficulty of ['easy', 'medium']) for (const gridSize of [4, 6, 8, 16]) {
   test(`${difficulty} friend grid ${gridSize} scores the person's cell and preserves the qualified sighting`, async () => {
     const opts = { seed: 'friend-demo', mode: 'friend', difficulty };
     const point = await generate(opts);

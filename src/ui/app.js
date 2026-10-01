@@ -274,13 +274,14 @@ function show(quiz) {
   $('facing-arrow').textContent = quiz.mode === 'trail' || headingHidden(quiz) || quiz.heading.mode === 'exact' ? '' : quiz.heading.arrow;
   $('prompt').textContent = facing ? 'You stand at the marked point. Which of the 8 directions are you looking in?'
     : lookalike ? 'A, B and C have similar views in this direction. Match the ridge shapes and foreground to find your point.'
-    : friendGrid ? `Find the orange-jacketed person's cell.${quiz.friend.observerHidden ? ' Your own position is unmarked; read the skyline, slopes and hollows.' : ' You stand at YOU; use bearing, apparent size and the terrain.'} Tap a cell or type its code, then check your answer. Rows start at north; columns start at west. Locate your friend, not your own cell.`
-    : grid ? `You stand at a cell centre.${headingHidden(quiz) ? ' Your heading is one of 8 directions, hidden until you answer.' : ''} Tap your cell or type its code, then check your answer. Rows start at north; columns start at west.`
+    : grid ? `${friendGrid ? "Locate your friend's cell" : 'Find your cell'}: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size} (row + column, e.g. B3).`
     : quiz.mode === 'trail' ? 'Which trail did you follow: A red, B green or C cyan? All three traces advance together. Match the slopes, ridges and hollows in the moving view. Circles mark the starts; arrows mark the ends.'
     : quiz.mode === 'friend' ? quiz.friend.observerHidden
       ? `Where is the person in the orange jacket: A, B or C? Your position is unmarked. All three spots fit his distance and apparent size; use the skyline, slopes and hollows to locate him.${quiz.friend.challenge === 'depth-trap' ? ' Depth trap also matches his vertical angle more closely.' : ''}`
       : `You stand at YOU. Where is the person in the orange jacket: A, B or C?${quiz.friend.challenge === 'depth-trap' ? ' All three spots share a bearing — compare distance, apparent size and slope.' : ' Match his position to the surrounding terrain.'}`
     : 'You are at one of the marked points, facing the direction shown. Which one?';
+  $('prompt').classList.toggle('grid-remark', grid);
+  (grid ? document.querySelector('.map-wrap') : document.querySelector('.answer-row')).before($('prompt'));
   $('credit').textContent = `seed ${quiz.seed}${quiz.variant ? ` · positions #${quiz.variant}` : ''} · ${DIFFICULTIES[quiz.difficulty].label.toLowerCase()} · ${Math.round(t.size / 1000 * 10) / 10} km × ${Math.round(t.size / 1000 * 10) / 10} km`;
   $('viewing-badge').hidden = true;
   $('result').hidden = true;

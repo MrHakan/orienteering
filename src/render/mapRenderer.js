@@ -328,23 +328,12 @@ export class MapRenderer {
       ctx.lineWidth = 3; ctx.strokeStyle = COLORS.bg; ctx.strokeText(text, x, y);
       ctx.fillStyle = '#bde0f5'; ctx.fillText(text, x, y);
     };
-    // Headers rotate with the terrain, while text stays upright. Dense mobile
-    // grids use these headers instead of covering contours with 256 tiny codes.
+    // References come from the edge headers; keep cell interiors clear so the
+    // contours stay readable at every grid size. Text stays upright on rotation.
     const offset = 11 / this.S * L;
     for (let i = 0; i < n; i++) {
       label(String(i + 1), ...this.toCanvas(left + (i + 0.5) / n * L, bottom + L + offset));
       label(String.fromCharCode(65 + i), ...this.toCanvas(left - offset, bottom + L - (i + 0.5) / n * L));
-    }
-    if (n <= 8 || this.S / n >= 30) {
-      const font = Math.min(11, Math.max(8, this.S / n * 0.23));
-      for (let row = 0; row < n; row++) for (let col = 0; col < n; col++) {
-        label(`${String.fromCharCode(65 + row)}${col + 1}`, ...this.toCanvas(left + (col + 0.5) / n * L, bottom + L - (row + 0.5) / n * L), font);
-      }
-    }
-    const active = this.reveal ? this.data.grid.correctLabel : this.selection || (this.pickable ? this.hover : null);
-    if (active) {
-      ctx.fillStyle = 'rgba(21,26,32,0.95)'; ctx.fillRect(0, 0, 48, 24);
-      label(active, 24, 12, 13);
     }
   }
 
