@@ -18,6 +18,7 @@ import { TerrainRenderer } from '../render/webglTerrain.js';
 import { CONDITIONS, WINDS, normaliseEnvironment, weatherParams, environmentAnimated } from '../render/environment.js';
 import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
+import { relativeBearing } from '../render/relativeBearing.js';
 import { drawSkylineOverlay } from '../render/skylineOverlay.js';
 import { ExportComposer } from '../export/composer.js';
 import { planForChoice, describePlan, EASTER_CHOICES } from '../easter/index.js';
@@ -522,6 +523,8 @@ function renderAnswerButtons() {
 
 function renderScene(camera, playback = {}) {
   if (!renderer) return;
+  const startHeading = camera.heading;
+  let relativeTurn = null;
   const environmentOptions = { environment: state.environment,
     weather: weatherParams(state.environment, state.quiz.camera.heading),
     environmentTime: reducedMotion.matches ? 0 : Math.max(0, (performance.now() - state.environmentStart) / 1000) };
@@ -556,9 +559,18 @@ function renderScene(camera, playback = {}) {
       state.friendCinematicPlaying || state.friendCinematicTime > 0, { camera, person: friendPerson }) : null);
     if (frame) camera = frame.camera;
     if (watchFrame) camera = watchFrame.camera;
+    if (watchFrame) relativeTurn = watchFrame.relativeTurn;
     renderer.setViewmodel(null); renderer.render(camera, { ...environmentOptions, time: watchFrame ? state.sunTime : conquest ? state.friendCinematicTime : elapsed,
       solar: watchFrame?.solar, watch: watchFrame?.watch,
       personMotion: frame ? frame.personMotion : { wave: state.friendZoom && state.quiz.mode === 'friend' ? lift * lift * (3 - 2 * lift) : 0 } });
+  }
+  const relative = $('relative-bearing');
+  relative.hidden = relativeTurn === null;
+  if (!relative.hidden) {
+    const bearing = relativeBearing(camera.heading, startHeading, relativeTurn);
+    $('relative-bearing-value').textContent = bearing.text;
+    relative.dataset.side = bearing.side;
+    relative.setAttribute('aria-label', `Relative bearing from starting view: ${bearing.text}`);
   }
   // In "Which way?" the bearing tape would give the answer away.
   const tapeAllowed = !usesSunWatch(state.quiz) && (!headingHidden(state.quiz) || state.answered);

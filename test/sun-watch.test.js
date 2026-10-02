@@ -10,6 +10,7 @@ import { cellAtExtent } from '../src/engine/gridQuiz.js';
 import { scrambleLabels } from '../src/engine/scramble.js';
 import { captionText } from '../src/export/composer.js';
 import { watchHandAngles } from '../src/render/watchViewModel.js';
+import { relativeBearing } from '../src/render/relativeBearing.js';
 import { angleDiff, wrap360 } from '../src/engine/grid.js';
 import { generate } from '../src/engine/quiz.js';
 import { TerrainModel } from '../src/engine/terrainModel.js';
@@ -90,6 +91,25 @@ test('analog hand positions include fractional hours, minutes and seconds', () =
   const b = watchHandAngles({ hour24: 9, minute: 15, seconds: 30 });
   assert.ok(Math.abs(b.minute - Math.PI * 31 / 60) < 1e-12);
   assert.ok(Math.abs(b.second - Math.PI) < 1e-12);
+});
+
+test('relative bearing handles north wraparound, a sun behind us, and returning to the start', () => {
+  assert.equal(relativeBearing(1, 359).text, 'RIGHT 2°');
+  assert.equal(relativeBearing(359, 1).text, 'LEFT 2°');
+  assert.equal(relativeBearing(226.166, 90).text, 'RIGHT 136°');
+  assert.equal(relativeBearing(90, 226.166).text, 'LEFT 136°');
+  assert.equal(relativeBearing(0, 180, 180).text, 'RIGHT 180°');
+  assert.equal(relativeBearing(.01, 180, 180.01).text, 'RIGHT 180°');
+  assert.equal(relativeBearing(359.99, 180, -180.01).text, 'LEFT 180°');
+  for (const mode of ['where-am-i', 'friend']) {
+    const q = { ...quiz, mode }, timing = watchTiming(q);
+    const bearing = t => { const f = sunWatchFrame(q, t); return relativeBearing(f.camera.heading, q.camera.heading, f.relativeTurn); };
+    for (const t of [0, timing.readable, timing.sky, 15]) assert.equal(bearing(t).text, 'START 0°');
+    const peak = bearing(timing.aim), back = bearing((timing.return + 15) / 2);
+    assert.equal(peak.side, back.side);
+    assert.ok(peak.degrees > back.degrees && back.degrees > 0);
+    assert.equal(peak.text, bearing(timing.aim).text, 'out-of-order replay preserves the relative reference');
+  }
 });
 
 test('time selection is seeded independently of answer labels and rejects a hidden sun', () => {

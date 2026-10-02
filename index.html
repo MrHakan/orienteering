@@ -114,6 +114,10 @@
       <div class="scene-wrap">
         <canvas id="scene" aria-label="First-person view of the terrain"></canvas>
         <canvas id="tape" aria-hidden="true"></canvas>
+        <output id="relative-bearing" class="relative-bearing" aria-label="Relative bearing from starting view" hidden>
+          <span class="relative-bearing-label">FROM START</span>
+          <span id="relative-bearing-value">START 0°</span>
+        </output>
         <div id="viewing-badge" class="badge" hidden></div>
         <p id="scene-error" class="scene-error" role="status" hidden></p>
         <div id="loading" class="loading">

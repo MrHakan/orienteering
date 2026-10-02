@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { generate } from '../src/engine/quiz.js';
 import { sunWatchFrame, WATCH_TIMING, FRIEND_WATCH_TIMING } from '../src/engine/sunWatch.js';
 import { friendSceneFrame } from '../src/export/friendZoom.js';
+import { relativeBearing } from '../src/render/relativeBearing.js';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = fileURLToPath(new URL(process.env.CHECK_SITE ? '../' + process.env.CHECK_SITE + '/' : '..', import.meta.url));
@@ -40,6 +41,7 @@ try {
     };
   });
   assert.equal(await page.locator('#direction-tools').isVisible(), true);
+  assert.equal(await page.locator('#relative-bearing').isVisible(), true);
   assert.equal(await page.locator('.facing').isVisible(), false);
   assert.equal(await page.locator('#facts').isVisible(), false);
   assert.equal(await page.locator('.dev').isVisible(), false);
@@ -58,6 +60,7 @@ try {
     const expected = sunWatchFrame(q, t);
     for (const [key, value] of Object.entries(expected.camera)) assert.ok(Math.abs(actual.camera[key] - value) < 1e-9, `camera ${key} at ${t}`);
     assert.deepEqual(actual.options.watch, expected.watch);
+    assert.equal(await page.locator('#relative-bearing-value').textContent(), relativeBearing(expected.camera.heading, q.camera.heading, expected.relativeTurn).text);
     if (t >= WATCH_TIMING.aim && t <= WATCH_TIMING.return) {
       assert.ok(Math.abs(actual.camera.heading - actual.options.solar.azimuth) < 1e-9);
       assert.ok(Math.abs(actual.camera.pitch - actual.options.solar.altitude) < 1e-9);
@@ -73,7 +76,9 @@ try {
   await page.waitForFunction(() => Number(document.getElementById('direction-scrub').value) > 4.2);
   await page.locator('#direction-play').click();
   const paused = await page.locator('#direction-scrub').inputValue();
+  const pausedBearing = await page.locator('#relative-bearing-value').textContent();
   await page.waitForTimeout(150); assert.equal(await page.locator('#direction-scrub').inputValue(), paused);
+  assert.equal(await page.locator('#relative-bearing-value').textContent(), pausedBearing);
   await page.locator('#direction-replay').click();
   await page.waitForFunction(() => Number(document.getElementById('direction-scrub').value) < 1);
   await page.locator('#direction-play').click(); await seek(page, 4);
@@ -91,6 +96,7 @@ try {
     const { TerrainRenderer } = await import(new URL('render/webglTerrain.js', src));
     const { TerrainModel } = await import(new URL('engine/terrainModel.js', src));
     const { sunWatchFrame } = await import(new URL('engine/sunWatch.js', src));
+    const { relativeBearing } = await import(new URL('render/relativeBearing.js', src));
     const { ExportComposer } = await import(new URL('export/composer.js', src));
     const { encodeCanvasVideo } = await import(new URL('export/recorder.js', src));
     const model = new TerrainModel({ ...q.terrain, heights: new Float32Array(q.terrain.heights), seed: q.terrain.modelSeed });
@@ -116,13 +122,18 @@ try {
     r.watchViewmodel.dispose(); r.gl.getExtension('WEBGL_lose_context')?.loseContext();
     for (const format of ['reels', 'post']) {
       const c = new ExportComposer(q, model, { format, tape: true, easterEgg: null });
+      const text = [], fillText = c.ctx.fillText.bind(c.ctx);
+      c.ctx.fillText = (...args) => { text.push(args[0]); return fillText(...args); };
       c.animated = true; await c.drawFrameReady(4);
       if (Math.abs(c.renderer.lastFrame.camera.pitch + 64) > 1e-9 || c.renderer.lastFrame.options.watch.progress !== 1) throw new Error('Export lost watch timing');
       const watchImage = c.canvas.toDataURL();
       await c.drawFrameReady(11); const sunImage = c.canvas.toDataURL();
+      const held = sunWatchFrame(q, 11);
+      if (!text.includes('FROM START') || !text.includes(relativeBearing(held.camera.heading, q.camera.heading, held.relativeTurn).text)) throw new Error('Export lost relative bearing');
       await c.drawFrameReady(13, { reveal: true });
       if (c.renderer.lastFrame.camera.heading === q.camera.heading) throw new Error('Reveal cut the 15-second sequence short');
       await c.drawFrameReady(15, { reveal: true });
+      if (!text.includes('START 0°')) throw new Error('Export relative bearing did not return to zero');
       if (JSON.stringify(c.renderer.lastFrame.camera) !== JSON.stringify(q.camera)) throw new Error('Reveal changed the answer viewpoint');
       const png = await c.toImage({ time: 4 }); if (png.size < 10000) throw new Error('Empty watch PNG');
       if (format === 'post') {
@@ -145,6 +156,7 @@ try {
   console.log('Location difficulty, solar visibility and 15-second video exports passed.');
   // Leaving the mode restores the existing interface and never runs its camera clock.
   await page.locator('#mode').selectOption('grid'); await ready(page);
+  assert.equal(await page.locator('#relative-bearing').isVisible(), false);
   assert.equal(await page.locator('#direction-tools').isVisible(), false);
   assert.equal(await page.locator('.facing').isVisible(), true);
   assert.equal(await page.locator('#facts').isVisible(), true);
@@ -169,6 +181,7 @@ try {
         const expected = friendSceneFrame(friend, t, true);
         for (const [key, value] of Object.entries(expected.camera)) assert.ok(Math.abs(actual.camera[key] - value) < 1e-9, `friend ${skin} ${answerMode} ${key} at ${t}`);
         assert.deepEqual(actual.options.watch, expected.watch);
+        assert.equal(await page.locator('#relative-bearing-value').textContent(), relativeBearing(expected.camera.heading, friend.camera.heading, expected.relativeTurn).text);
         if (t >= FRIEND_WATCH_TIMING.aim && t <= FRIEND_WATCH_TIMING.return) {
           assert.ok(Math.abs(actual.camera.heading - actual.options.solar.azimuth) < 1e-9);
           assert.ok(Math.abs(actual.camera.pitch - actual.options.solar.altitude) < 1e-9);
@@ -186,15 +199,20 @@ try {
         const { ExportComposer } = await import(new URL('export/composer.js', src));
         const { TerrainModel } = await import(new URL('engine/terrainModel.js', src));
         const { friendSceneFrame } = await import(new URL('export/friendZoom.js', src));
+        const { relativeBearing } = await import(new URL('render/relativeBearing.js', src));
         const model = new TerrainModel({ ...q.terrain, heights: new Float32Array(q.terrain.heights), seed: q.terrain.modelSeed });
         const shots = [];
         for (const format of ['reels', 'post']) {
           const c = new ExportComposer(q, model, { format, tape: true, easterEgg: null }); c.animated = true;
+          const text = [], fillText = c.ctx.fillText.bind(c.ctx);
+          c.ctx.fillText = (...args) => { text.push(args[0]); return fillText(...args); };
           for (const t of [5.5, 8, 12.6, 13.95, 15]) {
+            text.length = 0;
             await c.drawFrameReady(t, { reveal: t >= 12 });
             const expected = friendSceneFrame(q, t, true), actual = c.renderer.lastFrame;
             if (JSON.stringify(actual.camera) !== JSON.stringify(expected.camera)) throw new Error(`Friend export differs at ${t}`);
             if (JSON.stringify(actual.options.watch) !== JSON.stringify(expected.watch)) throw new Error('Friend watch mismatch');
+            if (!text.includes('FROM START') || !text.includes(relativeBearing(expected.camera.heading, q.camera.heading, expected.relativeTurn).text)) throw new Error(`Friend export lost relative bearing at ${t}`);
             if (t === 8 || t === 12.6) shots.push({ format, t, image: c.canvas.toDataURL() });
           }
           const png = await c.toImage();
@@ -214,11 +232,18 @@ try {
     const context = HTMLCanvasElement.prototype.getContext;
     HTMLCanvasElement.prototype.getContext = function(type, ...args) { return type === 'webgl2' ? null : context.call(this, type, ...args); };
   });
-  await mobile.goto(`${url}/#seed=sun-places&d=sun-watch&m=friend&fa=grid&g=6`); await ready(mobile);
+  await mobile.goto(`${url}/#seed=y6pw-zwtz&d=sun-watch&m=friend&fa=grid&g=6&fc=depth-trap&v=1`); await ready(mobile);
   await mobile.waitForTimeout(500); await seek(mobile, 8);
+  assert.equal(await mobile.locator('#relative-bearing-value').textContent(), 'START 0°');
+  await seek(mobile, 12.6);
+  assert.equal(await mobile.locator('#relative-bearing-value').textContent(), 'RIGHT 136°');
   assert.equal(await mobile.locator('#scene-error').isVisible(), false);
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   if (out) await mobile.screenshot({ path: join(out, 'sun-watch-mobile.png'), fullPage: true });
+  await seek(mobile, 13.9);
+  assert.equal(await mobile.locator('#relative-bearing-value').textContent(), 'RIGHT 73°');
+  await seek(mobile, 15);
+  assert.equal(await mobile.locator('#relative-bearing-value').textContent(), 'START 0°');
   await mobile.close(); assert.deepEqual(errors, []);
-  console.log('Sun/watch browser checks passed: difficulty, three locations, 15s video, varied sun bearings, no heading/hints, direct sun turn then return to friend, friend zoom then watch, point/6×6 grid, both skins and export formats, replay/pause, ordinary modes restored, mobile and WebGL 1.');
+  console.log('Sun/watch browser checks passed: difficulty, three locations, 15s video, varied sun bearings, no absolute heading, dynamic relative RIGHT/LEFT bearing, direct sun turn then return to friend, friend zoom then watch, point/6×6 grid, both skins and export formats, replay/pause, ordinary modes restored, mobile and WebGL 1.');
 } finally { await browser.close(); server.close(); }

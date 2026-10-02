@@ -6,6 +6,7 @@
 import { TerrainRenderer } from '../render/webglTerrain.js';
 import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
+import { relativeBearing, drawRelativeBearing } from '../render/relativeBearing.js';
 import { skylineScreenPoints } from '../render/skylineOverlay.js';
 import { createEasterEgg } from '../easter/index.js';
 import { normaliseEnvironment, environmentFromWeather, weatherParams } from '../render/environment.js';
@@ -199,6 +200,9 @@ export class ExportComposer {
     ctx.beginPath(); ctx.rect(S.x, S.y, S.w, S.h); ctx.clip();
     // The bearing tape would reveal the answer in "Which way?" until the reveal.
     if (!usesSunWatch(q) && this.options.tape && (!headingHidden(q) || reveal)) drawCompassTape(null, camera, { exact: q.heading.mode === 'exact', target: { ctx, x: S.x, y: S.y, width: S.w, scale: S.w / 666 } });
+    if (watchFrame) drawRelativeBearing(ctx, relativeBearing(camera.heading, q.camera.heading, watchFrame.relativeTurn), {
+      x: S.x, y: S.y, width: S.w, scale: S.w / 666,
+    });
     ctx.restore();
 
     // Countdown bar under the scene (video only).

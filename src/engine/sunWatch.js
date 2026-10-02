@@ -47,7 +47,7 @@ export function sunWatchFrame(quiz, seconds = 0, { camera = quiz.camera, active 
   if (!usesSunWatch(quiz)) return { camera, watch: null, solar: null, done: true };
   const t = clamp(Number.isFinite(seconds) ? seconds : 0, 0, SUN_WATCH_DURATION), p = quiz.sunWatch, timing = watchTiming(quiz);
   const solar = solarPosition(p.hour24, p.minute, t, p.latitude);
-  let heading = camera.heading, pitch = camera.pitch, progress = 0;
+  let heading = camera.heading, pitch = camera.pitch, progress = 0, relativeTurn = 0;
   let fov = camera.fov;
   if (active) {
     const zoom = quiz.mode === 'friend' ? sunFriendZoom(t) : 1;
@@ -67,11 +67,12 @@ export function sunWatchFrame(quiz, seconds = 0, { camera = quiz.camera, active 
         const anchor = solarPosition(p.hour24, p.minute, timing.aim, p.latitude);
         const turn = wrap360(anchor.azimuth - camera.heading + 180) - 180;
         const drift = wrap360(solar.azimuth - anchor.azimuth + 180) - 180;
-        heading = wrap360(camera.heading + (turn + drift) * orient);
+        relativeTurn = (turn + drift) * orient;
+        heading = wrap360(camera.heading + relativeTurn);
         pitch = lerp(camera.pitch, solar.altitude, orient);
       }
     }
   }
   return { camera: heading === camera.heading && pitch === camera.pitch && fov === camera.fov ? camera : { ...camera, heading, pitch, fov }, solar,
-    watch: { progress, hour24: p.hour24, minute: p.minute, seconds: t }, done: t >= SUN_WATCH_DURATION };
+    watch: { progress, hour24: p.hour24, minute: p.minute, seconds: t }, relativeTurn, done: t >= SUN_WATCH_DURATION };
 }
