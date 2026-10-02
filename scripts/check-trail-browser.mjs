@@ -79,11 +79,14 @@ try {
   await page.locator('#trail-play').click();
   assert.equal(await page.locator('#trail-play').getAttribute('aria-pressed'),'false');
   await seek(page,6);
-  const beforeInspect=await page.locator('#scene').screenshot();
+  await page.locator('#scene').screenshot();
+  const beforeInspect=await page.locator('#scene').evaluate(c=>c.toDataURL());
   await page.locator('#quiz-title').click();await page.keyboard.press('f');
-  await page.waitForTimeout(400);
+  // Inspect seeks an MP4 asynchronously; decoding can exceed 400 ms in CI.
+  // Require a visible frame change while the movement clock stays paused.
+  await page.waitForFunction(before=>document.getElementById('scene').toDataURL()!==before,
+    beforeInspect,{timeout:10000,polling:50});
   assert.equal(await page.locator('#trail-scrub').inputValue(),'6');
-  assert.notDeepEqual(await page.locator('#scene').screenshot(),beforeInspect);
   await page.locator('.trail-customise summary').click();
   const mapAtSix=await page.locator('#map').evaluate(c=>c.toDataURL());
   for(const knife of ['classic','default','butterfly']) {
