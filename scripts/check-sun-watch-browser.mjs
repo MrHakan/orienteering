@@ -23,6 +23,17 @@ const browser = await chromium.launch({ ...(process.env.CHROME_EXECUTABLE ? { ex
 const url = `http://localhost:${server.address().port}`, errors = [];
 const ready = page => page.waitForFunction(() => document.getElementById('loading').classList.contains('hidden'), null, { timeout: 90000 });
 const seek = (page, time) => page.locator('#direction-scrub').evaluate((el, time) => { el.value = String(time); el.dispatchEvent(new Event('input', { bubbles: true })); }, time);
+// Node and Chromium can differ by a few ulps in trigonometric results.
+// Match the same angular/vector tolerances used by the scene checks above.
+function assertSolar(actual, expected) {
+  for (const key of ['azimuth', 'altitude']) {
+    assert.ok(Math.abs(actual[key] - expected[key]) < 1e-9, 'solar ' + key);
+  }
+  assert.equal(actual.direction.length, expected.direction.length);
+  expected.direction.forEach((value, i) =>
+    assert.ok(Math.abs(actual.direction[i] - value) < 1e-12, 'solar direction ' + i));
+}
+
 try {
   const page = await browser.newPage({ viewport: { width: 1360, height: 1000 }, reducedMotion: 'reduce' });
   page.on('pageerror', err => errors.push(err.message));
@@ -248,8 +259,9 @@ try {
     await seek(developer, 11);
     const actual = await developer.evaluate(() => window.latitudeFrames.scene);
     const expected = sunWatchFrame(expectedQuiz, 11);
-    assert.deepEqual(actual.camera, expected.camera);
-    assert.deepEqual(actual.options.solar, expected.solar);
+    for (const [key, value] of Object.entries(expected.camera))
+      assert.ok(Math.abs(actual.camera[key] - value) < 1e-9, 'latitude camera ' + key);
+    assertSolar(actual.options.solar, expected.solar);
     assert.equal(await developer.locator('#facts').isVisible(), false);
     assert.equal(await developer.locator('.facing').isVisible(), false);
   };
@@ -270,7 +282,7 @@ try {
   await developer.locator('#open-export').click();
   await developer.waitForFunction(() => window.latitudeFrames.export?.options.solar);
   const exported = await developer.evaluate(() => window.latitudeFrames.export);
-  assert.deepEqual(exported.options.solar, sunWatchFrame(northern, exported.options.time).solar);
+  assertSolar(exported.options.solar, sunWatchFrame(northern, exported.options.time).solar);
   await developer.locator('#export-close').click();
   await developer.reload(); await ready(developer); await observeDeveloper();
   assert.equal(await latitudeField.inputValue(), '40'); await checkLatitude(northern);
