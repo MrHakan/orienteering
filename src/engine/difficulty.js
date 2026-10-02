@@ -4,6 +4,7 @@
 export const DIFFICULTIES = {
   'sun-watch': {
     label: 'Sun & watch',
+    sunWatchLatitude: 0,
     terrain: { archetypes: [3, 4], relief: 1.45, complexity: 0.45, noiseShare: [0.22, 0.28] },
     heading: 'intercardinal', distractors: 2, fov: [60, 66],
     minSeparation: 420, minTrueDistance: 420,
@@ -127,6 +128,7 @@ export function getDifficulty(name) {
  * to a path in a difficulty preset. Unset keys keep the preset's value.
  */
 export const TUNABLES = [
+  { key: 'sunLat', label: 'Sun/watch latitude: north +, south −', unit: '°', path: ['sunWatchLatitude'], min: -80, max: 80, step: 1 },
   { key: 'minTrue', label: 'Min distance, true point to distractor', unit: 'm', path: ['minTrueDistance'], min: 0, max: 1500, step: 10 },
   { key: 'minSep', label: 'Min distance between options', unit: 'm', path: ['minSeparation'], min: 0, max: 1500, step: 10 },
   { key: 'sameLandform', label: 'Reject options on the same landform', type: 'bool', path: ['rejectSameLandform'], fallback: true },

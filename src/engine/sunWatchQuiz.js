@@ -2,7 +2,7 @@
 // must rule out both other places; matching all three at one heading would
 // make the wristwatch irrelevant to the location question.
 import { SeedManager } from './rng.js';
-import { getDifficulty } from './difficulty.js';
+import { getDifficulty, applyTuning } from './difficulty.js';
 import { ViewpointGenerator } from './viewpoints.js';
 import { buildTerrain, terrainSummary, landmarkSummary, framingPitch, now } from './quiz.js';
 import { compareLookalikeViews, rankLookalikeTriples, sweepDescriptor, triangleSpread, DIRECTIONS } from './lookalikeQuiz.js';
@@ -47,8 +47,9 @@ function friendTargets(model, cameras, rng, elevationTolerance) {
 }
 
 export function generateSunWatchQuiz({ seed, difficulty = 'sun-watch', mode = 'where-am-i', variant = 0,
-  size, n, maxTerrainAttempts = 8, onProgress = () => {}, ...opts }) {
+  size, n, maxTerrainAttempts = 8, onProgress = () => {}, tuning = null, ...opts }) {
   const t0 = now(), friendMode = mode === 'friend', preset = getDifficulty('sun-watch');
+  const latitude = applyTuning(preset, tuning).sunWatchLatitude;
   const seeds = new SeedManager(`${seed}#${difficulty}`), log = [];
   const fov = friendMode ? 50 : 64, eyeHeight = 1.7;
   for (let attempt = 0; attempt < maxTerrainAttempts; attempt++) {
@@ -150,7 +151,7 @@ export function generateSunWatchQuiz({ seed, difficulty = 'sun-watch', mode = 'w
         directions: DIRECTIONS.map((d, i) => ({ ...d, viewpoints: byHeading[i].length })), ms: Math.round(now() - t0) }, log,
     };
     if (mode === 'lookalike') quiz.directionChoice = 'auto';
-    quiz.sunWatch = createSunWatch(quiz, model);
+    quiz.sunWatch = createSunWatch(quiz, model, { latitude });
     if (friendMode) {
       const target = chosen.targets[ci];
       quiz.friend = { x: target.x, y: target.y, z: target.z, height: FRIEND_HEIGHT,

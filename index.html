@@ -247,10 +247,11 @@
 
       <section class="box dev">
         <h2>Developer</h2>
-        <label class="toggle"><input type="checkbox" id="dev-enabled"> Developer mode <small>(override thresholds)</small></label>
+        <label class="toggle"><input type="checkbox" id="dev-enabled"> Developer mode <small>(generation and sun latitude)</small></label>
         <form id="dev-form" hidden>
           <label class="toggle"><input type="checkbox" id="dev-skyline"> Show computed skyline on the view <small>(engine ray-march; should sit on the rendered horizon)</small></label>
           <p class="dev-note">Empty fields use the <span id="dev-difficulty">difficulty</span> default shown in grey. Changes apply on regenerate and go into the link.</p>
+          <p id="dev-sun-note" class="dev-note" hidden>Sun/watch latitude: 0° is the equator; positive is north, negative is south. Uses an equinox and local solar time.</p>
           <div id="dev-fields" class="dev-fields"></div>
           <div class="row-btns">
             <button type="submit" class="btn primary small">Apply &amp; regenerate</button>

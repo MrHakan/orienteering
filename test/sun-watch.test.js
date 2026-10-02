@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { solarPosition, createSunWatch, sunWatchFrame, WATCH_TIMING, FRIEND_WATCH_TIMING, SUN_WATCH_DURATION, usesSunWatch, watchTiming } from '../src/engine/sunWatch.js';
 import { descriptorDistance } from '../src/engine/skyline.js';
 import { compareSunWatchViews } from '../src/engine/sunWatchQuiz.js';
-import { getDifficulty } from '../src/engine/difficulty.js';
+import { getDifficulty, applyTuning, encodeTuning, decodeTuning } from '../src/engine/difficulty.js';
 import { friendSceneFrame } from '../src/export/friendZoom.js';
 import { personSight, friendObserver } from '../src/engine/friendQuiz.js';
 import { cellAtExtent } from '../src/engine/gridQuiz.js';
@@ -19,7 +19,7 @@ const camera = Object.freeze({ x: 700, y: 850, z: 95, heading: 45, pitch: -2, fo
 const quiz = Object.freeze({ mode: 'where-am-i', seed: 'sun-watch', difficulty: 'sun-watch', camera, sunWatch: { hour24: 14, minute: 25, latitude: 40 } });
 
 test('solar-time sunrise is east, afternoon is west, and the noon sun is south', () => {
-  const morning = solarPosition(9), afternoon = solarPosition(15), noon = solarPosition(12);
+  const morning = solarPosition(9, 0, 0, 40), afternoon = solarPosition(15, 0, 0, 40), noon = solarPosition(12, 0, 0, 40);
   assert.ok(morning.azimuth > 90 && morning.azimuth < 180);
   assert.ok(afternoon.azimuth > 180 && afternoon.azimuth < 270);
   assert.ok(Math.abs(morning.altitude - afternoon.altitude) < 1e-10);
@@ -27,6 +27,41 @@ test('solar-time sunrise is east, afternoon is west, and the noon sun is south',
   assert.ok(solarPosition(6).altitude < .000001 && solarPosition(18).altitude < .000001);
   assert.ok(solarPosition(0).altitude < 0);
   for (const time of [8, 9, 12, 14, 16]) assert.ok(Math.abs(Math.hypot(...solarPosition(time).direction) - 1) < 1e-12);
+});
+
+test('default equinox equator has a due-east morning and due-west afternoon with time-driven elevation', () => {
+  for (const hour of [6, 7, 8, 9, 10, 11]) for (const minute of [0, 15, 55]) {
+    const sun = solarPosition(hour, minute, 15);
+    assert.equal(sun.azimuth, 90);
+    assert.ok(Math.abs(sun.altitude - (hour + minute / 60 + 15 / 3600 - 6) * 15) < 1e-9);
+  }
+  for (const hour of [13, 14, 15, 16, 17]) for (const minute of [0, 15, 55]) {
+    const sun = solarPosition(hour, minute, 15);
+    assert.equal(sun.azimuth, 270);
+    assert.ok(Math.abs(sun.altitude - (18 - hour - minute / 60 - 15 / 3600) * 15) < 1e-9);
+  }
+  assert.equal(solarPosition(14, 15).altitude, 56.25);
+  assert.equal(solarPosition(12).altitude, 90);
+  const north = solarPosition(14, 15, 0, 40), south = solarPosition(14, 15, 0, -40);
+  assert.ok(Math.abs(north.azimuth - 226.10957615248657) < 1e-9);
+  assert.ok(Math.abs(north.altitude - 39.564218500635626) < 1e-9);
+  assert.ok(south.azimuth > 270 && south.azimuth < 360);
+  assert.equal(north.altitude, south.altitude);
+});
+
+test('developer latitude travels in links and clamps invalid overrides', () => {
+  const preset = getDifficulty('sun-watch');
+  assert.equal(preset.sunWatchLatitude, 0);
+  for (const latitude of [-40, 0, 40]) {
+    const tuning = decodeTuning(encodeTuning({ sunLat: latitude }));
+    assert.equal(applyTuning(preset, tuning).sunWatchLatitude, latitude);
+    const plan = createSunWatch(quiz, { skyline: { castRay: () => ({ angle: 0 }) } }, { latitude });
+    assert.equal(plan.latitude, latitude);
+    assert.notEqual(plan.hour24 + plan.minute / 60, 12);
+  }
+  assert.equal(applyTuning(preset, { sunLat: 100 }).sunWatchLatitude, 80);
+  assert.equal(applyTuning(preset, { sunLat: -100 }).sunWatchLatitude, -80);
+  assert.equal(applyTuning(preset, { sunLat: 'invalid' }).sunWatchLatitude, 0);
 });
 
 test('camera lowers at 2 seconds and the analog watch remains readable for 3 full seconds', () => {
@@ -124,6 +159,10 @@ test('sun/watch is a location difficulty; ordinary direction questions keep thei
   assert.equal(ordinary.sunWatch, undefined);
   assert.deepEqual(sunWatchFrame(ordinary, 4).camera, ordinary.camera);
   const q = await generate({ seed: 'sun-places', difficulty: 'sun-watch', mode: 'where-am-i' });
+  assert.equal(q.sunWatch.latitude, 0);
+  const tuned = await generate({ seed: 'sun-places', difficulty: 'sun-watch', mode: 'where-am-i', tuning: { sunLat: 40 } });
+  assert.equal(tuned.sunWatch.latitude, 40);
+  assert.deepEqual(tuned.camera, q.camera); assert.deepEqual(tuned.options, q.options); assert.equal(tuned.correctLabel, q.correctLabel);
   const model = new TerrainModel({ ...q.terrain, seed: q.terrain.modelSeed });
   assert.deepEqual(q.sunWatch, createSunWatch(q, model));
   assert.equal(q.options.find(o => o.correct).heading, q.camera.heading);
@@ -189,6 +228,9 @@ test('friend zoom finishes first, then waits one second before a three-second wa
 test('friend point/grid sightings retain physical visibility, equal range and sun-qualified terrain matches', async () => {
   const opts = { seed: 'sun-places', difficulty: 'sun-watch', mode: 'friend' };
   const point = await generate(opts), model = verifyLocations(point);
+  const north = await generate({ ...opts, tuning: { sunLat: 40 } });
+  assert.equal(north.sunWatch.latitude, 40);
+  assert.deepEqual(north.camera, point.camera); assert.deepEqual(north.options, point.options); assert.deepEqual(north.friend, point.friend);
   assert.equal(friendObserver(point), null);
   for (const o of point.options) {
     const sight = personSight(model, o.observer, o);
@@ -212,6 +254,9 @@ test('friend point/grid sightings retain physical visibility, equal range and su
 test('seeded replay ignores heading overrides and difficulty switches restore ordinary scenes', async () => {
   const opts = { seed: 'sun-places', difficulty: 'sun-watch', mode: 'lookalike' };
   const a = await generate(opts), b = await generate({ ...opts, headingMode: 'exact', direction: 'N', tuning: { distractors: 4 } });
+  const south = await generate({ ...opts, tuning: { sunLat: -40 } });
+  assert.equal(south.sunWatch.latitude, -40);
+  assert.deepEqual(south.camera, a.camera); assert.deepEqual(south.options, a.options); assert.equal(south.correctLabel, a.correctLabel);
   assert.deepEqual(a.camera, b.camera); assert.deepEqual(a.options, b.options); assert.deepEqual(a.sunWatch, b.sunWatch);
   verifyLocations(a);
   const ordinary = await generate({ ...opts, difficulty: 'medium', mode: 'where-am-i' });

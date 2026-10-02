@@ -44,7 +44,9 @@ try {
   assert.equal(await page.locator('#relative-bearing').isVisible(), true);
   assert.equal(await page.locator('.facing').isVisible(), false);
   assert.equal(await page.locator('#facts').isVisible(), false);
-  assert.equal(await page.locator('.dev').isVisible(), false);
+  assert.equal(await page.locator('.dev').isVisible(), true);
+  assert.equal(await page.locator('#dev-form').isVisible(), false);
+  assert.equal(q.sunWatch.latitude, 0);
   assert.equal(await page.locator('.about').isVisible(), false);
   assert.equal(await page.locator('#opt-tape').isVisible(), false);
   assert.equal(await page.locator('#opt-landforms').isVisible(), false);
@@ -65,6 +67,7 @@ try {
       assert.ok(Math.abs(actual.camera.heading - actual.options.solar.azimuth) < 1e-9);
       assert.ok(Math.abs(actual.camera.pitch - actual.options.solar.altitude) < 1e-9);
     }
+    assert.equal(actual.options.solar.azimuth, q.sunWatch.hour24 < 12 ? 90 : 270);
     for (const key of ['azimuth', 'altitude']) assert.ok(Math.abs(actual.options.solar[key] - expected.solar[key]) < 1e-9);
     expected.solar.direction.forEach((value, i) => assert.ok(Math.abs(actual.options.solar.direction[i] - value) < 1e-12));
     assert.equal(await page.locator('#tape').evaluate(c => c.getContext('2d').getImageData(0, 0, c.width, c.height).data.some((v, i) => i % 4 === 3 && v > 0)), false);
@@ -226,13 +229,73 @@ try {
       console.log(`Friend ${answerMode}/${skin} camera and export sequence passed.`);
     }
   }
+  // Exercise the real developer form: worker generation, persistence, links,
+  // live/export sky and restoring the default must all use the same latitude.
+  const developer = await browser.newPage({ reducedMotion: 'reduce' });
+  developer.on('pageerror', error => errors.push(error.message));
+  const observeDeveloper = () => developer.evaluate(async () => {
+    const src = new URL('../', document.querySelector('script[type="module"]').src);
+    const { TerrainRenderer } = await import(new URL('render/webglTerrain.js', src));
+    const render = TerrainRenderer.prototype.render;
+    window.latitudeFrames = {};
+    TerrainRenderer.prototype.render = function(camera, options) {
+      const result = render.call(this, camera, options);
+      window.latitudeFrames[this.canvas.id === 'scene' ? 'scene' : 'export'] = { camera, options };
+      return result;
+    };
+  });
+  const checkLatitude = async expectedQuiz => {
+    await seek(developer, 11);
+    const actual = await developer.evaluate(() => window.latitudeFrames.scene);
+    const expected = sunWatchFrame(expectedQuiz, 11);
+    assert.deepEqual(actual.camera, expected.camera);
+    assert.deepEqual(actual.options.solar, expected.solar);
+    assert.equal(await developer.locator('#facts').isVisible(), false);
+    assert.equal(await developer.locator('.facing').isVisible(), false);
+  };
+  const latitudeField = developer.locator('[data-key="sunLat"]');
+  await developer.goto(`${url}/#seed=sun-places&d=sun-watch`); await ready(developer);
+  await observeDeveloper(); await developer.locator('#dev-enabled').check();
+  assert.equal(await latitudeField.isEnabled(), true);
+  assert.equal(await latitudeField.getAttribute('placeholder'), '0');
+  assert.equal(await developer.locator('#dev-sun-note').isVisible(), true);
+  await latitudeField.fill('40'); await developer.locator('#dev-form [type="submit"]').click(); await ready(developer);
+  const northern = await generate({ seed: 'sun-places', difficulty: 'sun-watch', tuning: { sunLat: 40 } });
+  assert.deepEqual(northern.camera, q.camera);
+  assert.deepEqual(northern.options, q.options);
+  assert.equal(northern.correctLabel, q.correctLabel);
+  await checkLatitude(northern);
+  assert.equal(new URLSearchParams(new URL(developer.url()).hash.slice(1)).get('dev'), 'sunLat:40');
+  await developer.locator('#open-export').click();
+  await developer.waitForFunction(() => window.latitudeFrames.export?.options.solar);
+  const exported = await developer.evaluate(() => window.latitudeFrames.export);
+  assert.deepEqual(exported.options.solar, sunWatchFrame(northern, exported.options.time).solar);
+  await developer.locator('#export-close').click();
+  await developer.reload(); await ready(developer); await observeDeveloper();
+  assert.equal(await latitudeField.inputValue(), '40'); await checkLatitude(northern);
+  // A new link without an override retains the user's saved developer setting.
+  await developer.goto(`${url}/#seed=sun-places&d=sun-watch`); await ready(developer);
+  await observeDeveloper(); assert.equal(await latitudeField.inputValue(), '40'); await checkLatitude(northern);
+  await developer.locator('#dev-enabled').uncheck(); await ready(developer); await checkLatitude(q);
+  assert.equal(new URLSearchParams(new URL(developer.url()).hash.slice(1)).has('dev'), false);
+  await developer.locator('#dev-enabled').check(); await ready(developer); await checkLatitude(northern);
+  await developer.locator('#dev-reset').click(); await ready(developer); await checkLatitude(q);
+  assert.equal(await latitudeField.inputValue(), '');
+  await developer.locator('#mode').selectOption('grid'); await ready(developer);
+  assert.equal(await latitudeField.isDisabled(), true);
+  assert.equal(await developer.locator('#dev-sun-note').isVisible(), false);
+  await developer.close();
+  console.log('Developer latitude passed: apply, saved settings, shared link, export, reset, disable and ordinary-mode gating.');
+
   const mobile = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
   mobile.on('pageerror', error => errors.push(error.message));
   await mobile.addInitScript(() => {
     const context = HTMLCanvasElement.prototype.getContext;
     HTMLCanvasElement.prototype.getContext = function(type, ...args) { return type === 'webgl2' ? null : context.call(this, type, ...args); };
   });
-  await mobile.goto(`${url}/#seed=y6pw-zwtz&d=sun-watch&m=friend&fa=grid&g=6&fc=depth-trap&v=1`); await ready(mobile);
+  await mobile.goto(`${url}/#seed=y6pw-zwtz&d=sun-watch&m=friend&fa=grid&g=6&fc=depth-trap&v=1&dev=sunLat:40`); await ready(mobile);
+  assert.equal(await mobile.locator('[data-key="sunLat"]').inputValue(), '40');
+  assert.equal(await mobile.locator('[data-key="sunLat"]').isEnabled(), true);
   await mobile.waitForTimeout(500); await seek(mobile, 8);
   assert.equal(await mobile.locator('#relative-bearing-value').textContent(), 'START 0°');
   await seek(mobile, 12.6);

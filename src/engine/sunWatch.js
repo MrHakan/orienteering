@@ -2,6 +2,7 @@ import { Random } from './rng.js';
 import { clamp, lerp, smoothstep, wrap360 } from './grid.js';
 
 export const SUN_WATCH_DURATION = 15;
+export const DEFAULT_SUN_LATITUDE = 0;
 export const WATCH_TIMING = Object.freeze({ down: 2, readable: 2.5, end: 5.5, sky: 6.4, aim: 10.2, return: 11.2, finish: 15 });
 export const FRIEND_WATCH_TIMING = Object.freeze({ down: 6, readable: 6.5, end: 9.5, sky: 10.2, aim: 12.3, return: 12.9, finish: 15 });
 export const supportsSunWatch = mode => ['where-am-i', 'lookalike', 'friend'].includes(mode);
@@ -13,8 +14,8 @@ export function sunFriendZoom(seconds) {
   return 1 + 2 * smoothstep(3, 5, seconds) * (1 - smoothstep(6, 6.5, seconds));
 }
 
-/** Equinox, northern mid-latitudes, local solar time. ENU -> WebGL east/up/-north. */
-export function solarPosition(hour24, minute = 0, seconds = 0, latitude = 40) {
+/** Equinox, local solar time. ENU -> WebGL east/up/-north. */
+export function solarPosition(hour24, minute = 0, seconds = 0, latitude = DEFAULT_SUN_LATITUDE) {
   const rad = Math.PI / 180;
   const h = ((hour24 + minute / 60 + seconds / 3600) - 12) * 15 * rad;
   const lat = latitude * rad;
@@ -24,19 +25,19 @@ export function solarPosition(hour24, minute = 0, seconds = 0, latitude = 40) {
 }
 
 /** Time is drawn independently of the answer; never use the host's wall clock. */
-export function createSunWatch(quiz, model) {
+export function createSunWatch(quiz, model, { latitude = DEFAULT_SUN_LATITUDE } = {}) {
   const rng = new Random(`${quiz.seed}|${quiz.difficulty}|${quiz.variant || 0}|sun-watch-v1`);
   const times = rng.shuffle([8, 14].flatMap(hour => Array.from({ length: 25 }, (_, i) => hour * 60 + i * 5)));
   for (const minutes of times) {
-    const plan = { hour24: Math.floor(minutes / 60), minute: minutes % 60, latitude: 40 };
-    const sun = solarPosition(plan.hour24, plan.minute);
+    const plan = { hour24: Math.floor(minutes / 60), minute: minutes % 60, latitude };
+    const sun = solarPosition(plan.hour24, plan.minute, 0, plan.latitude);
     const horizon = model.skyline.castRay(quiz.camera.x, quiz.camera.y, quiz.camera.z, sun.azimuth).angle;
     if (sun.altitude > horizon + 4) return plan;
   }
   // A near-noon sun also clears a steep nearby skyline; fail rather than offer
   // a question in which the only orientation cue is below the terrain.
   for (const hour24 of [11, 13]) {
-    const plan = { hour24, minute: 0, latitude: 40 }, sun = solarPosition(hour24);
+    const plan = { hour24, minute: 0, latitude }, sun = solarPosition(hour24, 0, 0, latitude);
     if (sun.altitude > model.skyline.castRay(quiz.camera.x, quiz.camera.y, quiz.camera.z, sun.azimuth).angle + 4) return plan;
   }
   throw new Error('Could not find a visible daylight sun for this viewpoint.');

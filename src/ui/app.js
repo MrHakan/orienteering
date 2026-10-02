@@ -831,7 +831,7 @@ function renderFacts() {
   const sealed = usesSunWatch(q) && !state.answered;
   $('facts').hidden = sealed;
   $('facts').closest('.box').querySelectorAll('h2, details').forEach(el => { el.hidden = sealed; });
-  $('dev-enabled').closest('.box').hidden = sealed;
+  $('dev-enabled').closest('.box').hidden = false;
   $('opt-landforms').closest('label').hidden = sealed;
   $('opt-tape').closest('label').hidden = usesSunWatch(q);
   $('legend').hidden = sealed || !state.settings.landforms;
@@ -1290,12 +1290,14 @@ function renderDevPanel() {
   $('dev-enabled').checked = dev.enabled;
   $('dev-skyline').checked = !!dev.skyline;
   $('dev-form').hidden = !dev.enabled;
-  const preset = $('mode').value === 'lookalike' ? getLookalikePreset($('difficulty').value) : DIFFICULTIES[$('difficulty').value] || DIFFICULTIES.medium;
+  const watch = $('difficulty').value === 'sun-watch';
+  $('dev-sun-note').hidden = !watch;
+  const preset = !watch && $('mode').value === 'lookalike' ? getLookalikePreset($('difficulty').value) : DIFFICULTIES[$('difficulty').value] || DIFFICULTIES.medium;
   $('dev-difficulty').textContent = preset.label;
   const mode = $('mode').value;
   $('dev-fields').innerHTML = TUNABLES.map((t) => {
     const def = tunableValue(preset, t);
-    const applies = def !== undefined && (!t.key.startsWith('facing') || mode === 'facing')
+    const applies = t.key === 'sunLat' ? watch && supportsSunWatch(mode) : def !== undefined && (!t.key.startsWith('facing') || mode === 'facing')
       && !(mode === 'facing' && ['minTrue', 'minSep', 'sameLandform', 'bandMin', 'bandTarget', 'bandMax', 'distractors', 'minConfidence'].includes(t.key))
       && !(mode === 'trail' && !['minQuality', 'minConfidence'].includes(t.key))
       && !(mode === 'friend' && !['minQuality', 'minConfidence'].includes(t.key))
@@ -1312,7 +1314,7 @@ function renderDevPanel() {
 }
 
 function readDevForm() {
-  const preset = $('mode').value === 'lookalike' ? getLookalikePreset($('difficulty').value) : DIFFICULTIES[$('difficulty').value] || DIFFICULTIES.medium;
+  const preset = $('difficulty').value !== 'sun-watch' && $('mode').value === 'lookalike' ? getLookalikePreset($('difficulty').value) : DIFFICULTIES[$('difficulty').value] || DIFFICULTIES.medium;
   const values = {};
   $('dev-fields').querySelectorAll('[data-key]').forEach((el) => {
     if (el.disabled) return;

@@ -191,12 +191,24 @@ the sun, holds it until 12.9 s, then returns to the friend by 15 s. Both point
 and grid answers (including 6×6) work. Classic
 friends wave at zoom; Conquest's entrance lands before the wrist is raised.
 
-No absolute heading text, compass tape, tutorial, developer overlay or pre-answer
+No absolute heading text, compass tape, tutorial, skyline overlay or pre-answer
 question diagnostics are shown. The clock and sun provide the physical scene;
 the game does not explain how to interpret them. The answer and comparisons
 appear after the player submits a location.
 
-The seeded watch uses simulated local solar time, an equinox and 40°N latitude.
+The seeded watch uses simulated local solar time, an equinox and **0° latitude
+(the equator)** by default. The morning sun is due east (090°); the afternoon
+sun is due west (270°). Its height still follows the time: at 14:15 it is 56.25°
+above the horizon, setting at 18:00. Exact noon is never selected because the
+sun is at the zenith and has no horizontal bearing.
+**Developer mode → Sun/watch latitude → Apply & regenerate** changes latitude
+from 80° south to 80° north; **40** restores the northern mid-latitude model.
+The `sunLat` override travels in shared links (`&dev=sunLat:40`), saved developer
+settings and exports. Resetting defaults or disabling developer mode restores
+the equator. Latitude changes only the physical sky, keeping the qualified
+terrain, observer, friend and answer fixed.
+[40° north sun-path diagram](src/assets/guides/sun-path-40-north.png)
+shows directions and elevation through the equinox day.
 Morning and afternoon times are drawn independently of the correct answer.
 Solar azimuth/elevation drive both the visible sun and terrain illumination;
 the generator checks that the sun clears the skyline. The camera sequence never
