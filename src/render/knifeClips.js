@@ -5,7 +5,7 @@ export const KNIVES = [
   { id: 'default', label: 'CS:GO · Default', file: 'default.mp4', duration: 25 / 3, fps: 60,
     aspect: 16 / 9, maxHeight: .74, idle: [.85, 1.05], inspect: [1.25, 7.8] },
   { id: 'butterfly', label: 'CS:GO · Butterfly', file: 'butterfly.mp4', duration: 35.6, fps: 30,
-    aspect: 16 / 9, idle: [.55, .95], inspect: [1.05, 3.85] },
+    aspect: 16 / 9, maxHeight: .82, idle: [.55, .95], inspect: [1.05, 3.85] },
 ];
 
 export function normaliseAppearance(value = {}) {

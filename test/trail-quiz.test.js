@@ -20,7 +20,7 @@ for (const difficulty of ['easy','medium','hard','expert','master']) for (const 
     assert.equal(q.options.filter(o=>o.correct).length,1);
     assert.equal(q.correctLabel,q.options.find(o=>o.correct).label);
     assert.ok(q.validation.minDistance>=q.validation.minRequiredDistance);
-    assert.ok(q.validation.minSeparation>=240);assert.ok(q.stats.questionsCompared>0);
+    assert.ok(q.validation.minSeparation>=q.terrain.size*.25);assert.ok(q.stats.questionsCompared>0);
     for(const o of q.options) {
       assert.ok(o.landings.length>=8);assert.ok(o.maxSlope<=24);
       assert.equal(o.points.length,97);
