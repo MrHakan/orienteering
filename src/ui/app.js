@@ -1329,7 +1329,7 @@ $('dev-enabled').addEventListener('change', () => {
   dev.enabled = $('dev-enabled').checked;
   saveDev();
   renderDevPanel();
-  if (Object.keys(dev.values).length) load({ seed: $('seed').value.trim() });
+  if (Object.keys(dev.values).length) load({ seed: $('seed').value.trim(), variant: state.quiz?.variant || 0 });
 });
 $('dev-form').addEventListener('submit', (e) => {
   e.preventDefault();

@@ -254,16 +254,17 @@ try {
     assert.equal(await developer.locator('.facing').isVisible(), false);
   };
   const latitudeField = developer.locator('[data-key="sunLat"]');
-  await developer.goto(`${url}/#seed=sun-places&d=sun-watch`); await ready(developer);
+  const developerDefault = await generate({ seed: 'sun-places', difficulty: 'sun-watch', variant: 1 });
+  await developer.goto(`${url}/#seed=sun-places&d=sun-watch&v=1`); await ready(developer);
   await observeDeveloper(); await developer.locator('#dev-enabled').check();
   assert.equal(await latitudeField.isEnabled(), true);
   assert.equal(await latitudeField.getAttribute('placeholder'), '0');
   assert.equal(await developer.locator('#dev-sun-note').isVisible(), true);
   await latitudeField.fill('40'); await developer.locator('#dev-form [type="submit"]').click(); await ready(developer);
-  const northern = await generate({ seed: 'sun-places', difficulty: 'sun-watch', tuning: { sunLat: 40 } });
-  assert.deepEqual(northern.camera, q.camera);
-  assert.deepEqual(northern.options, q.options);
-  assert.equal(northern.correctLabel, q.correctLabel);
+  const northern = await generate({ seed: 'sun-places', difficulty: 'sun-watch', variant: 1, tuning: { sunLat: 40 } });
+  assert.deepEqual(northern.camera, developerDefault.camera);
+  assert.deepEqual(northern.options, developerDefault.options);
+  assert.equal(northern.correctLabel, developerDefault.correctLabel);
   await checkLatitude(northern);
   assert.equal(new URLSearchParams(new URL(developer.url()).hash.slice(1)).get('dev'), 'sunLat:40');
   await developer.locator('#open-export').click();
@@ -274,12 +275,12 @@ try {
   await developer.reload(); await ready(developer); await observeDeveloper();
   assert.equal(await latitudeField.inputValue(), '40'); await checkLatitude(northern);
   // A new link without an override retains the user's saved developer setting.
-  await developer.goto(`${url}/#seed=sun-places&d=sun-watch`); await ready(developer);
+  await developer.goto(`${url}/#seed=sun-places&d=sun-watch&v=1`); await ready(developer);
   await observeDeveloper(); assert.equal(await latitudeField.inputValue(), '40'); await checkLatitude(northern);
-  await developer.locator('#dev-enabled').uncheck(); await ready(developer); await checkLatitude(q);
+  await developer.locator('#dev-enabled').uncheck(); await ready(developer); await checkLatitude(developerDefault);
   assert.equal(new URLSearchParams(new URL(developer.url()).hash.slice(1)).has('dev'), false);
   await developer.locator('#dev-enabled').check(); await ready(developer); await checkLatitude(northern);
-  await developer.locator('#dev-reset').click(); await ready(developer); await checkLatitude(q);
+  await developer.locator('#dev-reset').click(); await ready(developer); await checkLatitude(developerDefault);
   assert.equal(await latitudeField.inputValue(), '');
   await developer.locator('#mode').selectOption('grid'); await ready(developer);
   assert.equal(await latitudeField.isDisabled(), true);
