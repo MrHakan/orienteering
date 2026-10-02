@@ -40,6 +40,8 @@ export function captionText(quiz) {
   return `You are at ${list}, ${quiz.heading.text.toLowerCase()}.`;
 }
 
+export const exportDuration = quiz => quiz.mode === 'trail' ? quiz.trail.duration + 3 : 15;
+
 export class ExportComposer {
   /**
    * @param {object} quiz generated quiz
@@ -65,7 +67,8 @@ export class ExportComposer {
     const rest = { ...options };
     delete rest.canvas;
     const prev = this.options || {};
-    this.options = { format: 'reels', weather: [], handle: '', caption: true, reveal: true, tape: true, northUp: false, duration: 15, ...prev, ...rest };
+    this.options = { format: 'reels', weather: [], handle: '', caption: true, reveal: true, tape: true, northUp: false, duration: exportDuration(this.quiz), ...prev, ...rest };
+    if (this.quiz.mode === 'trail') this.options.duration = Math.max(exportDuration(this.quiz), this.options.duration);
     if ('weather' in rest && !('environment' in rest)) delete this.options.environment;
     const o = this.options;
     this.renderer.setViewmodel?.(this.quiz.mode === 'trail' ? o.appearance || this.quiz.appearance || {} : null);

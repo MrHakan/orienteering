@@ -8,7 +8,7 @@ import { createTrailPlan, simulateTrail, trailFrame, airAccelerate, MOVEMENT_PRO
 import { TRAIL_COLORS, compareTrailViews } from '../src/engine/trailQuiz.js';
 import { scrambleLabels } from '../src/engine/scramble.js';
 import { MapRenderer, trailTracePoints } from '../src/render/mapRenderer.js';
-import { ExportComposer, FORMATS } from '../src/export/composer.js';
+import { ExportComposer, FORMATS, exportDuration } from '../src/export/composer.js';
 
 for (const difficulty of ['easy','medium','hard','expert','master']) for (const movement of ['classic','go']) {
   test(`${difficulty} ${movement}: three matched, walkable, distinguishable trails`, async () => {
@@ -23,13 +23,16 @@ for (const difficulty of ['easy','medium','hard','expert','master']) for (const 
     assert.ok(q.validation.minSeparation>=q.terrain.size*.25);assert.ok(q.stats.questionsCompared>0);
     for(const o of q.options) {
       assert.ok(o.landings.length>=8);assert.ok(o.maxSlope<=24);
-      assert.equal(o.points.length,97);
+      assert.equal(o.points.length,Math.round(q.trail.duration*8)+1);
+      assert.ok(o.terrainRun.relief>=6);
+      assert.ok(Math.max(o.terrainRun.slopeRange,o.terrainRun.gradeRange)>=2.5);
+      assert.ok(o.terrainRun.cellCount>=2);
       for(let i=0;i<o.points.length;i++) {
         const other=q.options[(q.options.indexOf(o)+1)%3];
         assert.ok(Math.abs((o.points[i].x-o.x)-(other.points[i].x-other.x))<1e-8);
         assert.ok(Math.abs((o.points[i].y-o.y)-(other.points[i].y-other.y))<1e-8);
       }
-      for(let t=0;t<=12;t+=.125) {
+      for(let t=0;t<=q.trail.duration;t+=.125) {
         const {camera,motion}=trailFrame(q,t,o.label,model);
         assert.ok(Object.values(camera).every(Number.isFinite));
         assert.ok(model.inside(camera.x,camera.y,65));
@@ -38,7 +41,7 @@ for (const difficulty of ['easy','medium','hard','expert','master']) for (const 
       }
       if(!o.correct) {
         assert.ok(o.cue.magnitude>=q.validation.minCue);
-        assert.ok(o.cue.t<12);
+        assert.ok(o.cue.t<q.trail.duration);
         assert.ok(!(o.cue.t>=1.2 && o.cue.t<=4) && !(o.cue.t>=7.4 && o.cue.t<=10.2));
         for(const label of [q.correctLabel,o.label]) {
           const {camera}=trailFrame(q,o.cue.t,label,model);
@@ -90,7 +93,7 @@ test('trail replay and random-access frames survive new positions and scrambling
   const s=scrambleLabels(a,3);
   for(const t of [0,1.5,8,12])assert.deepEqual(trailFrame(a,t,a.correctLabel,model).camera,trailFrame(s,t,s.correctLabel,model).camera);
   assert.deepEqual(TRAIL_COLORS,{A:'#ff6358',B:'#58d68b',C:'#39d5ed'});
-  assert.deepEqual(trailFrame(a,15,a.correctLabel,model).camera,trailFrame(a,12,a.correctLabel,model).camera);
+  assert.deepEqual(trailFrame(a,a.trail.duration+3,a.correctLabel,model).camera,trailFrame(a,a.trail.duration,a.correctLabel,model).camera);
 });
 
 test('pairwise terrain differences are symmetric and contain a timed visible cue',async()=>{
@@ -109,7 +112,7 @@ test('pairwise terrain differences are symmetric and contain a timed visible cue
     assert.equal(ab.ok,true);assert.equal(ba.ok,true);
     assert.ok(Math.abs(ab.D-ba.D)<1e-12);
     assert.ok(Math.abs(ab.cue.delta+ba.cue.delta)<1e-12);
-    assert.ok(ab.cue.t<12);
+    assert.ok(ab.cue.t<q.trail.duration);
   }
   // Equal screen angles are not a clue, even if world skyline angles differ.
   const a=described[0],b={...a,views:a.views.map(d=>({...d,
@@ -156,15 +159,15 @@ test('both video formats share the live route sampler and freeze at the end for 
     const c=Object.create(ExportComposer.prototype),calls=[];
     c.quiz=q;c.model=model;c.canvas={...FORMATS[format],toBlob:cb=>cb('png')};
     c.ctx=new Proxy({measureText:()=>({width:20})},{get:(o,k)=>o[k]??(()=>{}),set:(o,k,v)=>{o[k]=v;return true;}});
-    c.layout=c.computeLayout(FORMATS[format]);c.options={duration:15,caption:true,tape:false,handle:''};
+    c.layout=c.computeLayout(FORMATS[format]);c.options={duration:exportDuration(q),caption:true,tape:false,handle:''};
     c.weather={rain:false};c.animated=true;
     c.renderer={prepareEnvironmentReady:async()=>{},render:(camera,options)=>calls.push({camera,options})};
     c.glCanvas={};c.mapCanvas={};c.mapRevealCanvas={};
     const mapCalls=[];c.trailRevealMap={setViewing:camera=>mapCalls.push(camera)};c.trailRevealMapTime=-1;
-    for(const t of [0,2.5,6,10.75,12,14.95]) {
-      c.drawFrame(t,{reveal:t>=12});
+    for(const t of [0,2.5,6,10.75,q.trail.duration,q.trail.duration+2.95]) {
+      c.drawFrame(t,{reveal:t>=q.trail.duration});
       assert.deepEqual(calls.at(-1).camera,trailFrame(q,t,q.correctLabel,model).camera);
-      assert.equal(calls.at(-1).options.time,Math.min(t,12));
+      assert.equal(calls.at(-1).options.time,Math.min(t,q.trail.duration));
       assert.equal(calls.at(-1).options.sunHeading,q.camera.heading);
     }
     await c.toImage({time:4});

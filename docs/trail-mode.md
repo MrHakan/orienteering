@@ -2,17 +2,17 @@
 
 ![Video-composited Classic knife and simultaneous candidate traces](chroma-key-trails.png)
 
-Pick **Mode → Bunny-hop trails**, watch the 12-second first-person run, and choose the route you followed. Map routes use **A red (#ff6358), B green (#58d68b), C cyan (#39d5ed)**, labelled circles for starts and arrows for ends. Tap a line or its letter. Colours are also named in text and accessible button labels.
+Pick **Mode → Bunny-hop trails**, watch the terrain-selected first-person run, and choose the route you followed. Map routes use **A red (#ff6358), B green (#58d68b), C cyan (#39d5ed)**, labelled circles for starts and arrows for ends. Tap a line or its letter. Colours are also named in text and accessible button labels.
 
 Space pauses/resumes, F inspects, Replay starts again, and the time slider jumps to any frame. Automatic inspections run at 1.2–4.0 and 7.4–10.2 seconds. Manual inspections also work while the camera is paused. Reduced-motion preferences start playback paused; changing tabs pauses the clock.
 
 ## Finish-cell grid
 
-Set **Find by → Grid — finish cell**, then choose **4 × 4, 6 × 6, 8 × 8 or 16 × 16**. Watch the same 12-second run and tap or type its **finish cell**. Every possible finish is at a cell centre, away from ambiguous borders. The finish stays the answer when you pause, seek or replay.
+Set **Find by → Grid — finish cell**, then choose **4 × 4, 6 × 6, 8 × 8 or 16 × 16**. Watch the run and tap or type its **finish cell**. Every possible finish is at a cell centre, away from ambiguous borders. The finish stays the answer when you pause, seek or replay.
 
 The question shows a clean contour grid with row and column labels outside the map and one instruction between the scene and map. It shows no path, starting point or moving position. After checking, the correct cell becomes green, a wrong choice red, and **START**, **FINISH** and the actual yellow route appear. The white dot follows replay; FINISH stays fixed.
 
-The grid generator translates one shared steering plan to every cell centre, rejects physically impossible runs, and compares the actual nine-frame sequence with every other physically possible candidate. Each alternative needs the difficulty's minimum sequence difference and a timed skyline cue that is visible in both views outside inspection. Distant alternatives have no maximum similarity requirement. Generation fails explicitly if no unambiguous run is found.
+The grid generator translates one shared steering plan to every cell centre, rejects physically impossible runs, and compares the actual full-run sequence sampled every 1.5 seconds with every other physically possible candidate. Each alternative needs the difficulty's minimum sequence difference and a timed skyline cue that is visible in both views outside inspection. Distant alternatives have no maximum similarity requirement. Generation fails explicitly if no unambiguous run is found.
 
 Grid links include the answer method and size:
 
@@ -37,6 +37,14 @@ Movement and appearance are independent. The Bunny hop selector changes the phys
 
 New positions preserves the seeded terrain, generates another matched route triple and resets the clock. Scramble letters preserves every route and the actual motion, and reassigns the letter colours.
 
+## Terrain passages
+
+Runs last at least **24 seconds** (about **407 m** on the standard terrain). Duration also scales with grid-cell width: `max(24, ceil(cellMetres / 14))`. A standard 4×4 finish grid therefore runs for **36 seconds**, about **620 m**. The speed ceiling is unchanged.
+
+Every eligible route must have at least **6 m of ground-height relief** and at least **2.5° of sustained slope or travel-grade variation**. Grades are measured over 30 m; slope/grade ranges use the 10th and 90th percentiles so one ripple cannot qualify an otherwise flat run. Ridge-side and valley passages come from the final heightmap's regional relief and drainage distances; a feature needs a 20 m passage to count. Selection rewards several stable terrain passages and descending from a ridge toward a valley while retaining all existing match limits. It does not promise a ridge-to-valley descent on every seed.
+
+A/B/C candidates cross at least two cells on a reference 6×6 grid. Finish-cell answers cross **at least three cells on the selected grid**. Each counted cell needs 12 m of travel, so touching a corner does not count. These diagnostics are retained in the question data; they do not add pre-answer labels or hints. Physically possible grid alternatives remain in the comparison set even when they would not qualify as a rich actual run.
+
 ## Movement
 
 `trailMotion.js` simulates an automatic CS-inspired run at **128 ticks/s**. Its independent implementation uses projection-limited air acceleration, alternating strafes, retained horizontal speed, queued jumps, ballistic gravity and collision with the **same triangular surface rendered by WebGL**. Constants are converted from game units to metres (0.0254 m/unit). Gravity is 800 units/s²; air acceleration uses a 30-unit projected wish-speed cap, which allows perpendicular strafes to build speed. The classic jump impulse derives from a 45-unit jump height; the GO-style profile uses 301.993 units/s.
@@ -49,9 +57,9 @@ All three candidates use the **same horizontal motion plan**. Length, direction,
 
 ## Matching three fair alternatives
 
-The generator searches up to four headings on each of four terrain attempts, using a seeded, jittered 17 × 17 grid. It rejects broken terrain, blocked/edge-heavy views, excessive slopes and uninformative skylines.
+The generator searches up to eight heading/steering plans on each of four terrain attempts, using a seeded, jittered 33 × 33 grid. It rejects broken terrain, blocked/edge-heavy views, excessive slopes and uninformative skylines.
 
-Each candidate is compared at five coarse times. A compatibility graph shortlists mutually plausible triples, including A–B, A–C **and B–C**. Finalists are recast at nine times with 33 bearing columns and scored using the existing view-quality rules. The objective minimises the worst pair; it does not start from a predetermined correct route.
+Each candidate is compared every 3 seconds plus the last quarter-second. A compatibility graph shortlists mutually plausible triples, including A–B, A–C **and B–C**. Finalists are recast every 1.5 seconds plus the last quarter-second, with 33 bearing columns and scored using the existing view-quality rules. The objective minimises the worst pair; it does not start from a predetermined correct route.
 
 Every pair must satisfy bounds on:
 
@@ -70,13 +78,13 @@ Starts are at least 25% of the map width apart (500 m on the standard 2 km terra
 | Expert | 0.8–4.0° | 1.0° | 4 m |
 | Master | 0.7–3.5° | 0.9° | 3.4 m |
 
-The clue must occur before 12 seconds and outside either automatic inspect window. It uses the central 9° of the scene; its three-column coarse footprint lies in the central skyline area above the idle video hands. The browser audit checks this area at both export aspect ratios. Its skyline position must fit both candidate views in both export aspect ratios. Cue angles also account for each route's small landing pitch, so camera punch cannot cancel the claimed difference. These constraints ensure there is a usable terrain difference; they do not guarantee a human difficulty rating. If no validated triple is found, generation explicitly asks for another seed or a lower difficulty.
+The clue must occur before the run ends and outside either automatic inspect window. It uses the central 9° of the scene; its three-column coarse footprint lies in the central skyline area above the idle video hands. The browser audit checks this area at both export aspect ratios. Its skyline position must fit both candidate views in both export aspect ratios. Cue angles also account for each route's small landing pitch, so camera punch cannot cancel the claimed difference. These constraints ensure there is a usable terrain difference; they do not guarantee a human difficulty rating. If no validated triple is found, generation explicitly asks for another seed or a lower difficulty.
 
 ## Answer and export
 
 During playback, the complete routes remain faintly visible and the travelled portion of **all three** A/B/C routes grows at the same clip time, each with an identically styled coloured head. Pause, replay and seeking update the traces together. There is no correctness-dependent style before answering. Static contours are cached to keep mobile animation responsive. The answer highlights the correct route and enables replay of all three candidates. **Actual here** and **Compare here** show both views at exactly the same clue time.
 
-PNG and video export use `trailFrame()`, the same random-access sampler as live playback. The default 15-second video plays the run for 12 seconds and freezes at its endpoint while optionally revealing the answer for the last 3 seconds. Inspect timing depends on clip time, so encoding speed cannot change the motion. Appearance settings and the simultaneous traces carry into both 9:16 and 4:5 formats. PNG and video encoding await each decoded source frame before capture. Video encoding waits for queue capacity instead of retaining hundreds of full-size GPU frames. The native video elements remain paused and are sampled from the shared clock, so decoding cannot advance terrain movement independently. Answer PNG dots follow the displayed frame, and seasonal sky effects track the moving skyline.
+PNG and video export use `trailFrame()`, the same random-access sampler as live playback. The default video plays the complete run (normally 24 seconds, or 36 seconds for a 4×4 grid on the standard terrain) and freezes at its endpoint while optionally revealing the answer for the last 3 seconds. Inspect timing depends on clip time, so encoding speed cannot change the motion. Appearance settings and the simultaneous traces carry into both 9:16 and 4:5 formats. PNG and video encoding await each decoded source frame before capture. Video encoding waits for queue capacity instead of retaining hundreds of full-size GPU frames. The native video elements remain paused and are sampled from the shared clock, so decoding cannot advance terrain movement independently. Answer PNG dots follow the displayed frame, and seasonal sky effects track the moving skyline.
 
 ## Validation
 

@@ -32,7 +32,7 @@ One-time setup: **Settings → Pages → Build and deployment → Source: GitHub
 - **15 s video:** animated weather, any combination of **wind** (bands of grass sweeping downwind, faster clouds), **rain** (falling streaks, wet overcast light), **clouds** (a moving cloud deck and cloud shadows drifting over the terrain) and **fog** (visibility down to ~1.5 km). A countdown bar runs under the scene; optionally the last 3 s reveal the answer and the view wedge on the map.
 - **Frame:** handle/footer text, caption ("You are at A, B or C, facing north."), bearing tape.
 
-Weather is purely visual and never changes the terrain. Position puzzles keep their fixed viewpoint, friend videos follow the zoom sequence, and Bunny-hop trails follows the same 12-second run as the page.
+Weather is purely visual and never changes the terrain. Position puzzles keep their fixed viewpoint, friend videos follow the zoom sequence, and Bunny-hop trails follows the same terrain-selected run as the page.
 
 Videos are encoded frame by frame with WebCodecs and muxed into MP4 by a small built-in muxer (`src/export/mp4.js`). The output is always exactly 30 fps and 15.0 s, however fast the machine renders. In Chrome, Edge and Safari the codec is **H.264**, which is what Instagram expects. Browsers without an H.264 encoder fall back to VP9 (or real-time MediaRecorder WebM), and the dialog warns that the file needs converting before upload. On phones, the **Share…** button hands the file to the system share sheet, which includes Instagram.
 
@@ -78,13 +78,13 @@ In Friend mode, **Friend character → Conquest** adds a slow-motion arrival usi
 
 ## Bunny-hop trails
 
-**Mode → Bunny-hop trails** (`&m=trail`) plays a 12-second first-person run over the terrain. Choose which map trail you followed: **A red, B green or C cyan**. All three have the same shape, speed and steering; their moving terrain views are matched pairwise so the skyline and nearby slopes decide the answer. After answering, replay each route or compare the specific time and bearing that rules it out.
+**Mode → Bunny-hop trails** (`&m=trail`) plays a 24-second first-person run (about 407 m) over changing slopes. Routes need at least 6 m of ground relief and a sustained slope/grade change; selection rewards ridge-side and valley passages. The 4×4 grid uses 36 seconds on the standard terrain to reach at least three cells without changing the speed ceiling. Choose which map trail you followed: **A red, B green or C cyan**. All three have the same shape, speed and steering; their moving terrain views are matched pairwise so the skyline and nearby slopes decide the answer. After answering, replay each route or compare the specific time and bearing that rules it out.
 
 **Find by → Grid — finish cell** adds 4×4, 6×6, 8×8 and 16×16 cell answers. Watch the run and identify where it ends; the question map has no route markers. The answer reveals the finish cell and actual run. Grid links use `&m=trail&ta=grid&g=6`. A/B/C routes now span both map axes, with starts at least 500 m apart on the standard 2 km terrain.
 
 Choose **CS 1.6 / CS:GO style** movement and the supplied **CS 1.6 Classic, CS:GO Default or Butterfly** green-screen clips. A WebGL chroma-key pass removes the background and green edge spill; hands and knives come entirely from the footage. Choose either hand and three sizes. **Space** pauses/resumes, **F** replays the clip’s knife animation, and the scrubber replays any moment. All three coloured map traces advance with the same playback clock without exposing the answer. Reduced-motion preferences start the run paused. Appearance persists locally and travels in shared links without changing the question.
 
-Videos play the run for 12 seconds and freeze at its endpoint for the final 3-second answer reveal. Both export formats and PNGs use the same camera sampler. [The trail guide](docs/trail-mode.md) explains movement, matching and validation.
+Videos play the complete run and freeze at its endpoint for the final 3-second answer reveal: normally 27 seconds, or 39 seconds for a 4×4 finish grid. Both export formats and PNGs use the same camera sampler. [The trail guide](docs/trail-mode.md) explains movement, matching and validation.
 
 ## Core principle
 
