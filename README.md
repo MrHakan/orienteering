@@ -82,7 +82,6 @@ In Friend mode, **Friend character → Conquest** adds a slow-motion arrival usi
 
 **Find by → Grid — finish cell** adds 4×4, 6×6, 8×8 and 16×16 cell answers. Watch the run and identify where it ends; the question map has no route markers. The answer reveals the finish cell and actual run. Grid links use `&m=trail&ta=grid&g=6`. A/B/C routes now span both map axes, with starts at least 500 m apart on the standard 2 km terrain.
 
-
 Choose **CS 1.6 / CS:GO style** movement and the supplied **CS 1.6 Classic, CS:GO Default or Butterfly** green-screen clips. A WebGL chroma-key pass removes the background and green edge spill; hands and knives come entirely from the footage. Choose either hand and three sizes. **Space** pauses/resumes, **F** replays the clip’s knife animation, and the scrubber replays any moment. All three coloured map traces advance with the same playback clock without exposing the answer. Reduced-motion preferences start the run paused. Appearance persists locally and travels in shared links without changing the question.
 
 Videos play the run for 12 seconds and freeze at its endpoint for the final 3-second answer reveal. Both export formats and PNGs use the same camera sampler. [The trail guide](docs/trail-mode.md) explains movement, matching and validation.

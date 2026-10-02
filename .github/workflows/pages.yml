@@ -87,3 +87,38 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Verify published release
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          const url = new URL(process.env.PAGE_URL);
+          const release = process.env.RELEASE_SHA;
+          async function read(path) {
+            const response = await fetch(new URL(path, url), { signal: AbortSignal.timeout(15000) });
+            assert.equal(response.status, 200, path);
+            return response.text();
+          }
+          let html;
+          for (let attempt = 0; attempt < 24; attempt++) {
+            html = await read('?release=' + release);
+            if (html.includes('assets/' + release + '/src/ui/app.js')) break;
+            await new Promise(resolve => setTimeout(resolve, 5000));
+          }
+          assert.ok(html.includes('assets/' + release + '/src/ui/app.js'), 'Pages serves the current release');
+          assert.ok(html.includes('id="trail-answer"'), 'Finish-cell control is published');
+          const root = 'assets/' + release + '/src/';
+          const [app, worker, quiz, grid, trails] = await Promise.all([
+            read(root + 'ui/app.js'), read(root + 'ui/worker.js'), read(root + 'engine/quiz.js'),
+            read(root + 'engine/trailGridQuiz.js'), read(root + 'engine/trailQuiz.js'),
+          ]);
+          assert.ok(app.includes('showTrailGridResult'));
+          assert.ok(worker.includes('trailAnswer'));
+          assert.ok(quiz.includes("import('./trailGridQuiz.js')"));
+          assert.ok(grid.includes("label: 'FINISH'"));
+          assert.ok(trails.includes('size * .25'));
+          console.log('Published controls, worker and both trail generators verified at ' + url);
+          JS
