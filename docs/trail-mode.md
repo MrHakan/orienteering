@@ -6,6 +6,22 @@ Pick **Mode → Bunny-hop trails**, watch the 12-second first-person run, and ch
 
 Space pauses/resumes, F inspects, Replay starts again, and the time slider jumps to any frame. Automatic inspections run at 1.2–4.0 and 7.4–10.2 seconds. Manual inspections also work while the camera is paused. Reduced-motion preferences start playback paused; changing tabs pauses the clock.
 
+## Finish-cell grid
+
+Set **Find by → Grid — finish cell**, then choose **4 × 4, 6 × 6, 8 × 8 or 16 × 16**. Watch the same 12-second run and tap or type its **finish cell**. Every possible finish is at a cell centre, away from ambiguous borders. The finish stays the answer when you pause, seek or replay.
+
+The question shows a clean contour grid with row and column labels outside the map and one instruction between the scene and map. It shows no path, starting point or moving position. After checking, the correct cell becomes green, a wrong choice red, and **START**, **FINISH** and the actual yellow route appear. The white dot follows replay; FINISH stays fixed.
+
+The grid generator translates one shared steering plan to every cell centre, rejects physically impossible runs, and compares the actual nine-frame sequence with every other physically possible candidate. Each alternative needs the difficulty's minimum sequence difference and a timed skyline cue that is visible in both views outside inspection. Distant alternatives have no maximum similarity requirement. Generation fails explicitly if no unambiguous run is found.
+
+Grid links include the answer method and size:
+
+```
+#seed=bhop-grid&d=medium&m=trail&ta=grid&g=6&k=classic
+```
+
+New positions generates another finish on the same seeded terrain. Letter scrambling is hidden for cell answers. Grid PNGs show the finish frame by default; video still plays the full run, then freezes at the finish for its answer reveal. Both export formats keep question maps free of traces and reveal the fixed finish cell.
+
 ## Appearance and links
 
 **Knife video & hand** selects **CS 1.6 Classic**, **CS:GO Default** or **CS:GO Butterfly**, right/left hand and small/original/large size. These are the three supplied videos, rendered as a bottom-anchored video texture with green dominance keying, soft alpha edges and spill suppression. There is no procedural hand or knife geometry. Source gloves and finishes remain together with the blade. The Classic clip’s black sidebars are cropped before shipping. Half-second keyframes and fast-start metadata make source-frame seeking quick.
@@ -44,7 +60,7 @@ Every pair must satisfy bounds on:
 - skyline depth;
 - a visible, timed skyline cue.
 
-Starts are at least 240 m apart and must form a spread-out triangle. The complete contour map includes distant ridges that supply the skyline clues; framing does not depend on which is correct. Every anchor must meet the difficulty's existing minimum view quality. A correct route is selected uniformly from the accepted triple; letters are shuffled independently.
+Starts are at least 25% of the map width apart (500 m on the standard 2 km terrain). Each triple must span at least 30% of the map in both axes (600 m) and have a diameter of at least 45% (900 m), as well as form a spread-out triangle. These are generation constraints, so zooming the map cannot hide clustering. The complete contour map includes distant ridges that supply the skyline clues; framing does not depend on which is correct. Every anchor must meet the difficulty's existing minimum view quality. A correct route is selected uniformly from the accepted triple; letters are shuffled independently.
 
 | Difficulty | RMS difference | Cue minimum | Ground-profile RMS maximum |
 |---|---:|---:|---:|

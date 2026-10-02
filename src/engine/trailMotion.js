@@ -94,7 +94,8 @@ export function landingPulse(route, seconds) {
 
 /** Random-access sampler used by live playback, comparisons and encoded frames. */
 export function trailFrame(quiz, seconds, label = quiz.correctLabel, model = null) {
-  const route = quiz.options.find((p) => p.label === label) || quiz.options.find((p) => p.correct);
+  const routes = quiz.trail.routes || quiz.options;
+  const route = routes.find((p) => p.label === label) || routes.find((p) => p.correct);
   const p = planAt(quiz.trail.plan, seconds), i = p.index, j = Math.min(route.feet.length - 1, i + 1), f = p.fraction;
   const x = route.x + p.x, y = route.y + p.y;
   const ground = model ? surfaceElevation(model, x, y) : lerp(route.ground[i], route.ground[j], f);

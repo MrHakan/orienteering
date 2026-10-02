@@ -10,7 +10,7 @@ import { normaliseFriendChallenge, normaliseFriendAnswer, friendObserver, friend
 import { FRIEND_SKINS, normaliseFriendSkin } from '../engine/friendAppearance.js';
 import { friendSceneFrame } from '../export/friendZoom.js';
 import { normaliseMovement, trailFrame } from '../engine/trailMotion.js';
-import { TRAIL_COLORS } from '../engine/trailQuiz.js';
+import { TRAIL_COLORS, normaliseTrailAnswer } from '../engine/trailQuiz.js';
 import { KNIVES, normaliseAppearance } from '../render/knifeClips.js';
 import { TrailPlayback } from './trailPlayback.js';
 import { usesSunWatch, supportsSunWatch, sunWatchFrame, SUN_WATCH_DURATION } from '../engine/sunWatch.js';
@@ -240,14 +240,14 @@ function getWorker() {
   return worker;
 }
 
-function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, tuning }) {
+function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning }) {
   const id = ++state.requestId;
   return new Promise((resolve, reject) => {
     const w = getWorker();
     if (!w) {
       // Fallback: generate on the main thread.
       import('../engine/quiz.js').then(({ generate }) => {
-        setTimeout(() => generate({ seed, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, tuning }).then(resolve, reject), 30);
+        setTimeout(() => generate({ seed, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning }).then(resolve, reject), 30);
       }, reject);
       return;
     }
@@ -259,7 +259,7 @@ function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, directi
       else reject(new Error(e.data.message));
     };
     w.addEventListener('message', onMessage);
-    w.postMessage({ id, seed, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, tuning });
+    w.postMessage({ id, seed, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning });
   });
 }
 
@@ -282,6 +282,7 @@ async function load(req) {
     friendAnswer: normaliseFriendAnswer(req.friendAnswer ?? $('friend-answer').value),
     friendSkin: normaliseFriendSkin(req.friendSkin ?? $('friend-skin').value),
     movement: normaliseMovement(req.movement ?? $('movement').value),
+    trailAnswer: normaliseTrailAnswer(req.trailAnswer ?? $('trail-answer').value),
     appearance: normaliseAppearance(req.appearance || state.appearance),
     tuning: req.tuning || activeTuning(),
   };
@@ -304,6 +305,7 @@ async function load(req) {
   $('friend-answer').value = r.friendAnswer;
   $('friend-skin').value = r.friendSkin;
   $('movement').value = r.movement;
+  $('trail-answer').value = r.trailAnswer;
   state.appearance = r.appearance; syncAppearanceControls();
   syncControls();
   setLoading(true, r.mode === 'lookalike' ? 'Searching for matching A/B/C views…' : r.difficulty === 'master' ? 'Searching for a devious question…' : 'Generating terrain…');
@@ -340,6 +342,7 @@ function updateHash() {
   }
   else if (q.mode === 'trail') {
     parts.push('m=trail');
+    if (q.grid) parts.push('ta=grid', `g=${q.grid.size}`);
     if (q.trail.movement !== 'go') parts.push(`mv=${q.trail.movement}`);
     const o = normaliseAppearance(q.appearance);
     parts.push(`k=${o.knife}`, `hand=${o.handedness}`);
@@ -370,16 +373,18 @@ function syncControls() {
   const lookalike = $('mode').value === 'lookalike';
   const grid = $('mode').value === 'grid';
   const friendGrid = $('mode').value === 'friend' && $('friend-answer').value === 'grid';
+  const trailGrid = $('mode').value === 'trail' && $('trail-answer').value === 'grid';
   $('difficulty').querySelector('[value="sun-watch"]').disabled = !supportsSunWatch($('mode').value);
   const watch = $('difficulty').value === 'sun-watch';
   $('friend-answer-field').hidden = $('mode').value !== 'friend';
   $('friend-challenge-field').hidden = $('mode').value !== 'friend';
   $('movement-field').hidden = $('mode').value !== 'trail';
-  $('grid-size-field').hidden = !(grid || friendGrid);
+  $('trail-answer-field').hidden = $('mode').value !== 'trail';
+  $('grid-size-field').hidden = !(grid || friendGrid || trailGrid);
   $('grid-challenge-field').hidden = !grid;
   $('heading-field').hidden = watch || facing || lookalike || $('mode').value === 'trail' || (grid && $('grid-challenge').value === 'lost-compass');
   $('direction-field').hidden = watch || !lookalike;
-  $('scramble').hidden = facing || grid || friendGrid;
+  $('scramble').hidden = facing || grid || friendGrid || trailGrid;
   if (typeof dev !== 'undefined') renderDevPanel();
 }
 
@@ -397,7 +402,7 @@ function show(quiz) {
   state.sunTime = 0; sunPlayer.reset(SUN_WATCH_DURATION);
   $('direction-tools').hidden = !usesSunWatch(quiz);
   $('trail-tools').hidden = quiz.mode !== 'trail';
-  $('trail-legend').hidden = quiz.mode !== 'trail';
+  $('trail-legend').hidden = quiz.mode !== 'trail' || usesGrid(quiz);
   $('friend-tools').hidden = quiz.mode !== 'friend';
   $('friend-status').textContent = quiz.friend?.observerHidden
     ? 'Orange jacket · 1.80 m tall · locate him using the terrain'
@@ -411,9 +416,9 @@ function show(quiz) {
   const facing = quiz.mode === 'facing';
   const lookalike = quiz.mode === 'lookalike';
   const grid = usesGrid(quiz), friendGrid = quiz.mode === 'friend' && grid;
-  $('quiz-title').textContent = quiz.mode === 'trail' ? 'WHICH TRAIL DID YOU FOLLOW?' : quiz.mode === 'friend' ? 'WHERE IS YOUR FRIEND?' : facing ? 'WHICH WAY ARE YOU FACING?' : lookalike ? 'LOOK-ALIKES' : grid ? `${quiz.grid.size} × ${quiz.grid.size} GRID` : 'WHERE ARE YOU?';
+  $('quiz-title').textContent = quiz.mode === 'trail' ? grid ? 'WHERE DID YOU FINISH?' : 'WHICH TRAIL DID YOU FOLLOW?' : quiz.mode === 'friend' ? 'WHERE IS YOUR FRIEND?' : facing ? 'WHICH WAY ARE YOU FACING?' : lookalike ? 'LOOK-ALIKES' : grid ? `${quiz.grid.size} × ${quiz.grid.size} GRID` : 'WHERE ARE YOU?';
   $('quiz-title').classList.toggle('long', facing || ['friend', 'trail'].includes(quiz.mode));
-  $('facing-text').textContent = quiz.mode === 'trail' ? 'BUNNY HOP · READ THE MOVING TERRAIN' : facing ? 'YOU ARE AT THE MARKED POINT' : headingHidden(quiz) ? 'LOST COMPASS · FIND YOUR CELL' : quiz.heading.text;
+  $('facing-text').textContent = quiz.mode === 'trail' ? grid ? 'BUNNY HOP · FIND YOUR FINISH CELL' : 'BUNNY HOP · READ THE MOVING TERRAIN' : facing ? 'YOU ARE AT THE MARKED POINT' : headingHidden(quiz) ? 'LOST COMPASS · FIND YOUR CELL' : quiz.heading.text;
   $('facing-arrow').textContent = quiz.mode === 'trail' || headingHidden(quiz) || quiz.heading.mode === 'exact' ? '' : quiz.heading.arrow;
   $('facing-text').closest('.facing').hidden = usesSunWatch(quiz);
   document.querySelector('.card').classList.toggle('sun-watch', usesSunWatch(quiz));
@@ -422,7 +427,7 @@ function show(quiz) {
     : quiz.mode === 'friend' ? 'Where is your friend: A, B or C?' : 'You are at A, B or C. Which one?'
     : facing ? 'Which direction were you facing at the start?'
     : lookalike ? 'A, B and C have similar views in this direction. Match the ridge shapes and foreground to find your point.'
-    : grid ? `${friendGrid ? "Locate your friend's cell" : 'Find your cell'}: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size} (row + column, e.g. B3).`
+    : grid ? `${quiz.mode === 'trail' ? 'Find your finish cell' : friendGrid ? "Locate your friend's cell" : 'Find your cell'}: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size} (row + column, e.g. B3).`
     : quiz.mode === 'trail' ? 'Which trail did you follow: A red, B green or C cyan? All three traces advance together. Match the slopes, ridges and hollows in the moving view. Circles mark the starts; arrows mark the ends.'
     : quiz.mode === 'friend' ? quiz.friend.observerHidden
       ? `Where is your friend: A, B or C? Your position is unmarked. All three spots fit his distance and apparent size; use the skyline, slopes and hollows to locate him.${quiz.friend.challenge === 'depth-trap' ? ' Depth trap also matches his vertical angle more closely.' : ''}`
@@ -434,7 +439,7 @@ function show(quiz) {
   $('viewing-badge').hidden = true;
   $('result').hidden = true;
   $('prompt').hidden = false;
-  $('map').setAttribute('aria-label', quiz.mode === 'trail' ? 'Contour map showing three candidate trails: A red, B green, C cyan. Tap a trail or choose its letter.' : grid ? `${quiz.grid.size} by ${quiz.grid.size} contour grid. Rows A to ${String.fromCharCode(64 + quiz.grid.size)} from north to south; columns 1 to ${quiz.grid.size} from west to east. Enter a cell code below to answer.` : 'Topographic contour map with candidate locations');
+  $('map').setAttribute('aria-label', quiz.mode === 'trail' && !grid ? 'Contour map showing three candidate trails: A red, B green, C cyan. Tap a trail or choose its letter.' : grid ? `${quiz.grid.size} by ${quiz.grid.size} contour grid. Rows A to ${String.fromCharCode(64 + quiz.grid.size)} from north to south; columns 1 to ${quiz.grid.size} from west to east. Enter a cell code below to answer.` : 'Topographic contour map with candidate locations');
 
   if (renderer) {
     renderer.setTerrain(state.model);
@@ -444,7 +449,7 @@ function show(quiz) {
   map.setData({
     model: state.model,
     interval: t.contourInterval,
-    options: quizMarkers(quiz),
+    options: quizMarkers(quiz), routes: quiz.trail?.routes,
     rotation: state.settings.northUp ? 0 : quiz.mapRotation,
     landmarks: quiz.landmarks,
     grid: grid ? { ...quiz.grid, correctLabel: quiz.correctLabel } : null,
@@ -478,7 +483,7 @@ function renderAnswerButtons() {
   $('grid-answer').hidden = !grid;
   answers.parentElement.hidden = grid;
   if (grid) {
-    $('grid-cell-label').textContent = state.quiz.mode === 'friend' ? "Friend's cell" : 'Your cell';
+    $('grid-cell-label').textContent = state.quiz.mode === 'trail' ? 'Finish cell' : state.quiz.mode === 'friend' ? "Friend's cell" : 'Your cell';
     $('grid-cell').value = '';
     $('grid-cell').removeAttribute('aria-invalid');
     $('grid-help').textContent = `Tap a cell or enter A1–${String.fromCharCode(64 + state.quiz.grid.size)}${state.quiz.grid.size}.`;
@@ -656,7 +661,7 @@ function answer(label) {
   $('scramble').disabled = true;
   $('prompt').hidden = true;
   renderFacts();
-  if (quiz.mode === 'trail') { showTrailResult(label, right); return; }
+  if (quiz.mode === 'trail') { if (quiz.grid) showTrailGridResult(label, right); else showTrailResult(label, right); return; }
   if (quiz.mode === 'facing') { showFacingResult(label, right); return; }
   if (quiz.mode === 'grid') { showGridResult(label, right); return; }
   if (quiz.mode === 'friend' && usesGrid(quiz)) { showFriendGridResult(label, right); return; }
@@ -679,6 +684,21 @@ function answer(label) {
   highlightView(quiz.correctLabel);
 }
 
+
+function showTrailGridResult(label, right) {
+  const q = state.quiz, res = $('result');
+  res.hidden = false;
+  res.innerHTML = `<div class="verdict ${right ? 'good' : 'bad'}">${right ? 'Correct' : 'Not quite'} — you finished in ${q.correctLabel}.</div>
+    <p>${right ? '' : `You selected ${label}. `}The green cell is your finish; FINISH marks its centre. The yellow trace shows the actual run, and the white dot follows the replay.</p>
+    <p class="note">Find where the full run ends. Pausing or replaying an earlier moment keeps the same finish cell.</p>
+    <button type="button" class="btn ghost" id="grid-replay">Replay actual run</button>
+    <button type="button" class="btn primary" id="next">Next quiz (N)</button>`;
+  $('grid-help').textContent = `Your answer: ${label} · finish cell: ${q.correctLabel}`;
+  $('grid-replay').addEventListener('click', () => trailPlayer.replay());
+  $('next').addEventListener('click', newQuiz);
+  state.viewing = q.correctLabel;
+  trailPlayer.refresh();
+}
 
 function showTrailResult(label, right) {
   const q = state.quiz, res = $('result');
@@ -836,10 +856,11 @@ function renderFacts() {
   $('opt-tape').closest('label').hidden = usesSunWatch(q);
   $('legend').hidden = sealed || !state.settings.landforms;
   const facts = [
-    ['Mode', q.mode === 'trail' ? 'Bunny-hop trails' : q.mode === 'friend' ? `Where is your friend?${q.friend.challenge === 'depth-trap' ? ' · Depth trap' : ''}` : q.mode === 'facing' ? 'Which way are you facing?' : q.mode === 'lookalike' ? 'Look-alikes (A / B / C)' : q.mode === 'grid' ? `Grid ${q.grid.size} × ${q.grid.size}${headingHidden(q) ? ' · Lost compass' : ''}` : 'Where are you?'],
+    ['Mode', q.mode === 'trail' ? q.grid ? 'Bunny-hop · finish cell' : 'Bunny-hop trails' : q.mode === 'friend' ? `Where is your friend?${q.friend.challenge === 'depth-trap' ? ' · Depth trap' : ''}` : q.mode === 'facing' ? 'Which way are you facing?' : q.mode === 'lookalike' ? 'Look-alikes (A / B / C)' : q.mode === 'grid' ? `Grid ${q.grid.size} × ${q.grid.size}${headingHidden(q) ? ' · Lost compass' : ''}` : 'Where are you?'],
     ...(!sealed ? [['Heading', headingHidden(q) && !state.answered ? 'hidden until you answer' : `${String(Math.round(q.camera.heading)).padStart(3, '0')}° (${q.mode === 'facing' ? 'one of 8 directions' : q.heading.mode})`]] : []),
-    ...(q.mode === 'trail' ? [['Run', `${q.trail.duration} s · ${Math.round(q.trail.plan.length)} m · three matched routes`],
+    ...(q.mode === 'trail' ? [['Run', `${q.trail.duration} s · ${Math.round(q.trail.plan.length)} m · ${q.grid ? 'find the finish' : 'three matched routes'}`],
       ['Movement', q.trail.movement === 'classic' ? 'CS 1.6 style' : 'CS:GO style']] : []),
+    ...(q.mode === 'trail' && q.grid ? [['Cells', `${q.options.length} · ${Math.round(q.grid.cellMetres)} m per side · finish at centre`]] : []),
     ...(q.mode === 'grid' ? [['Cells', `${q.options.length} · ${Math.round(q.grid.cellMetres)} m per side · observer at centre`]] : []),
     ...(q.mode === 'friend' ? [['Person', 'orange jacket · 1.80 m tall'], ['Find by', q.grid ? `${q.grid.size} × ${q.grid.size} grid · ${Math.round(q.grid.cellMetres)} m per side` : 'Point · A / B / C'], ['Viewpoint', q.friend.observerHidden && !state.answered ? 'unmarked · infer from terrain' : 'YOU · observer position'], ['Map area', `${Math.round(q.mapExtent.size)} m × ${Math.round(q.mapExtent.size)} m`]] : []),
     ['Field of view', `${q.camera.fov}° · eye ${q.camera.eyeHeight} m`],
@@ -922,7 +943,8 @@ function newPositions() {
   const gridSame = q.mode !== 'grid' || (Number($('grid-size').value) === q.grid.size && $('grid-challenge').value === q.grid.challenge);
   const friendSame = q.mode !== 'friend' || ($('friend-challenge').value === q.friend.challenge
     && $('friend-answer').value === q.friend.answerMode && (!q.grid || Number($('grid-size').value) === q.grid.size));
-  const trailSame = q.mode !== 'trail' || $('movement').value === q.trail.movement;
+  const trailSame = q.mode !== 'trail' || ($('movement').value === q.trail.movement
+    && $('trail-answer').value === q.trail.answerMode && (!q.grid || Number($('grid-size').value) === q.grid.size));
   load({ seed: q.seed, variant: same && gridSame && friendSame && trailSame ? (q.variant || 0) + 1 : 0 });
 }
 
@@ -934,7 +956,7 @@ $('new-quiz').addEventListener('click', newQuiz);
 $('new-positions').addEventListener('click', newPositions);
 $('scramble').addEventListener('click', scrambleOptions);
 // Changing mode, difficulty or heading style keeps the seed, so the terrain carries over.
-for (const id of ['difficulty', 'mode', 'heading-mode', 'lookalike-direction', 'grid-size', 'grid-challenge', 'friend-challenge', 'friend-answer', 'movement']) {
+for (const id of ['difficulty', 'mode', 'heading-mode', 'lookalike-direction', 'grid-size', 'grid-challenge', 'friend-challenge', 'friend-answer', 'movement', 'trail-answer']) {
   $(id).addEventListener('change', () => { syncControls(); load({ seed: $('seed').value.trim() }); });
 }
 $('copy-link').addEventListener('click', async () => {
@@ -1240,6 +1262,7 @@ function parseHash() {
     seed: p.get('seed'), difficulty: d && DIFFICULTIES[d] ? d : null, variant: v, scramble: sc,
     mode: ['facing', 'lookalike', 'grid', 'friend', 'trail'].includes(p.get('m')) ? p.get('m') : 'where-am-i',
     gridSize: normaliseGridSize(p.get('g')),
+    trailAnswer: normaliseTrailAnswer(p.get('ta')),
     gridChallenge: normaliseGridChallenge(p.get('gc')),
     friendChallenge: normaliseFriendChallenge(p.get('fc')),
     friendAnswer: normaliseFriendAnswer(p.get('fa')),
@@ -1258,7 +1281,8 @@ window.addEventListener('hashchange', () => {
   if (h.seed && (h.seed !== q?.seed || h.difficulty !== q?.difficulty || h.variant !== (q?.variant || 0) || h.scramble !== (q?.scramble || 0)
     || h.mode !== q?.mode || h.headingMode !== (q?.headingChoice || 'auto')
     || (h.mode === 'lookalike' && h.direction !== q?.directionChoice)
-    || (h.mode === 'trail' && (h.movement !== q?.trail?.movement || JSON.stringify(h.appearance) !== JSON.stringify(q?.appearance)))
+    || (h.mode === 'trail' && (h.movement !== q?.trail?.movement || h.trailAnswer !== q?.trail?.answerMode
+      || (h.trailAnswer === 'grid' && h.gridSize !== q?.grid?.size) || JSON.stringify(h.appearance) !== JSON.stringify(q?.appearance)))
     || (h.mode === 'friend' && (h.friendSkin !== q?.friend?.skin || h.friendChallenge !== q?.friend?.challenge || h.friendAnswer !== q?.friend?.answerMode
       || (h.friendAnswer === 'grid' && h.gridSize !== q?.grid?.size)))
     || (h.mode === 'grid' && (h.gridSize !== q?.grid?.size || h.gridChallenge !== q?.grid?.challenge))
@@ -1351,6 +1375,8 @@ $('dev-reset').addEventListener('click', () => {
 for (const id of ['difficulty', 'mode']) $(id).addEventListener('change', renderDevPanel);
 
 renderScore();
+$('trail-answer').value = normaliseTrailAnswer(store.get('otq.trailAnswer', 'trail'));
+$('trail-answer').addEventListener('change', () => store.set('otq.trailAnswer', $('trail-answer').value));
 const savedGrid = store.get('otq.grid', {});
 $('grid-size').value = normaliseGridSize(savedGrid.size);
 $('grid-challenge').value = normaliseGridChallenge(savedGrid.challenge);

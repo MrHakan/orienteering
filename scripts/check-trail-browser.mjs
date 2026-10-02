@@ -254,13 +254,119 @@ try {
   console.log('WebGL pixel audit: '+JSON.stringify(audit.clips));
   console.log('Encoded trail clip: '+JSON.stringify(audit.video));
   if(process.env.PRINT_PREVIEW==='1')console.log('TRAIL_PREVIEW_JPEG='+audit.preview);
+  // Finish-cell questions keep their contour map free of answer traces.
+  const gridQuiz=await generate({seed:'bhop-grid',mode:'trail',trailAnswer:'grid',gridSize:6,difficulty:'medium'});
+  await page.goto(url+'/#seed=bhop-grid&d=medium&m=trail&ta=grid&g=6&k=classic');
+  await ready(page,'WHERE DID YOU FINISH?');
+  assert.equal(await page.locator('#trail-answer').inputValue(),'grid');
+  assert.equal(await page.locator('#grid-size-field').isVisible(),true);
+  assert.equal(await page.locator('#trail-legend').isVisible(),false);
+  assert.equal(await page.locator('#grid-answer').isVisible(),true);
+  assert.equal(await page.locator('#answers button').count(),0);
+  assert.equal(await page.locator('#scramble').isVisible(),false);
+  assert.equal(await page.locator('#grid-cell-label').textContent(),'Finish cell');
+  assert.match(await page.locator('#prompt').textContent(),/Find your finish cell: A1–F6/);
+  assert.equal(await page.locator('#prompt').evaluate(el=>el.nextElementSibling.classList.contains('map-wrap')),true);
+  assert.match(page.url(),/ta=grid/);assert.match(page.url(),/g=6/);
+  const cleanGrid=await page.locator('#map').evaluate(c=>c.toDataURL());
+  await seek(page,6);
+  assert.equal(await page.locator('#map').evaluate(c=>c.toDataURL()),cleanGrid);
+  await seek(page,12);
+  assert.equal(await page.locator('#map').evaluate(c=>c.toDataURL()),cleanGrid);
+  await screenshot(page,'trail-grid-desktop-question');
+  await page.locator('#grid-cell').fill('G7');await page.locator('#grid-submit').click();
+  assert.equal(await page.locator('#grid-cell').getAttribute('aria-invalid'),'true');
+  const wrongCell=gridQuiz.options.find(o=>!o.correct).label;
+  await page.locator('#grid-cell').fill(wrongCell);await page.locator('#grid-submit').click();
+  assert.match(await page.locator('#result .verdict').textContent(),new RegExp('Not quite — you finished in '+gridQuiz.correctLabel));
+  assert.notEqual(await page.locator('#map').evaluate(c=>c.toDataURL()),cleanGrid);
+  await seek(page,3);
+  assert.match(await page.locator('#result .verdict').textContent(),new RegExp(gridQuiz.correctLabel));
+  await page.locator('#grid-replay').click();
+  await page.waitForFunction(()=>Number(document.getElementById('trail-scrub').value)>.3);
+  await page.locator('#trail-play').click();
+  await screenshot(page,'trail-grid-desktop-answer');
+
+  // Reloading the link restores the worker's answer method and grid size.
+  await page.reload();await ready(page,'WHERE DID YOU FINISH?');
+  assert.equal(await page.locator('#grid-size').inputValue(),'6');
+  await page.locator('#grid-cell').fill(gridQuiz.correctLabel);await page.keyboard.press('Enter');
+  assert.match(await page.locator('#result .verdict').textContent(),/Correct — you finished in/);
+
+  const gridMobile=await browser.newPage({viewport:{width:393,height:852},isMobile:true,hasTouch:true,deviceScaleFactor:2,reducedMotion:'reduce'});
+  watch(gridMobile);
+  const mobileGridQuiz=await generate({seed:'bhop-grid',mode:'trail',trailAnswer:'grid',gridSize:8,difficulty:'hard',movement:'classic'});
+  await gridMobile.goto(url+'/#seed=bhop-grid&d=hard&m=trail&ta=grid&g=8&mv=classic&k=classic');
+  await ready(gridMobile,'WHERE DID YOU FINISH?');
+  assert.equal(await gridMobile.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await seek(gridMobile,12);await screenshot(gridMobile,'trail-grid-mobile-question');
+  const chosenCell=mobileGridQuiz.options.find(o=>o.correct),gb=await gridMobile.locator('#map').boundingBox();
+  const ga=mobileGridQuiz.mapRotation*Math.PI/180,gs=Math.min(gb.width,gb.height)-56;
+  const gu=(chosenCell.x-mobileGridQuiz.mapExtent.x)/mobileGridQuiz.mapExtent.size;
+  const gv=(mobileGridQuiz.mapExtent.y-chosenCell.y)/mobileGridQuiz.mapExtent.size;
+  await gridMobile.locator('#map').tap({position:{x:gb.width/2+(gu*Math.cos(ga)-gv*Math.sin(ga))*gs,y:gb.height/2+(gu*Math.sin(ga)+gv*Math.cos(ga))*gs}});
+  assert.equal(await gridMobile.locator('#grid-cell').inputValue(),mobileGridQuiz.correctLabel);
+  await gridMobile.locator('#grid-submit').tap();
+  assert.match(await gridMobile.locator('#result .verdict').textContent(),/Correct — you finished in/);
+  assert.equal(await gridMobile.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await screenshot(gridMobile,'trail-grid-mobile-answer');await gridMobile.close();
+
+  const gridPlain=JSON.parse(JSON.stringify(gridQuiz,(key,value)=>ArrayBuffer.isView(value)?Array.from(value):value));
+  const gridExports=await page.evaluate(async q=>{
+    const src=new URL('../',document.querySelector('script[type="module"]').src);
+    const {TerrainModel}=await import(new URL('engine/terrainModel.js',src));
+    const {trailFrame}=await import(new URL('engine/trailMotion.js',src));
+    const {ExportComposer}=await import(new URL('export/composer.js',src));
+    const {encodeCanvasVideo}=await import(new URL('export/recorder.js',src));
+    const model=new TerrainModel({...q.terrain,heights:new Float32Array(q.terrain.heights),seed:q.terrain.modelSeed}),results=[];
+    for(const format of ['reels','post']) {
+      const c=new ExportComposer(q,model,{format,appearance:{knife:'classic'},easterEgg:null});
+      const texts=[],fill=c.ctx.fillText.bind(c.ctx);c.ctx.fillText=(...a)=>{texts.push(a[0]);fill(...a);};
+      await c.drawFrameReady(0);const clean=c.mapCanvas.toDataURL();
+      await c.drawFrameReady(6);
+      if(c.mapCanvas.toDataURL()!==clean)throw new Error('Grid export exposed the moving route');
+      texts.length=0;await c.toImage();
+      if(!texts.includes('Find your finish cell: A1–F6.')||texts.some(t=>t.startsWith('Answer:')))throw new Error('Grid question caption');
+      const question=c.canvas.toDataURL();
+      const end=trailFrame(q,12,q.correctLabel,model).camera;
+      if(Math.abs(end.x-q.grid.target.x)>1e-9||Math.abs(end.y-q.grid.target.y)>1e-9)throw new Error('Finish moved');
+      texts.length=0;await c.toImage({reveal:true});
+      if(!texts.includes('Answer: '+q.correctLabel))throw new Error('Grid answer caption');
+      const answer=c.canvas.toDataURL();
+      if(c.mapRevealCanvas.toDataURL()===clean)throw new Error('Grid reveal did not draw the route');
+      for(const t of [12,13,14.95])await c.drawFrameReady(t,{reveal:true});
+      let video=null;
+      if(format==='post') {
+        c.animated=true;
+        const clip=await encodeCanvasVideo(c.canvas,t=>c.drawFrameReady(t),{duration:.5,fps:30});
+        if(clip.blob.size<1000)throw new Error('Empty grid video');
+        video={bytes:clip.blob.size,type:clip.blob.type};
+      }
+      if(c.renderer.gl.getError())throw new Error('Grid export GL error');
+      results.push({format,question,answer,video});c.dispose();
+    }
+    return results;
+  },gridPlain);
+  if(out)for(const e of gridExports)for(const stage of ['question','answer'])
+    await writeFile(join(out,'trail-grid-export-'+e.format+'-'+stage+'.png'),Buffer.from(e[stage].split(',')[1],'base64'));
+  console.log('Finish-grid encoded clip: '+JSON.stringify(gridExports.find(e=>e.video).video));
+  await page.locator('#open-export').click();await page.locator('#export-easter').selectOption('off');
+  const gridDownloadPromise=page.waitForEvent('download');await page.locator('#export-answer-png').click();
+  const gridDownload=await gridDownloadPromise;assert.match(gridDownload.suggestedFilename(),/-answer\.png$/);
+  if(out)await gridDownload.saveAs(join(out,'trail-grid-ui-answer.png'));
+  await page.locator('#export-close').click();
+  await page.locator('#trail-answer').selectOption('trail');await ready(page,'WHICH TRAIL DID YOU FOLLOW?');
+  assert.equal(await page.locator('#answers .trail-choice').count(),3);
+  assert.equal(await page.locator('#grid-answer').isVisible(),false);
+  assert.equal(await page.locator('#grid-size-field').isVisible(),false);
+  assert.equal(await page.locator('#trail-legend').isVisible(),true);
   await page.locator('#mode').selectOption('friend');
   await ready(page,'WHERE IS YOUR FRIEND?');
   assert.equal(await page.locator('#trail-tools').isVisible(),false);
   assert.equal(await page.locator('#friend-tools').isVisible(),true);
   await page.locator('#friend-zoom').click();
   assert.equal(await page.locator('#friend-zoom').getAttribute('aria-pressed'),'true');
-  await page.locator('#mode').selectOption('grid');await ready(page,'4 × 4 GRID');
+  await page.locator('#mode').selectOption('grid');await ready(page,'6 × 6 GRID');
   assert.equal(await page.locator('#grid-answer').isVisible(),true);
   assert.equal(await page.locator('#friend-tools').isVisible(),false);
   assert.deepEqual(errors,[]);

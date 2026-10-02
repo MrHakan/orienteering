@@ -13,6 +13,7 @@ import { surfaceElevation } from './terrainSurface.js';
 import { saturate, wrap360 } from './grid.js';
 
 export const TRAIL_COLORS = { A: '#ff6358', B: '#58d68b', C: '#39d5ed' };
+export const normaliseTrailAnswer = value => value === 'grid' ? 'grid' : 'trail';
 const BANDS = {
   easy: { min: 1.7, max: 8, cue: 1.7, profile: 10 },
   medium: { min: 1.2, max: 6, cue: 1.4, profile: 7 },
@@ -25,7 +26,7 @@ export function getTrailPreset(difficulty = 'medium', tuning = null) {
   return { ...base, trailBand: BANDS[difficulty] || BANDS.medium };
 }
 
-function describeRoute(model, route, plan, fov, times, columns) {
+export function describeTrailRoute(model, route, plan, fov, times, columns) {
   return times.map((t) => {
     const p = planAt(plan, t), x = route.x + p.x, y = route.y + p.y;
     const descriptor = model.skyline.viewDescriptor(x, y, wrap360(p.heading + Math.sin(t * Math.PI / 0.32) * 1.1), fov, {
@@ -33,6 +34,17 @@ function describeRoute(model, route, plan, fov, times, columns) {
     });
     return { ...descriptor, pitchOffset: -landingPulse(route, t) * 0.45 };
   });
+}
+
+/** Minimum map-relative spacing keeps otherwise fair tracks from clustering. */
+export function trailSpread(points, size) {
+  const distances = points.flatMap((p, i) => points.slice(i + 1).map(q => Math.hypot(p.x - q.x, p.y - q.y)));
+  const xs = points.map(p => p.x), ys = points.map(p => p.y);
+  const minSeparation = Math.min(...distances), diameter = Math.max(...distances);
+  const spanX = Math.max(...xs) - Math.min(...xs), spanY = Math.max(...ys) - Math.min(...ys);
+  const ok = minSeparation >= size * .25 && diameter >= size * .45
+    && spanX >= size * .30 && spanY >= size * .30 && triangleSpread(points) >= .18;
+  return { ok, minSeparation, diameter, spanX, spanY };
 }
 
 // Use the central 9 degrees while inspect is idle. Even the three-column
@@ -103,24 +115,24 @@ export function generateTrailQuiz({ seed, difficulty = 'medium', variant = 0, he
           y: margin + (j + grng.range(0.1, 0.9)) * span / gridSize };
         const route = simulateTrail(model, p, plan, physics);
         if (!route) continue;
-        route.views = describeRoute(model, route, plan, fov, coarseTimes, 13);
+        route.views = describeTrailRoute(model, route, plan, fov, coarseTimes, 13);
         if (route.views.some((d) => d.edgeFrac > 0.35 || d.blockedFrac > 0.5)) continue;
         const skylineRange = Math.max(...route.views[0].horizon) - Math.min(...route.views[0].horizon);
         if (skylineRange < 1.5) continue;
         routes.push(route);
       }
       const pairFor = (a, b, coarse = true, times = coarseTimes) => {
-        if (Math.hypot(a.x - b.x, a.y - b.y) < 240) return null;
+        if (Math.hypot(a.x - b.x, a.y - b.y) < model.size * .25) return null;
         const pair = compareTrailViews(a, b, band, times, { coarse });
         return pair.ok ? pair : null;
       };
-      const ranking = rankLookalikeTriples(routes, pairFor, 72, (p) => triangleSpread(p) >= 0.18);
+      const ranking = rankLookalikeTriples(routes, pairFor, 72, p => trailSpread(p, model.size).ok);
       let accepted = 0;
       const valid = [];
       const refined = new Map();
       for (const triple of ranking.triples) {
         const points = triple.points.map((p) => {
-          if (!refined.has(p)) refined.set(p, { ...p, views: describeRoute(model, p, plan, fov, fullTimes, 33),
+          if (!refined.has(p)) refined.set(p, { ...p, views: describeTrailRoute(model, p, plan, fov, fullTimes, 33),
             quality: vg.score(vg.sweep(p), heading) });
           return refined.get(p);
         });
@@ -159,18 +171,18 @@ export function generateTrailQuiz({ seed, difficulty = 'medium', variant = 0, he
       if (confidence < preset.minConfidence) continue;
       const correctLabel = options.find((p) => p.correct).label;
       const camera = { x: chosen.x, y: chosen.y, z: chosen.feet[0] + eyeHeight, heading, pitch: triple.pitch, fov, eyeHeight, roll: 0 };
-      const minSeparation = Math.min(...triple.points.flatMap((p, i) => triple.points.slice(i + 1).map((q) => Math.hypot(p.x - q.x, p.y - q.y))));
+      const spread = trailSpread(triple.points, model.size), { minSeparation } = spread;
       return {
         version: 1, mode: 'trail', seed, difficulty, variant, lowConfidence: false,
         terrain: terrainSummary(model, interval, terrainCheck), camera,
-        trail: { plan, movement: physics, duration: plan.duration, pairs: triple.pairs, times: fullTimes },
+        trail: { plan, movement: physics, answerMode: 'trail', duration: plan.duration, pairs: triple.pairs, times: fullTimes },
         options, correctLabel, heading: { degrees: heading, ...formatHeading(heading, headingStyle), mode: headingStyle },
         mapExtent: trailMapExtent(model), mapRotation: preset.mapRotation ? rng.fork('rotation').pick([0, 90, 180, 270]) : 0,
         landmarks: landmarkSummary(model), hardness: saturate(1 - triple.cost),
         quality: { total: chosen.quality.total, ...chosen.quality.components, blockedFrac: chosen.quality.blockedFrac,
           edgeFrac: chosen.quality.edgeFrac, landmarksInView: chosen.quality.landmarksInView },
         validation: { ok: true, issues: [], confidence, uniqueness: saturate(minD / (2 * band.min)),
-          minDistance: minD, minRequiredDistance: band.min, minSeparation, minCue: band.cue },
+          minDistance: minD, minRequiredDistance: band.min, minSeparation, minCue: band.cue, requiredSeparation: model.size * .25, spread },
         stats: { viewpointsEvaluated: routes.length * coarseTimes.length, questionsCompared: accepted, terrainAttempt: attempt,
           ms: Math.round(now() - t0) }, log,
       };

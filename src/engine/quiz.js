@@ -35,6 +35,10 @@ export async function generate(opts) {
   }
   if (opts.difficulty === 'sun-watch') opts = { ...opts, difficulty: 'medium' };
   if (opts.mode === 'trail') {
+    if (opts.trailAnswer === 'grid') {
+      const { generateTrailGridQuiz } = await import('./trailGridQuiz.js');
+      return generateTrailGridQuiz(opts);
+    }
     const { generateTrailQuiz } = await import('./trailQuiz.js');
     return generateTrailQuiz(opts);
   }

@@ -28,6 +28,7 @@ const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 export function captionText(quiz) {
   if (quiz.mode === 'facing') return 'Which way: N, NE, E, SE, S, SW, W or NW?';
+  if (quiz.mode === 'trail' && quiz.grid) return `Find your finish cell: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size}.`;
   if (quiz.mode === 'trail') return 'Which trail: A red, B green or C cyan?';
   if (quiz.mode === 'friend' && quiz.grid) return `Find your friend's cell: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size}.`;
   if (quiz.mode === 'grid') return `Find your cell: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size}.`;
@@ -138,7 +139,7 @@ export class ExportComposer {
       const mr = new MapRenderer(c, { fixedSize: { width: s / 2, height: s / 2, dpr: 2 } });
       mr.setData({ model: this.model, interval: q.terrain.contourInterval, options: quizMarkers(q), rotation: this.options.northUp ? 0 : q.mapRotation, landmarks: q.landmarks,
         grid: q.grid ? { ...q.grid, correctLabel: q.correctLabel } : null,
-        extent: q.mapExtent || null, trails: q.mode === 'trail', trailDuration: q.trail?.duration, observer: friendObserver(q), friendMode: q.mode === 'friend' });
+        extent: q.mapExtent || null, routes: q.trail?.routes, trails: q.mode === 'trail', trailDuration: q.trail?.duration, observer: friendObserver(q), friendMode: q.mode === 'friend' });
       if (q.mode === 'trail') {
         if (reveal) this.trailRevealMap = mr;
         else this.trailQuestionMap = mr;
@@ -176,11 +177,11 @@ export class ExportComposer {
     ctx.font = `800 ${L.title.size}px ${FONT}`;
     if ('letterSpacing' in ctx) ctx.letterSpacing = `${Math.round(L.title.size * 0.06)}px`;
     const facingMode = q.mode === 'facing';
-    ctx.fillText(q.mode === 'trail' ? 'WHICH TRAIL?' : q.mode === 'friend' ? 'FIND YOUR FRIEND' : facingMode ? 'WHICH WAY?' : q.mode === 'lookalike' ? 'LOOK-ALIKES' : q.mode === 'grid' ? `${q.grid.size} × ${q.grid.size} GRID` : 'WHERE ARE YOU?', W / 2, L.title.y);
+    ctx.fillText(q.mode === 'trail' ? q.grid ? 'WHERE DID YOU FINISH?' : 'WHICH TRAIL?' : q.mode === 'friend' ? 'FIND YOUR FRIEND' : facingMode ? 'WHICH WAY?' : q.mode === 'lookalike' ? 'LOOK-ALIKES' : q.mode === 'grid' ? `${q.grid.size} × ${q.grid.size} GRID` : 'WHERE ARE YOU?', W / 2, L.title.y, W - 80);
     if ('letterSpacing' in ctx) ctx.letterSpacing = `${Math.round(L.facing.size * 0.08)}px`;
     ctx.font = `500 ${L.facing.size}px ${FONT}`;
     ctx.fillStyle = '#cfd3d6';
-    const facing = q.mode === 'trail' ? 'BUNNY HOP · READ THE MOVING TERRAIN' : facingMode ? 'YOU ARE AT THE MARKED POINT' : headingHidden(q) && !reveal ? 'LOST COMPASS · FIND YOUR CELL' : q.heading.mode === 'exact' ? q.heading.text : `${q.heading.text} ${q.heading.arrow}`;
+    const facing = q.mode === 'trail' ? q.grid ? 'BUNNY HOP · FIND YOUR FINISH CELL' : 'BUNNY HOP · READ THE MOVING TERRAIN' : facingMode ? 'YOU ARE AT THE MARKED POINT' : headingHidden(q) && !reveal ? 'LOST COMPASS · FIND YOUR CELL' : q.heading.mode === 'exact' ? q.heading.text : `${q.heading.text} ${q.heading.arrow}`;
     if (!usesSunWatch(q)) ctx.fillText(q.mode === 'friend' ? `${q.friend.observerHidden && !reveal ? 'READ THE TERRAIN' : 'FROM YOU'} · ${facing}` : facing, W / 2, L.facing.y);
     if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
 
@@ -276,7 +277,7 @@ export class ExportComposer {
   }
 
   /** PNG of a single frame. */
-  async toImage({ reveal = false, time = usesSunWatch(this.quiz) && this.quiz.mode === 'friend' ? 8 : 4 } = {}) {
+  async toImage({ reveal = false, time = this.quiz.mode === 'trail' && this.quiz.grid ? this.quiz.trail.duration : usesSunWatch(this.quiz) && this.quiz.mode === 'friend' ? 8 : 4 } = {}) {
     this.animated = false;
     await this.drawFrameReady(time, { reveal });
     return new Promise((resolve) => this.canvas.toBlob(resolve, 'image/png'));

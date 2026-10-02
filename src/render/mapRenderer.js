@@ -70,9 +70,9 @@ export class MapRenderer {
     canvas.addEventListener('mousemove', (e) => {
       const o = this.hit(e);
       const label = o ? o.label : null;
-      if (label !== this.hover) { this.hover = label; this.canvas.style.cursor = label && this.pickable ? 'pointer' : 'default'; this.draw(); }
+      if (label !== this.hover) { this.hover = label; if (this.data?.grid) this._trailBase = null; this.canvas.style.cursor = label && this.pickable ? 'pointer' : 'default'; this.draw(); }
     });
-    canvas.addEventListener('mouseleave', () => { this.hover = null; this.draw(); });
+    canvas.addEventListener('mouseleave', () => { this.hover = null; if (this.data?.grid) this._trailBase = null; this.draw(); });
     canvas.addEventListener('click', (e) => {
       const o = this.hit(e);
       if (o && this.onPick) this.onPick(o.label);
@@ -95,8 +95,8 @@ export class MapRenderer {
     this.draw();
   }
 
-  setReveal(reveal) { this.reveal = reveal; this.pickable = !reveal; this.draw(); }
-  setSelection(label) { this.selection = label; this.draw(); }
+  setReveal(reveal) { this.reveal = reveal; this.pickable = !reveal; this._trailBase = null; this.draw(); }
+  setSelection(label) { this.selection = label; this._trailBase = null; this.draw(); }
   setViewing(v) { this.viewing = v; this.draw(); }
   setTrailTime(time, viewing = null) {
     if (!this.data?.trails) return;
@@ -345,7 +345,7 @@ export class MapRenderer {
     ctx.strokeStyle = COLORS.bg; ctx.lineWidth = 3; ctx.stroke();
     ctx.fillStyle = COLORS.correct; ctx.fill();
     ctx.font = '700 10px system-ui, sans-serif'; ctx.textAlign = 'center';
-    ctx.strokeText('FRIEND', x, y - 11); ctx.fillText('FRIEND', x, y - 11);
+    ctx.strokeText(target.label || 'FRIEND', x, y - 11); ctx.fillText(target.label || 'FRIEND', x, y - 11);
   }
 
   prepareLines() {
@@ -522,8 +522,10 @@ export class MapRenderer {
   }
 
   drawTrails() {
+    if (this.data.grid && !this.reveal) return;
     const { ctx } = this;
-    for (const route of this.data.options) {
+    for (const route of this.data.routes || this.data.options) {
+      const color = this.data.grid ? '#ffd666' : TRAIL_COLORS[route.label];
       const active = !!this.reveal && this.viewing?.label === route.label, hovered = this.pickable && this.hover === route.label;
       ctx.globalAlpha = this.reveal && !route.correct && !active ? .5 : 1;
       const points = route.points.map((p) => this.toCanvas(p.x, p.y));
@@ -532,18 +534,18 @@ export class MapRenderer {
       line(); ctx.strokeStyle = COLORS.bg; ctx.lineWidth = active || hovered ? 7 : 6; ctx.stroke();
       const opacity = ctx.globalAlpha;
       ctx.globalAlpha = opacity * .48;
-      line(); ctx.strokeStyle = TRAIL_COLORS[route.label]; ctx.lineWidth = active || hovered ? 3.8 : 3; ctx.stroke();
+      line(); ctx.strokeStyle = color; ctx.lineWidth = active || hovered ? 3.8 : 3; ctx.stroke();
       ctx.globalAlpha = opacity;
       const trace = trailTracePoints(route.points, this.trailTime || 0, this.data.trailDuration || 12)
         .map(p => this.toCanvas(p.x, p.y));
       ctx.beginPath(); trace.forEach(([x,y], i) => i ? ctx.lineTo(x,y) : ctx.moveTo(x,y)); ctx.stroke();
       if ((this.trailTime || 0) > 0 && trace.length) {
         const [x,y] = trace.at(-1);
-        ctx.fillStyle = TRAIL_COLORS[route.label];
+        ctx.fillStyle = color;
         ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
       }
       const end = points.at(-1), before = points[Math.max(0, points.length - 5)], az = Math.atan2(end[1] - before[1], end[0] - before[0]);
-      ctx.fillStyle = TRAIL_COLORS[route.label]; ctx.beginPath(); ctx.moveTo(end[0] + Math.cos(az) * 6, end[1] + Math.sin(az) * 6);
+      ctx.fillStyle = color; ctx.beginPath(); ctx.moveTo(end[0] + Math.cos(az) * 6, end[1] + Math.sin(az) * 6);
       for (const a of [az + 2.5, az - 2.5]) ctx.lineTo(end[0] + Math.cos(a) * 5, end[1] + Math.sin(a) * 5);
       ctx.closePath(); ctx.fill();
       if (this.reveal && route.correct) {
@@ -560,8 +562,17 @@ export class MapRenderer {
   }
 
   drawTrailLabels() {
+    if (this.data.grid && !this.reveal) return;
     const { ctx } = this;
-    for (const route of this.data.options) {
+    for (const route of this.data.routes || this.data.options) {
+      if (this.data.grid) {
+        const [x, y] = this.toCanvas(route.x, route.y);
+        ctx.strokeStyle = '#ffd666'; ctx.fillStyle = COLORS.bg; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = '#ffd666'; ctx.font = '700 10px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+        ctx.fillText('START', x, y - 9);
+        continue;
+      }
       const [x, y] = this.toCanvas(route.x, route.y), color = TRAIL_COLORS[route.label];
       ctx.strokeStyle = color; ctx.fillStyle = COLORS.bg; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(x, y, 12, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
