@@ -9,6 +9,7 @@ import { depthDifference } from './quizCandidates.js';
 import { rankLookalikeTriples, triangleSpread } from './lookalikeQuiz.js';
 import { buildTerrain, terrainSummary, landmarkSummary, framingPitch, now } from './quiz.js';
 import { createTrailPlan, simulateTrail, planAt, normaliseMovement, landingPulse } from './trailMotion.js';
+import { terrainRunDuration, trailViewTimes, describeTrailTerrain } from './trailTerrain.js';
 import { surfaceElevation } from './terrainSurface.js';
 import { saturate, wrap360 } from './grid.js';
 
@@ -98,23 +99,27 @@ export function generateTrailQuiz({ seed, difficulty = 'medium', variant = 0, he
   const t0 = now(), preset = getTrailPreset(difficulty, tuning), band = preset.trailBand;
   const headingStyle = ['exact', 'cardinal', 'intercardinal'].includes(headingMode) ? headingMode : preset.heading;
   const physics = normaliseMovement(movement), seeds = new SeedManager(`${seed}#${difficulty}`), log = [];
-  const fov = 90, eyeHeight = 1.7, coarseTimes = [0, 3, 6, 9, 11.75], fullTimes = [0, 1.5, 3, 4.5, 6, 7.5, 9, 10.5, 11.75];
+  const fov = 90, eyeHeight = 1.7;
   for (let attempt = 0; attempt < maxTerrainAttempts; attempt++) {
     onProgress(`Generating bunny-hop terrain (attempt ${attempt + 1})`);
     const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n });
     if (!terrainCheck.ok) { log.push({ attempt, stage: 'terrain', issues: terrainCheck.issues }); continue; }
     const rng = seeds.stream('trail', attempt, variant, headingStyle);
     const headings = rng.fork('headings').shuffle(candidateHeadings(headingStyle, rng.fork('angles')));
-    for (const [h, heading] of headings.slice(0, 4).entries()) {
+    for (let h = 0; h < 8; h++) {
+      const heading = headings[h % headings.length];
       onProgress('Searching for three matching moving terrain views');
-      const plan = createTrailPlan(rng.fork(`steering-${h}`), heading), grng = rng.fork(`grid-${h}`);
-      const routes = [], gridSize = 17, margin = 230, span = model.size - 2 * margin;
+      const plan = createTrailPlan(rng.fork(`steering-${h}`), heading, terrainRunDuration(model.size)), grng = rng.fork(`grid-${h}`);
+      const coarseTimes = trailViewTimes(plan.duration, true), fullTimes = trailViewTimes(plan.duration);
+      const routes = [], gridSize = 33, margin = 65, span = model.size - 2 * margin;
       const vg = new ViewpointGenerator(model, preset, rng.fork(`quality-${h}`), { fov, eyeHeight });
       for (let j = 0; j < gridSize; j++) for (let i = 0; i < gridSize; i++) {
         const p = { x: margin + (i + grng.range(0.1, 0.9)) * span / gridSize,
           y: margin + (j + grng.range(0.1, 0.9)) * span / gridSize };
         const route = simulateTrail(model, p, plan, physics);
         if (!route) continue;
+        route.terrainRun = describeTrailTerrain(model, route);
+        if (!route.terrainRun.ok || route.terrainRun.cellCount < 2) continue;
         route.views = describeTrailRoute(model, route, plan, fov, coarseTimes, 13);
         if (route.views.some((d) => d.edgeFrac > 0.35 || d.blockedFrac > 0.5)) continue;
         const skylineRange = Math.max(...route.views[0].horizon) - Math.min(...route.views[0].horizon);
@@ -152,12 +157,12 @@ export function generateTrailQuiz({ seed, difficulty = 'medium', variant = 0, he
         });
         if (!cueVisible) continue;
         accepted++;
-        valid.push({ points, pairs, cost: Math.max(...pairs.map((p) => p.cost)), pitch });
+        valid.push({ points, pairs, cost: Math.max(...pairs.map((p) => p.cost)), terrainScore: Math.min(...points.map(p => p.terrainRun.score)), pitch });
       }
       log.push({ attempt, stage: 'question', try: h, ok: valid.length > 0,
         confidence: valid.length ? 0.85 : 0, issues: valid.length ? [] : ['no fair three-route match'] });
       if (!valid.length) continue;
-      valid.sort((a, b) => a.cost - b.cost);
+      valid.sort((a, b) => (a.cost - .35 * a.terrainScore) - (b.cost - .35 * b.terrainScore));
       const triple = rng.fork(`question-${h}`).pick(valid.slice(0, difficulty === 'master' ? 2 : 4));
       const chosen = rng.fork(`correct-${h}`).pick(triple.points);
       const options = rng.fork(`labels-${h}`).shuffle(triple.points).map((p, i) => {

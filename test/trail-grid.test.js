@@ -6,9 +6,9 @@ import { trailFrame, simulateTrail } from '../src/engine/trailMotion.js';
 import { cellAtExtent } from '../src/engine/gridQuiz.js';
 import { scrambleLabels } from '../src/engine/scramble.js';
 import { MapRenderer, quizMarkers } from '../src/render/mapRenderer.js';
-import { ExportComposer, FORMATS, captionText } from '../src/export/composer.js';
+import { ExportComposer, FORMATS, captionText, exportDuration } from '../src/export/composer.js';
 
-for(const [gridSize,difficulty,movement] of [[4,'easy','go'],[6,'medium','go'],[6,'expert','classic'],[8,'hard','classic'],[16,'master','go']]) {
+for(const [gridSize,difficulty,movement] of [[4,'easy','go'],[4,'master','classic'],[6,'medium','go'],[6,'expert','classic'],[8,'hard','classic'],[16,'master','go']]) {
   test(gridSize+' grid '+difficulty+': finish at cell centre, full-sequence cues for every possible alternative',async()=>{
     const q=await generate({seed:'bhop-grid',mode:'trail',trailAnswer:'grid',gridSize,difficulty,movement});
     const model=new TerrainModel({...q.terrain,seed:q.terrain.modelSeed});
@@ -17,8 +17,12 @@ for(const [gridSize,difficulty,movement] of [[4,'easy','go'],[6,'medium','go'],[
     assert.equal(q.options.filter(o=>o.correct).length,1);
     assert.equal(q.stats.cellsChecked,gridSize**2);
     assert.deepEqual(quizMarkers(q),[]);assert.equal(q.trail.routes.length,1);
+    assert.ok(q.trail.duration>=24);
+    assert.ok(q.trail.routes[0].terrainRun.cellCount>=3);
+    assert.ok(q.trail.routes[0].terrainRun.relief>=6);
+    assert.ok(Math.max(q.trail.routes[0].terrainRun.slopeRange,q.trail.routes[0].terrainRun.gradeRange)>=2.5);
     const actual=q.trail.routes[0],cell=q.options.find(o=>o.correct);
-    const end=trailFrame(q,12,q.correctLabel,model).camera;
+    const end=trailFrame(q,q.trail.duration,q.correctLabel,model).camera;
     assert.ok(Math.abs(end.x-cell.x)<1e-9 && Math.abs(end.y-cell.y)<1e-9);
     assert.equal(cellAtExtent(end.x,end.y,q.mapExtent,gridSize),q.correctLabel);
     assert.deepEqual(q.grid.target,{x:cell.x,y:cell.y,label:'FINISH'});
@@ -41,10 +45,10 @@ for(const [gridSize,difficulty,movement] of [[4,'easy','go'],[6,'medium','go'],[
         assert.ok(Math.abs(view.horizon[column]-cam.pitch)<25);
       }
     }
-    for(const t of [12,0,7.25,2.5,11.9,15]) {
+    for(const t of [q.trail.duration,0,7.25,2.5,q.trail.duration-.1,q.trail.duration+3]) {
       const {camera,motion}=trailFrame(q,t,q.correctLabel,model);
       assert.ok(Object.values(camera).every(Number.isFinite));assert.ok(model.inside(camera.x,camera.y,65));
-      assert.equal(q.correctLabel,cell.label);assert.equal(motion.t,Math.min(t,12));
+      assert.equal(q.correctLabel,cell.label);assert.equal(motion.t,Math.min(t,q.trail.duration));
     }
     assert.equal(scrambleLabels(q,3),q);
   });
@@ -85,18 +89,18 @@ test('both grid export formats use actual motion, finish-cell captions and termi
     const c=Object.create(ExportComposer.prototype),calls=[],texts=[];
     c.quiz=q;c.model=model;c.canvas={...FORMATS[format],toBlob:cb=>cb('png')};
     c.ctx=new Proxy({measureText:()=>({width:20}),fillText:t=>texts.push(t)},{get:(o,k)=>o[k]??(()=>{}),set:(o,k,v)=>{o[k]=v;return true;}});
-    c.layout=c.computeLayout(FORMATS[format]);c.options={duration:15,caption:true,tape:false,handle:''};
+    c.layout=c.computeLayout(FORMATS[format]);c.options={duration:exportDuration(q),caption:true,tape:false,handle:''};
     c.weather={rain:false};c.animated=true;
     c.renderer={prepareEnvironmentReady:async()=>{},render:(camera,options)=>calls.push({camera,options})};
     c.glCanvas={};c.mapCanvas={};c.mapRevealCanvas={};
     const maps=[];c.trailRevealMap={setTrailTime:(t,v)=>maps.push({t,v}),setViewing:()=>{}};
-    for(const t of [0,5,11.75,12,14.95]) {
-      texts.length=0;c.drawFrame(t,{reveal:t>=12});
+    for(const t of [0,5,11.75,q.trail.duration,q.trail.duration+2.95]) {
+      texts.length=0;c.drawFrame(t,{reveal:t>=q.trail.duration});
       assert.deepEqual(calls.at(-1).camera,trailFrame(q,t,q.correctLabel,model).camera);
-      assert.ok(texts.includes(t>=12?'Answer: '+q.correctLabel:captionText(q)));
+      assert.ok(texts.includes(t>=q.trail.duration?'Answer: '+q.correctLabel:captionText(q)));
       assert.ok(texts.includes('WHERE DID YOU FINISH?'));
     }
-    await c.toImage();assert.deepEqual(calls.at(-1).camera,trailFrame(q,12,q.correctLabel,model).camera);
+    await c.toImage();assert.deepEqual(calls.at(-1).camera,trailFrame(q,q.trail.duration,q.correctLabel,model).camera);
     await c.toImage({time:4,reveal:true});
     assert.deepEqual(calls.at(-1).camera,trailFrame(q,4,q.correctLabel,model).camera);
     assert.equal(maps.at(-1).v.label,q.correctLabel);

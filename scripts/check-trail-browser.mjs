@@ -64,6 +64,7 @@ try {
     ['A — red trail','B — green trail','C — cyan trail']);
   assert.equal(await page.locator('#trail-play').getAttribute('aria-pressed'),'false');
   assert.equal(await page.locator('#trail-scrub').inputValue(),'0');
+  assert.equal(Number(await page.locator('#trail-scrub').getAttribute('max')),q.trail.duration);
   if(process.env.CHECK_SITE)assert.match(await page.locator('script[type="module"]').getAttribute('src'),/assets\/[a-f0-9]{40}\/src\/ui\/app\.js/);
   await screenshot(page,'trail-desktop-question');
   const initialScene=await page.locator('#scene').screenshot();
@@ -145,6 +146,7 @@ try {
   assert.equal(await page.locator('#export-dialog').isVisible(),true);
   assert.equal(await page.locator('#trail-play').getAttribute('aria-pressed'),'false');
   await page.locator('#export-easter').selectOption('off');
+  assert.equal(await page.locator('#export-video').textContent(),'Record '+(q.trail.duration+3)+' s video');
   await page.locator('[name="format"][value="post"]').check();
   await page.waitForFunction(()=>document.getElementById('export-canvas').height===1350);
   const downloadPromise=page.waitForEvent('download');
@@ -218,14 +220,15 @@ try {
     r.viewmodel?.dispose();r.gl.getExtension('WEBGL_lose_context')?.loseContext();
     for(const format of ['reels','post']) {
       const c=new ExportComposer(q,model,{format,appearance:{knife:'classic',handedness:'right'},easterEgg:null});
+      if(c.options.duration!==q.trail.duration+3)throw new Error('Export duration truncated terrain run');
       c.animated=true;const texts=[],fill=c.ctx.fillText.bind(c.ctx);
       c.ctx.fillText=(...args)=>{texts.push(args[0]);fill(...args);};
       await c.drawFrameReady(4.5);
       const question={image:c.canvas.toDataURL(),texts:[...texts]};
-      texts.length=0;await c.drawFrameReady(13,{reveal:true});
+      texts.length=0;await c.drawFrameReady(q.trail.duration+1,{reveal:true});
       const answer={image:c.canvas.toDataURL(),texts:[...texts]};
-      await c.drawFrameReady(14.95,{reveal:true});
-      if(JSON.stringify(trailFrame(q,14.95,q.correctLabel,model).camera)!==JSON.stringify(trailFrame(q,12,q.correctLabel,model).camera))
+      await c.drawFrameReady(q.trail.duration+2.95,{reveal:true});
+      if(JSON.stringify(trailFrame(q,q.trail.duration+2.95,q.correctLabel,model).camera)!==JSON.stringify(trailFrame(q,q.trail.duration,q.correctLabel,model).camera))
         throw new Error('Reveal moved the endpoint');
       result.exports.push({format,question,answer});
       if(format==='post') {
@@ -271,7 +274,7 @@ try {
   const cleanGrid=await page.locator('#map').evaluate(c=>c.toDataURL());
   await seek(page,6);
   assert.equal(await page.locator('#map').evaluate(c=>c.toDataURL()),cleanGrid);
-  await seek(page,12);
+  await seek(page,gridQuiz.trail.duration);
   assert.equal(await page.locator('#map').evaluate(c=>c.toDataURL()),cleanGrid);
   await screenshot(page,'trail-grid-desktop-question');
   await page.locator('#grid-cell').fill('G7');await page.locator('#grid-submit').click();
@@ -299,7 +302,7 @@ try {
   await gridMobile.goto(url+'/#seed=bhop-grid&d=hard&m=trail&ta=grid&g=8&mv=classic&k=classic');
   await ready(gridMobile,'WHERE DID YOU FINISH?');
   assert.equal(await gridMobile.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-  await seek(gridMobile,12);await screenshot(gridMobile,'trail-grid-mobile-question');
+  await seek(gridMobile,mobileGridQuiz.trail.duration);await screenshot(gridMobile,'trail-grid-mobile-question');
   const chosenCell=mobileGridQuiz.options.find(o=>o.correct),gb=await gridMobile.locator('#map').boundingBox();
   const ga=mobileGridQuiz.mapRotation*Math.PI/180,gs=Math.min(gb.width,gb.height)-56;
   const gu=(chosenCell.x-mobileGridQuiz.mapExtent.x)/mobileGridQuiz.mapExtent.size;
@@ -331,13 +334,13 @@ try {
       const thumbnail=document.createElement('canvas');thumbnail.width=540;thumbnail.height=Math.round(c.canvas.height/2);
       thumbnail.getContext('2d').drawImage(c.canvas,0,0,thumbnail.width,thumbnail.height);
       const preview=thumbnail.toDataURL('image/jpeg',.65).split(',')[1];
-      const end=trailFrame(q,12,q.correctLabel,model).camera;
+      const end=trailFrame(q,q.trail.duration,q.correctLabel,model).camera;
       if(Math.abs(end.x-q.grid.target.x)>1e-9||Math.abs(end.y-q.grid.target.y)>1e-9)throw new Error('Finish moved');
       texts.length=0;await c.toImage({reveal:true});
       if(!texts.includes('Answer: '+q.correctLabel))throw new Error('Grid answer caption');
       const answer=c.canvas.toDataURL();
       if(c.mapRevealCanvas.toDataURL()===clean)throw new Error('Grid reveal did not draw the route');
-      for(const t of [12,13,14.95])await c.drawFrameReady(t,{reveal:true});
+      for(const t of [q.trail.duration,q.trail.duration+1,q.trail.duration+2.95])await c.drawFrameReady(t,{reveal:true});
       let video=null;
       if(format==='post') {
         c.animated=true;
@@ -355,6 +358,7 @@ try {
   if(process.env.PRINT_PREVIEW==='1')console.log('TRAIL_GRID_PREVIEW_JPEG='+gridExports.find(e=>e.format==='reels').preview);
   console.log('Finish-grid encoded clip: '+JSON.stringify(gridExports.find(e=>e.video).video));
   await page.locator('#open-export').click();await page.locator('#export-easter').selectOption('off');
+  assert.equal(await page.locator('#export-video').textContent(),'Record '+(gridQuiz.trail.duration+3)+' s video');
   const gridDownloadPromise=page.waitForEvent('download');await page.locator('#export-answer-png').click();
   const gridDownload=await gridDownloadPromise;assert.match(gridDownload.suggestedFilename(),/-answer\.png$/);
   if(out)await gridDownload.saveAs(join(out,'trail-grid-ui-answer.png'));

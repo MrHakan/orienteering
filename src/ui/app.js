@@ -20,7 +20,7 @@ import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
 import { relativeBearing } from '../render/relativeBearing.js';
 import { drawSkylineOverlay } from '../render/skylineOverlay.js';
-import { ExportComposer } from '../export/composer.js';
+import { ExportComposer, exportDuration } from '../export/composer.js';
 import { planForChoice, describePlan, EASTER_CHOICES } from '../easter/index.js';
 import { encodeCanvasVideo, pickVideoPath } from '../export/recorder.js';
 
@@ -1051,7 +1051,7 @@ function exportOptions() {
     reveal: $('export-reveal').checked,
     northUp: state.settings.northUp,
     appearance: { ...state.appearance },
-    duration: 15,
+    duration: exportDuration(state.quiz),
     easter: $('export-easter').value,
   };
 }
@@ -1138,6 +1138,7 @@ function openExport() {
   $('export-share').hidden = true;
   $('export-dialog').showModal();
   exportUi.videoPath = null;
+  $('export-video').textContent = `Record ${exportUi.composer.options.duration} s video`;
   $('export-video').disabled = true;
   pickVideoPath(1080, 1920).then((p) => {
     exportUi.videoPath = p;
@@ -1205,7 +1206,7 @@ async function exportVideo() {
   setExportBusy(true);
   const progress = $('export-progress');
   progress.hidden = false;
-  setExportStatus(exportUi.videoPath?.kind === 'recorder' ? 'Recording 15 s in real time — keep this tab visible…' : 'Rendering 450 frames…');
+  setExportStatus(exportUi.videoPath?.kind === 'recorder' ? `Recording ${c.options.duration} s in real time — keep this tab visible…` : `Rendering ${Math.round(c.options.duration * 30)} frames…`);
   try {
     c.animated = true;
     const d = c.options.duration;

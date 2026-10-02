@@ -8,13 +8,12 @@ import { buildTerrain, terrainSummary, landmarkSummary, framingPitch, now } from
 import { ViewpointGenerator } from './viewpoints.js';
 import { createTrailPlan, simulateTrail, planAt, normaliseMovement } from './trailMotion.js';
 import { getTrailPreset, describeTrailRoute, compareTrailViews, trailMapExtent } from './trailQuiz.js';
+import { terrainRunDuration, trailViewTimes, describeTrailTerrain, travelledCells } from './trailTerrain.js';
 import { surfaceElevation } from './terrainSurface.js';
 import { saturate, wrap360 } from './grid.js';
 
-const TIMES = [0, 1.5, 3, 4.5, 6, 7.5, 9, 10.5, 11.75];
-
-function cueVisible(pair, a, b, pitch, fov) {
-  const index = TIMES.indexOf(pair.cue.t), view = a.views[index];
+function cueVisible(pair, a, b, pitch, fov, times) {
+  const index = times.indexOf(pair.cue.t), view = a.views[index];
   const offset = wrap360(pair.cue.bearing - view.heading + 180) - 180;
   const column = Math.max(0, Math.min(32, Math.round((offset + fov / 2) / fov * 32)));
   return [a, b].every(route => Math.abs(route.views[index].horizon[column]
@@ -34,30 +33,39 @@ export function generateTrailGridQuiz({ seed, difficulty = 'medium', variant = 0
     const rng = seeds.stream('trail-grid', attempt, variant, divisions, style);
     const cells = gridCells(model.size, divisions);
     const headings = rng.fork('headings').shuffle(candidateHeadings(style, rng.fork('angles')));
-    for (const [h, heading] of headings.slice(0, 4).entries()) {
-      const plan = createTrailPlan(rng.fork('steering-' + h), heading), finish = planAt(plan, plan.duration);
+    for (let h = 0; h < 8; h++) {
+      const heading = headings[h % headings.length];
+      const plan = createTrailPlan(rng.fork('steering-' + h), heading, terrainRunDuration(model.size, divisions)), finish = planAt(plan, plan.duration);
+      const times = trailViewTimes(plan.duration);
+      const centre = cells[Math.floor(divisions / 2) * divisions + Math.floor(divisions / 2)];
+      const path = Array.from({ length: plan.samples.length / 4 }, (_, i) => ({
+        x: centre.x - finish.x + plan.samples[i * 4], y: centre.y - finish.y + plan.samples[i * 4 + 1],
+      }));
+      if (new Set(travelledCells(path, model.size, divisions)).size < 3) continue;
       const vg = new ViewpointGenerator(model, preset, rng.fork('quality-' + h), { fov, eyeHeight });
       const routes = [];
       onProgress('Checking runs ending in all ' + cells.length + ' cells');
       for (const cell of cells) {
         const route = simulateTrail(model, { x: cell.x - finish.x, y: cell.y - finish.y }, plan, physics);
         if (!route) continue;
+        route.terrainRun = describeTrailTerrain(model, route, divisions);
         route.label = cell.label; route.finish = cell;
-        route.views = describeTrailRoute(model, route, plan, fov, TIMES, 33);
+        route.views = describeTrailRoute(model, route, plan, fov, times, 33);
         routes.push(route);
       }
       const valid = [];
       for (const route of routes) {
+        if (!route.terrainRun.ok || route.terrainRun.cellCount < 3) continue;
         if (route.views.some(view => view.edgeFrac > .35 || view.blockedFrac > .5)) continue;
         const quality = vg.score(vg.sweep(route), heading);
         if (quality.total < preset.minQuality) continue;
         const pitch = framingPitch(Array.from(route.views[0].horizon));
         const pairs = routes.filter(other => other !== route).map(other => ({
-          label: other.label, ...compareTrailViews(route, other, band, TIMES),
+          label: other.label, ...compareTrailViews(route, other, band, times),
           visible: false,
         }));
         if (!pairs.length) continue;
-        for (const pair of pairs) pair.visible = cueVisible(pair, route, routes.find(other => other.label === pair.label), pitch, fov);
+        for (const pair of pairs) pair.visible = cueVisible(pair, route, routes.find(other => other.label === pair.label), pitch, fov, times);
         // Grid has no upper similarity limit: distant cells may be obviously
         // different. Each physically possible alternative still needs a cue.
         if (pairs.some(pair => pair.D < band.min || pair.cue.magnitude < band.cue || !pair.visible)) continue;
@@ -71,7 +79,7 @@ export function generateTrailGridQuiz({ seed, difficulty = 'medium', variant = 0
       log.push({ attempt, stage: 'question', try: h, ok: valid.length > 0, confidence: valid.length ? .85 : 0,
         issues: valid.length ? [] : ['no unambiguous moving grid sequence'] });
       if (!valid.length) continue;
-      valid.sort((a, b) => b.hardness - a.hardness);
+      valid.sort((a, b) => (b.hardness + .35 * b.route.terrainRun.score) - (a.hardness + .35 * a.route.terrainRun.score));
       const chosen = rng.fork('choice-' + h).pick(valid.slice(0, difficulty === 'master' ? 2 : 6));
       const { route, quality, pitch, pairs, closest, uniqueness, confidence, hardness } = chosen;
       const correctLabel = route.label;
@@ -87,7 +95,7 @@ export function generateTrailGridQuiz({ seed, difficulty = 'medium', variant = 0
         terrain: terrainSummary(model, interval, terrainCheck),
         camera: { x: route.x, y: route.y, z: route.feet[0] + eyeHeight, heading, pitch, fov, eyeHeight, roll: 0 },
         trail: { plan, movement: physics, answerMode: 'grid', duration: plan.duration, routes: [{ ...actual, correct: true }],
-          pairs, times: TIMES },
+          pairs, times },
         grid: { size: divisions, origin: 'trail-end-centre', cellMetres: model.size / divisions,
           target: { x: cell.x, y: cell.y, label: 'FINISH' } },
         options, correctLabel, closestLabel: closest.label,
@@ -98,7 +106,7 @@ export function generateTrailGridQuiz({ seed, difficulty = 'medium', variant = 0
           edgeFrac: quality.edgeFrac, landmarksInView: quality.landmarksInView },
         validation: { ok: true, issues: [], confidence, uniqueness, minDistance: closest.D,
           minRequiredDistance: band.min, minCue: band.cue },
-        stats: { viewpointsEvaluated: routes.length * TIMES.length, cellsChecked: cells.length,
+        stats: { viewpointsEvaluated: routes.length * times.length, cellsChecked: cells.length,
           routesChecked: routes.length, questionsCompared: valid.length, terrainAttempt: attempt, ms: Math.round(now() - t0) }, log,
       };
     }

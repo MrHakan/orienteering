@@ -16,11 +16,16 @@ test('fifteen independent trail questions meet the matching and cue limits', asy
     assert.ok(q.validation.spread.diameter>=q.terrain.size*.45);
     for(const pair of q.trail.pairs) {
       assert.equal(pair.ok,true);assert.ok(pair.cue.magnitude>=q.validation.minCue);
-      assert.ok(pair.cue.t<12);
+      assert.ok(pair.cue.t<q.trail.duration);
+    }
+    for(const r of q.options) {
+      assert.ok(r.terrainRun.relief>=6);
+      assert.ok(Math.max(r.terrainRun.gradeRange,r.terrainRun.slopeRange)>=2.5);
+      assert.ok(r.terrainRun.cellCount>=2);
     }
     for(const o of q.options.filter(o=>!o.correct)) {
       assert.ok(o.cue.magnitude>=q.validation.minCue);
-      assert.ok(o.cue.t<12);
+      assert.ok(o.cue.t<q.trail.duration);
     }
   }
 });
