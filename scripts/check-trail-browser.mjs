@@ -328,6 +328,9 @@ try {
       texts.length=0;await c.toImage();
       if(!texts.includes('Find your finish cell: A1–F6.')||texts.some(t=>t.startsWith('Answer:')))throw new Error('Grid question caption');
       const question=c.canvas.toDataURL();
+      const thumbnail=document.createElement('canvas');thumbnail.width=540;thumbnail.height=Math.round(c.canvas.height/2);
+      thumbnail.getContext('2d').drawImage(c.canvas,0,0,thumbnail.width,thumbnail.height);
+      const preview=thumbnail.toDataURL('image/jpeg',.65).split(',')[1];
       const end=trailFrame(q,12,q.correctLabel,model).camera;
       if(Math.abs(end.x-q.grid.target.x)>1e-9||Math.abs(end.y-q.grid.target.y)>1e-9)throw new Error('Finish moved');
       texts.length=0;await c.toImage({reveal:true});
@@ -343,12 +346,13 @@ try {
         video={bytes:clip.blob.size,type:clip.blob.type};
       }
       if(c.renderer.gl.getError())throw new Error('Grid export GL error');
-      results.push({format,question,answer,video});c.dispose();
+      results.push({format,question,answer,video,preview});c.dispose();
     }
     return results;
   },gridPlain);
   if(out)for(const e of gridExports)for(const stage of ['question','answer'])
     await writeFile(join(out,'trail-grid-export-'+e.format+'-'+stage+'.png'),Buffer.from(e[stage].split(',')[1],'base64'));
+  if(process.env.PRINT_PREVIEW==='1')console.log('TRAIL_GRID_PREVIEW_JPEG='+gridExports.find(e=>e.format==='reels').preview);
   console.log('Finish-grid encoded clip: '+JSON.stringify(gridExports.find(e=>e.video).video));
   await page.locator('#open-export').click();await page.locator('#export-easter').selectOption('off');
   const gridDownloadPromise=page.waitForEvent('download');await page.locator('#export-answer-png').click();

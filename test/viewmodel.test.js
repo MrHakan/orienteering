@@ -31,6 +31,7 @@ test('overlay preserves footage aspect and mirrors without changing clip time', 
     const settings = {knife:clip.id,scale}, r = knifeOverlayRect(640,640/aspect,0,{},settings);
     assert.ok(Math.abs(r.w / r.h - clip.aspect) < 1e-6);
     assert.equal(r.y + r.h, 640/aspect);
+    if (clip.maxHeight) assert.ok(r.h <= 640/aspect * clip.maxHeight * scale + 1e-8);
     const left = {...settings,handedness:'left'};
     assert.deepEqual(knifeOverlayRect(640,640/aspect,0,{},left), {...r,mirror:true});
     assert.equal(knifeClipTime(2,{},settings),knifeClipTime(2,{},left));

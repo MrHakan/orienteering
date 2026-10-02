@@ -45,6 +45,7 @@ jobs:
       - name: Test trail mode in Chromium
         env:
           CHECK_SITE: _site
+          PRINT_PREVIEW: '1'
         run: node scripts/check-trail-browser.mjs browser-artifacts
       - name: Test existing grid controls in Chromium
         run: node scripts/check-grid-browser.mjs browser-artifacts

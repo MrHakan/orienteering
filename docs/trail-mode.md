@@ -24,7 +24,7 @@ New positions generates another finish on the same seeded terrain. Letter scramb
 
 ## Appearance and links
 
-**Knife video & hand** selects **CS 1.6 Classic**, **CS:GO Default** or **CS:GO Butterfly**, right/left hand and small/original/large size. These are the three supplied videos, rendered as a bottom-anchored video texture with green dominance keying, soft alpha edges and spill suppression. There is no procedural hand or knife geometry. Source gloves and finishes remain together with the blade. The Classic clip’s black sidebars are cropped before shipping. Half-second keyframes and fast-start metadata make source-frame seeking quick.
+**Knife video & hand** selects **CS 1.6 Classic**, **CS:GO Default** or **CS:GO Butterfly**, right/left hand and small/original/large size. These are the three supplied videos, rendered as a bottom-anchored video texture with green dominance keying, soft alpha edges and spill suppression. There is no procedural hand or knife geometry. Default and Butterfly footage have height limits so their idle blades do not obscure the central terrain clue in the wider 4:5 scene, including at large size. Source gloves and finishes remain together with the blade. The Classic clip’s black sidebars are cropped before shipping. Half-second keyframes and fast-start metadata make source-frame seeking quick.
 
 F and automatic inspection replay an existing segment of the source clip. The Classic recording contains knife swings, so it replays that recorded movement rather than inventing an inspect animation. Karambit and Huntsman/Hunter require additional green-screen clips and are not offered as fabricated models. Add future footage to `src/assets/knives/` and describe its source times and aspect ratio in `knifeClips.js`.
 
