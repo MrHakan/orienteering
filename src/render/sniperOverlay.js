@@ -1,5 +1,5 @@
-// 2D layer for sniper mode, shared by the live scene and exports: the prone
-// rifle and enemy spot while observing, then the scope picture with a BDC
+// 2D layer for sniper mode, shared by the live scene and exports: the enemy
+// spot while observing (the 3D rifle is drawn by the renderer), then the scope picture with a BDC
 // reticle. Horizontal stadia are in mils (2/4/6/8); the vertical marks are the
 // rifle's bullet-drop holds for 200–1000 m, placed from the same ballistics
 // that decide the answer, so they spread out with range like a real BDC.
@@ -15,47 +15,6 @@ function project(camera, bearing, elevation, w, h) {
   const dx = ((bearing - camera.heading + 540) % 360) - 180, dy = elevation - camera.pitch;
   if (Math.abs(dx) >= 89) return null;
   return { x: w / 2 + Math.tan(dx * DEG) / tanH * w / 2, y: h / 2 - Math.tan(dy * DEG) / tanV * h / 2 };
-}
-
-function drawRifle(ctx, w, h, drop, time) {
-  const s = Math.min(w, h * 1.6) / 1000, bob = Math.sin(time * Math.PI * 0.5) * 3 * s;
-  ctx.save();
-  ctx.translate(0, drop + bob);
-  // Ghillie sleeve and glove (left), resting on the stock.
-  ctx.fillStyle = '#2c3320';
-  ctx.beginPath();
-  ctx.moveTo(w * 0.28, h); ctx.quadraticCurveTo(w * 0.42, h * 0.8, w * 0.6, h * 0.74);
-  ctx.lineTo(w * 0.66, h * 0.86); ctx.quadraticCurveTo(w * 0.5, h * 0.95, w * 0.44, h); ctx.closePath(); ctx.fill();
-  ctx.strokeStyle = 'rgba(80, 92, 48, .55)'; ctx.lineWidth = 3 * s;
-  for (let i = 0; i < 9; i++) { // frayed ghillie strands
-    const x = w * (0.33 + i * 0.035), y = h * (0.97 - i * 0.022);
-    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 18 * s, y - 26 * s); ctx.stroke();
-  }
-  // Barrel towards the target, receiver and rail.
-  const metal = ctx.createLinearGradient(0, h * 0.6, 0, h * 0.82);
-  metal.addColorStop(0, '#3a3d3c'); metal.addColorStop(1, '#121413');
-  ctx.fillStyle = metal;
-  ctx.beginPath();
-  ctx.moveTo(w * 0.53, h * 0.62); ctx.lineTo(w * 0.555, h * 0.6); ctx.lineTo(w * 0.8, h * 0.8); ctx.lineTo(w * 0.76, h * 0.84); ctx.closePath(); ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(w * 0.6, h * 0.66); ctx.lineTo(w * 0.7, h * 0.62); ctx.lineTo(w * 1.02, h * 0.86); ctx.lineTo(w * 1.02, h * 1.02); ctx.lineTo(w * 0.86, h * 1.02); ctx.closePath(); ctx.fill();
-  // Scope tube with objective bell and a large eyepiece in the corner.
-  const tube = ctx.createLinearGradient(w * 0.7, h * 0.5, w * 0.8, h * 0.7);
-  tube.addColorStop(0, '#4a4e4c'); tube.addColorStop(0.45, '#1d201f'); tube.addColorStop(1, '#090a0a');
-  ctx.fillStyle = tube;
-  ctx.beginPath();
-  ctx.moveTo(w * 0.62, h * 0.54); ctx.lineTo(w * 0.67, h * 0.5); ctx.lineTo(w * 1.0, h * 0.74); ctx.lineTo(w * 0.93, h * 0.86); ctx.closePath(); ctx.fill();
-  ctx.beginPath(); ctx.ellipse(w * 0.64, h * 0.53, 26 * s, 42 * s, 0.9, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#0b0c0c';
-  ctx.beginPath(); ctx.ellipse(w * 0.9, h * 0.82, 120 * s, 150 * s, 0.9, 0, Math.PI * 2); ctx.fill();
-  const lens = ctx.createRadialGradient(w * 0.89, h * 0.8, 10 * s, w * 0.9, h * 0.82, 105 * s);
-  lens.addColorStop(0, 'rgba(120, 150, 170, .5)'); lens.addColorStop(0.6, 'rgba(30, 40, 48, .9)'); lens.addColorStop(1, '#050606');
-  ctx.fillStyle = lens;
-  ctx.beginPath(); ctx.ellipse(w * 0.9, h * 0.82, 92 * s, 118 * s, 0.9, 0, Math.PI * 2); ctx.fill();
-  // Turret knobs.
-  ctx.fillStyle = '#202322';
-  ctx.fillRect(w * 0.76, h * 0.55, 34 * s, 40 * s);
-  ctx.restore();
 }
 
 function drawSpot(ctx, p, alpha, s) {
@@ -83,7 +42,7 @@ function drawReticle(ctx, cx, cy, ppm, radius, alpha) {
   ctx.fillRect(cx - post / 2, cy + bottom * ppm, post, radius);
   // Small crosses on the posts (like a range card reference).
   ctx.lineWidth = line;
-  for (const [x, y, dx, dy] of [[-12.5, 0, 0, 1], [12.5, 0, 0, 1], [0, -11, 1, 0]]) {
+  for (const [x, y, dx, dy] of [[-10.3, 0, 0, 1], [10.3, 0, 0, 1], [0, -9.9, 1, 0]]) {
     ctx.beginPath(); ctx.moveTo(cx + (x - dx * 0.8) * ppm, cy + (y - dy * 0.8) * ppm); ctx.lineTo(cx + (x + dx * 0.8) * ppm, cy + (y + dy * 0.8) * ppm); ctx.stroke();
   }
   // Fine crosshair: horizontal ±8 mil, vertical up 7.8 mil and down past the 1000 m mark.
@@ -135,7 +94,6 @@ export function drawSniperOverlay(ctx, quiz, frame, { x = 0, y = 0, width: w, he
     const target = quiz.sniper;
     const p = project(frame.camera, target.bearing, target.elevation, w, h);
     if (spot && p && p.x > 0 && p.x < w && p.y > 0 && p.y < h) drawSpot(ctx, p, 1 - smoothstep(0, 0.4, raise), Math.max(0.8, s * 1.4));
-    drawRifle(ctx, w, h, raise * h * 0.9, frame.time);
   }
   if (raise > 0) {
     const R = SCOPE_CIRCLE * Math.min(w, h), cx = w / 2, cy = h / 2;

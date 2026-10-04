@@ -9,7 +9,7 @@
 //
 // Only the starting heading is given. Range and height difference have to be
 // read from the terrain: locate yourself and the target on the contour map,
-// or range the 1.80 m target with the scope's mil stadia.
+// or range the prone enemy's 0.50 m shoulders with the scope's mil stadia.
 
 import { SeedManager, Random } from './rng.js';
 import { getDifficulty, applyTuning } from './difficulty.js';
@@ -24,11 +24,13 @@ export const SNIPER_DURATION = 15;
 export const SNIPER_TIMING = Object.freeze({ overview: 5, scope: 5.7, finish: 15 });
 export const SNIPER_EYE = 0.45;          // prone eye height (m)
 export const SNIPER_FOV = 55;            // unscoped horizontal field of view (°)
-export const TARGET_HEIGHT = 1.8;        // the enemy stands in a ghillie suit
-export const HEAD_HEIGHT = 1.65;         // aim point: the head (centre above the ground)
+export const TARGET_HEIGHT = 1.8;        // body scale (a 1.80 m man, lying prone)
+export const HEAD_HEIGHT = 0.3;          // aim point: the prone enemy's head centre above the ground
+export const SHOULDER_WIDTH = 0.5;       // across the ghillie shoulders, for mil ranging
+export const BODY_LENGTH = 1.7;          // head to boots along the ground
 export const HEAD_RADIUS = 0.12;         // a hold counts as a hit inside this radius
 /** Scope picture: its circle spans ±SCOPE_RADIUS_MIL; the circle radius is a fraction of the short side. */
-export const SCOPE_RADIUS_MIL = 16;
+export const SCOPE_RADIUS_MIL = 12;
 export const SCOPE_CIRCLE = 0.46;
 export const MARKS = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000];
 
@@ -140,10 +142,14 @@ const BANDS = {
 };
 export const sniperBand = difficulty => BANDS[difficulty] || BANDS.medium;
 
-function targetSight(model, camera, x, y) {
+/** A prone enemy: his head and rifle must be in clear view; his body lies on the slope behind them. */
+function targetSight(model, camera, x, y, bearing) {
   const z = surfaceElevation(model, x, y);
-  const visible = [0.35, 1.0, 1.65].every(h => surfaceLineOfSight(model, camera, { x, y, z: z + h }));
-  return { z, visible };
+  const visible = [0.2, HEAD_HEIGHT, 0.4].every(h => surfaceLineOfSight(model, camera, { x, y, z: z + h }));
+  const fx = x + Math.sin(bearing * DEG) * BODY_LENGTH, fy = y + Math.cos(bearing * DEG) * BODY_LENGTH;
+  // Positive pitch raises the boots (lying head-down a slope facing the observer).
+  const pitch = Math.atan2(surfaceElevation(model, fx, fy) - z, BODY_LENGTH) / DEG;
+  return { z, visible, pitch };
 }
 
 export function generateSniperQuiz({ seed, world = 'classic', difficulty = 'medium', variant = 0, tuning = null,
@@ -172,8 +178,9 @@ export function generateSniperQuiz({ seed, world = 'classic', difficulty = 'medi
         const horizontal = rng.range(...band.range);
         const x = camera.x + Math.sin(bearing * DEG) * horizontal, y = camera.y + Math.cos(bearing * DEG) * horizontal;
         if (!model.inside(x, y, 40) || model.getSlope(x, y) > 30) continue;
-        const sight = targetSight(model, camera, x, y);
-        if (!sight.visible) continue;
+        if (!model.inside(x + Math.sin(bearing * DEG) * 2, y + Math.cos(bearing * DEG) * 2, 30)) continue;
+        const sight = targetSight(model, camera, x, y, bearing);
+        if (!sight.visible || Math.abs(sight.pitch) > 22) continue;
         const rise = sight.z + HEAD_HEIGHT - camera.z;
         const angle = Math.atan2(rise, horizontal) / DEG;
         if (Math.abs(angle) > 22 || Math.abs(angle) < minAngle) continue;
@@ -194,7 +201,8 @@ export function generateSniperQuiz({ seed, world = 'classic', difficulty = 'medi
         const confidence = saturate(0.6 + 0.25 * Math.min(1, (Math.abs(second.miss) - Math.abs(best.miss)) / 2) + 0.15 * vp.quality.total);
         if (confidence < base.minConfidence) continue;
         log.push({ attempt, stage: 'question', try: tried, ok: true, confidence: +confidence.toFixed(3), issues: [] });
-        const target = { x, y, z: sight.z, height: TARGET_HEIGHT, heading: wrap360(bearing + 180), skin: 'sniper', aimHeight: HEAD_HEIGHT };
+        const target = { x, y, z: sight.z, height: TARGET_HEIGHT, heading: wrap360(bearing + 180), pitch: +sight.pitch.toFixed(2),
+          skin: 'sniper', pose: 'prone', aimHeight: HEAD_HEIGHT };
         const quiz = {
           version: 1, mode: 'sniper', seed, difficulty, variant, lowConfidence: false,
           terrain: terrainSummary(model, interval, terrainCheck), camera,
@@ -236,8 +244,8 @@ export function sniperExplanation(quiz) {
     data: { correctMark: s.correctMark, slantMark: s.slantMark } },
     { type: 'ballistic-hit', text: `Holding the head on the ${correct.label} mark, the simulated round lands ${fmt(Math.abs(correct.miss * 100), 0)} cm ${correct.miss >= 0 ? 'high' : 'low'}, inside the head (±${HEAD_RADIUS * 100} cm).`,
       data: { mark: correct.metres, missMetres: correct.miss, muzzleVelocity: s.rifle.muzzle, zeroMetres: s.rifle.zero } },
-    { type: 'ranging', text: `Ranging check: a 1.80 m target at ${Math.round(s.slant)} m is ${fmt(1800 / s.slant, 2)} mil tall in the scope (metres = 1800 / mil).`,
-      data: { targetHeightMetres: TARGET_HEIGHT, mils: +(1800 / s.slant).toFixed(3) } },
+    { type: 'ranging', text: `Ranging check: his ${SHOULDER_WIDTH.toFixed(2)} m shoulders at ${Math.round(s.slant)} m span ${fmt(SHOULDER_WIDTH * 1000 / s.slant, 2)} mil in the scope (metres = 500 / mil).`,
+      data: { shoulderWidthMetres: SHOULDER_WIDTH, mils: +(SHOULDER_WIDTH * 1000 / s.slant).toFixed(3) } },
   ];
   const alternatives = quiz.options.filter(o => !o.correct).map(o => ({
     label: o.label, difference: Math.abs(o.miss), plausibility: o.metres === s.slantMark ? 'This is the mark for the straight-line range.' : '',

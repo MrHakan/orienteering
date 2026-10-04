@@ -458,7 +458,7 @@ function show(quiz) {
   document.querySelector('.card').classList.toggle('sun-watch', usesSunWatch(quiz));
   document.querySelector('.about').hidden = usesSunWatch(quiz);
   $('prompt').textContent = quiz.mode === 'sniper'
-    ? `Which scope mark puts the round on the enemy sniper's head: ${quiz.options.map((o) => o.label).join(', ')}? Only your heading is known — find yourself and the target on the map, mind the height difference, or range his 1.80 m with the mil scale. Keys ${quiz.options.map((o) => String(o.metres / 100 % 10)).join('/')}.`
+    ? `Which scope mark puts the round on the enemy sniper's head: ${quiz.options.map((o) => o.label).join(', ')}? Only your heading is known — find yourself and the target on the map, mind the height difference, or range his 0.50 m shoulders with the mil scale. Keys ${quiz.options.map((o) => String(o.metres / 100 % 10)).join('/')}.`
     : usesSunWatch(quiz) ? grid ? `${friendGrid ? "Locate your friend's cell" : 'Find your cell'}: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size}.`
     : quiz.mode === 'friend' ? 'Where is your friend: A, B or C?' : 'You are at A, B or C. Which one?'
     : facing ? 'Which direction were you facing at the start?'
@@ -585,7 +585,8 @@ function renderScene(camera, playback = {}) {
     const frame = sniperFrame(state.quiz, state.sunTime, aspect);
     renderer.setPerson(state.quiz.sniper.target);
     renderer.setViewmodel(null);
-    renderer.render(frame.camera, { ...environmentOptions, time: state.sunTime, sunHeading: state.quiz.camera.heading });
+    renderer.render(frame.camera, { ...environmentOptions, time: state.sunTime, sunHeading: state.quiz.camera.heading,
+      rifle: { raise: frame.raise, time: state.sunTime } });
     state.sniperFrame = frame; camera = frame.camera;
   } else if (state.quiz.mode === 'trail') {
     const frame = trailFrame(state.quiz, state.trailTime, state.viewing || state.quiz.correctLabel, state.model);
@@ -938,7 +939,7 @@ function renderFacts() {
       ['Movement', q.trail.movement === 'classic' ? 'CS 1.6 style' : 'CS:GO style']] : []),
     ...(q.mode === 'trail' && q.grid ? [['Cells', `${q.options.length} · ${Math.round(q.grid.cellMetres)} m per side · finish at centre`]] : []),
     ...(q.mode === 'grid' ? [['Cells', `${q.options.length} · ${Math.round(q.grid.cellMetres)} m per side · observer at centre`]] : []),
-    ...(q.mode === 'sniper' ? [['Target', 'enemy sniper · 1.80 m · aim for the head'], ['Scope', 'BDC marks 200–1000 m · mil stadia 2/4/6/8 · zero 100 m'],
+    ...(q.mode === 'sniper' ? [['Target', 'enemy sniper · prone · shoulders 0.50 m · aim for the head'], ['Scope', 'BDC marks 200–1000 m · mil stadia 2/4/6/8 · zero 100 m'],
       ['Viewpoint', state.answered ? `YOU · ${Math.round(q.sniper.horizontal)} m to the target` : 'unmarked · only the heading is known']] : []),
     ...(q.mode === 'friend' ? [['Person', 'orange jacket · 1.80 m tall'], ['Find by', q.grid ? `${q.grid.size} × ${q.grid.size} grid · ${Math.round(q.grid.cellMetres)} m per side` : 'Point · A / B / C'], ['Viewpoint', q.friend.observerHidden && !state.answered ? 'unmarked · infer from terrain' : 'YOU · observer position'], ['Map area', `${Math.round(q.mapExtent.size)} m × ${Math.round(q.mapExtent.size)} m`]] : []),
     ['Field of view', `${q.camera.fov}° · eye ${q.camera.eyeHeight} m`],

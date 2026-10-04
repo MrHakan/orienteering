@@ -83,13 +83,15 @@ try {
     const ctx = c.canvas.getContext('2d'), S = c.layout.scene;
     const corner = ctx.getImageData(S.x + 4, S.y + 4, 1, 1).data.slice(0, 3);
     c.animated = true;
+    await c.drawFrameReady(2); const overview = c.canvas.toDataURL('image/png');
     const clip = await encodeCanvasVideo(c.canvas, t => c.drawFrameReady(t + 4.8), { duration: .5, fps: 10 });
     c.dispose();
-    return { png, corner: Array.from(corner), video: clip.blob.size };
+    return { png, overview, corner: Array.from(corner), video: clip.blob.size };
   }, { ...q, terrain: { ...q.terrain, heights: Array.from(q.terrain.heights) } });
   assert.deepEqual(exported.corner, [0, 0, 0], 'export PNG shows the scope');
   assert.ok(exported.video > 1000);
   if (out) await writeFile(join(out, 'sniper-export.png'), Buffer.from(exported.png.split(',')[1], 'base64'));
+  if (out) await writeFile(join(out, 'sniper-export-overview.png'), Buffer.from(exported.overview.split(',')[1], 'base64'));
   assert.deepEqual(errors, []);
   console.log('Sniper browser checks passed: overview spot, scope housing and reticle, timeline, number keys, ballistic reveal, YOU/ENEMY map and PNG/video exports.');
 } finally {

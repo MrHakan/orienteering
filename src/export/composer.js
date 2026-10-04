@@ -203,7 +203,8 @@ export class ExportComposer {
     this.renderer.render(camera, { weather: this.weather, environment: this.environment, environmentTime: t, time: frame ? frame.motion.t : t,
       personMotion: friendFrame.personMotion,
       solar: watchFrame?.solar, watch: watchFrame?.watch,
-      motion: frame ? { ...frame.motion, clockRunning: this.animated } : {}, sunHeading: q.mode === 'trail' ? q.camera.heading : camera.heading });
+      motion: frame ? { ...frame.motion, clockRunning: this.animated } : {}, sunHeading: q.mode === 'trail' ? q.camera.heading : camera.heading,
+      rifle: sniper ? { raise: sniper.raise, time: t } : null });
     ctx.drawImage(this.glCanvas, S.x, S.y, S.w, S.h);
     ctx.save();
     ctx.beginPath(); ctx.rect(S.x, S.y, S.w, S.h); ctx.clip();
@@ -287,7 +288,7 @@ export class ExportComposer {
   }
 
   /** PNG of a single frame. */
-  async toImage({ reveal = false, time = this.quiz.mode === 'trail' && this.quiz.grid ? this.quiz.trail.duration : this.quiz.mode === 'sniper' ? 9.4
+  async toImage({ reveal = false, time = this.quiz.mode === 'trail' && this.quiz.grid ? this.quiz.trail.duration : this.quiz.mode === 'sniper' ? 7.5
     : usesSunWatch(this.quiz) && this.quiz.mode === 'friend' ? 8 : 4 } = {}) {
     this.animated = false;
     await this.drawFrameReady(time, { reveal });

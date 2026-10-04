@@ -78,14 +78,14 @@ In Friend mode, **Friend character → Conquest** adds a slow-motion arrival usi
 
 ## Sniper mode
 
-**Sniper — which hold?** You lie prone (eye 0.45 m) facing a given heading; your position is not marked. For 5 seconds you observe the landscape with the rifle beside you and a red spot over an enemy sniper (it shows *where*, never how far). The rifle then rises and the last 10 seconds are through the scope: the hold settles, then drifts down and up the reticle with breathing and tremor, so the target passes over every mark. The sway is the same for every question and never hints at the answer.
+**Sniper — which hold?** You lie prone (eye 0.45 m) facing a given heading; your position is not marked. For 5 seconds you observe the landscape over your 3D rifle (lit, with scope, rail and bipod) and a red spot over an enemy sniper, who lies prone in a ghillie suit on the slope (it shows *where*, never how far). The rifle then rises and the last 10 seconds are through the scope: the hold settles, then drifts down and up the reticle with breathing and tremor, so the target passes over every mark. The sway is the same for every question and never hints at the answer.
 
 Question: which bullet-drop mark puts the round on the enemy's **head**? Options are consecutive 100 m marks (3 on Easy/Medium, 4 on Hard/Expert, 5 on Master, which always includes the straight-line-range trap when it differs). Keys 3–9 and 0 (1000 m) answer.
 
 - **Ballistics** (`src/engine/sniper.js`): 820 m/s, quadratic drag, 5 cm sight height, zeroed at 100 m. Each scope mark is the hold that hits at that range on flat ground, so the BDC marks spread out with range exactly as drawn. The answer is the mark whose simulated trajectory passes within the head (±12 cm); every other option misses it by at least 30 cm.
 - **Height difference**: gravity only acts across the horizontal distance (rifleman's rule), so up- and downhill shots use the horizontal range, not the straight-line range. Harder levels prefer larger slopes (≥ 2–6°).
-- **How to solve it**: find yourself and the target on the contour map from the heading and the terrain, then measure the map (horizontal) distance; or range the 1.80 m enemy with the mil stadia (metres = 1800 ÷ mils — that is the straight-line range, so correct it for the slope).
-- **Scope**: the circle spans ±16 mil; horizontal stadia are numbered 2/4/6/8 mil, vertical marks 2–10 (×100 m) with wind wings. The live view and exports share one sampler (`sniperFrame`), so the 15 s Reels video is exactly the 5 s overview + 10 s scope sequence. After answering, the map shows YOU, the ENEMY and the line of fire with its length, and the explanation lists each mark's impact.
+- **How to solve it**: find yourself and the target on the contour map from the heading and the terrain, then measure the map (horizontal) distance; or range the enemy's 0.50 m shoulders with the mil stadia (metres = 500 ÷ mils — that is the straight-line range, so correct it for the slope).
+- **Scope**: the circle spans ±12 mil; horizontal stadia are numbered 2/4/6/8 mil, vertical marks 2–10 (×100 m) with wind wings. The live view and exports share one sampler (`sniperFrame`), so the 15 s Reels video is exactly the 5 s overview + 10 s scope sequence. After answering, the map shows YOU, the ENEMY and the line of fire with its length, and the explanation lists each mark's impact.
 
 ## Bunny-hop trails
 

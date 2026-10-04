@@ -91,3 +91,28 @@ test('generate() dispatches sniper mode and keeps the world', async () => {
   assert.equal(q.difficulty, 'medium');
   assert.equal(q.terrain.world, 'karst');
 });
+
+test('the enemy lies prone along the slope and the first-person rifle is real geometry', async () => {
+  const { personVertices } = await import('../src/render/personMesh.js');
+  const { rifleGeometry, rifleModelMatrix } = await import('../src/render/rifleViewModel.js');
+  const extent = (v) => { const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
+    for (let i = 0; i < v.length; i += 9) for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], v[i + k]); hi[k] = Math.max(hi[k], v[i + k]); }
+    return { lo, hi }; };
+  const flat = extent(personVertices({ x: 0, y: 0, z: 0, height: 1.8, heading: 0, pitch: 0, skin: 'sniper', pose: 'prone' }));
+  assert.ok(flat.hi[1] < 0.55 && flat.lo[1] > -0.05, `prone height ${flat.hi[1].toFixed(2)} m`);
+  assert.ok(flat.hi[2] - flat.lo[2] > 2.4, 'body plus rifle stretch along the ground');
+  // Head-down slope: boots (behind, north for heading 180) rise with the pitch.
+  const sloped = extent(personVertices({ x: 0, y: 0, z: 0, height: 1.8, heading: 180, pitch: 15, skin: 'sniper', pose: 'prone' }));
+  assert.ok(sloped.hi[1] > flat.hi[1] + 0.05 && sloped.lo[1] < -0.1, 'boots up the slope, rifle and bipod down it');
+  const q = generateSniperQuiz({ seed: 'prone', difficulty: 'medium' });
+  assert.equal(q.sniper.target.pose, 'prone');
+  assert.ok(Math.abs(q.sniper.target.pitch) <= 22);
+  assert.equal(HEAD_HEIGHT, 0.3);
+  const rifle = rifleGeometry();
+  assert.equal(rifle.length % 10, 0);
+  assert.ok(rifle.length / 10 > 5000, 'detailed mesh');
+  assert.ok(rifle.every(Number.isFinite));
+  const m = rifleModelMatrix(1.6, 0, 0);
+  assert.ok(m[14] < -0.4 && m[12] > 0, 'lower right, in front of the eye');
+  assert.ok(rifleModelMatrix(1.6, 1, 0)[13] < m[13] - 0.5, 'lowered out of view as the scope comes up');
+});

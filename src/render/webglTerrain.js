@@ -3,6 +3,7 @@
 //
 // GL axes: X = east, Y = up, Z = -north.
 import { personVertices } from './personMesh.js';
+import { RifleViewModel } from './rifleViewModel.js';
 import { KnifeViewModel } from './knifeViewModel.js';
 import { FriendSprite } from './friendSprite.js';
 import { windGust, densityProfile } from './environment.js';
@@ -360,7 +361,7 @@ export class TerrainRenderer {
     if (person?.skin === 'conquest' && !this.friendSprite) this.friendSprite = new FriendSprite(this.gl, () => {
       if (this.lastFrame) this.render(this.lastFrame.camera, this.lastFrame.options);
     });
-    if (person && this.person && ['x', 'y', 'z', 'height', 'heading', 'skin'].every(k => person[k] === this.person[k])) return;
+    if (person && this.person && ['x', 'y', 'z', 'height', 'heading', 'pitch', 'pose', 'skin'].every(k => person[k] === this.person[k])) return;
     this.person = person;
     if (!person) { this.personCount = 0; return; }
     this.personPose = null;
@@ -513,7 +514,7 @@ export class TerrainRenderer {
   dispose() {
     this.disposed = true; this.lastFrame = null;
     this.surfaceTextures?.dispose(); this.plantTextures?.dispose();
-    this.viewmodel?.dispose(); this.friendSprite?.dispose(); this.watchViewmodel?.dispose();
+    this.viewmodel?.dispose(); this.friendSprite?.dispose(); this.watchViewmodel?.dispose(); this.rifleViewmodel?.dispose();
     this.gl.getExtension('WEBGL_lose_context')?.loseContext();
   }
 
@@ -597,7 +598,7 @@ export class TerrainRenderer {
    * environment: optional hd / foliage / nature flags; environmentTime in seconds.
    * Weather is purely visual: it never changes the terrain geometry.
    */
-  render(camera, { weather = {}, environment = {}, time = 0, environmentTime = time, motion = {}, personMotion = {}, sunHeading = camera.heading, solar = null, watch = null } = {}) {
+  render(camera, { weather = {}, environment = {}, time = 0, environmentTime = time, motion = {}, personMotion = {}, sunHeading = camera.heading, solar = null, watch = null, rifle = null } = {}) {
     if (!this.model) return;
     const textureMode = normaliseTextureMode(environment.texture);
     if (textureMode !== this.textureMode) {
@@ -733,6 +734,8 @@ export class TerrainRenderer {
       this.drawPerson(projection, view, eye, sun, horizon, fogDensity, camera);
     }
     this.drawWeather(weather, camera, environmentTime, gust);
+    // Sniper mode: the shooter's own rifle, nearest of all, over the weather.
+    if (rifle && rifle.raise < 1) { this.rifleViewmodel ||= new RifleViewModel(gl); this.rifleViewmodel.render(W, H, rifle, horizon); }
     if (watch && this.watchViewmodel) this.watchViewmodel.render(W, H, watch);
     if (this.viewmodelEnabled) this.viewmodel.render(W, H, time, motion);
   }

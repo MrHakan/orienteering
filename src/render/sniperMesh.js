@@ -1,12 +1,12 @@
-// Enemy sniper for sniper mode: a 1.80 m figure in a shaggy ghillie suit,
-// standing in a shooting stance with a scoped, suppressed rifle shouldered
-// and pointed back at the observer. Built from tapered cylinders, low-poly
-// spheres and grass-like ghillie strands; deterministic (no randomness at
-// draw time) and metre-scale, so its apparent size is exact for mil ranging.
+// Enemy sniper for sniper mode: a 1.80 m man in a shaggy ghillie suit lying
+// prone on his elbows behind a scoped, suppressed rifle on its bipod, aimed
+// back at the observer. The body follows the slope (person.pitch). Built from
+// tapered cylinders, low-poly ellipsoids and grass-like ghillie strands;
+// deterministic and metre-scale, so his apparent size is exact for ranging.
 //
-// Local frame: x right, y up, z forward (the person's heading).
+// Local frame: x right, y up, z forward (the person's heading). The origin is
+// on the ground under the head; the head centre is 0.30 m above it.
 
-// A little darker than dry grass so the head still reads through the scope at 1 km.
 const GHILLIE = [[0.19, 0.23, 0.10], [0.25, 0.26, 0.13], [0.14, 0.18, 0.07], [0.27, 0.23, 0.14], [0.21, 0.19, 0.10], [0.12, 0.15, 0.06]];
 const SUIT = [0.15, 0.17, 0.09], BOOT = [0.09, 0.08, 0.06], GLOVE = [0.14, 0.13, 0.10];
 const METAL = [0.07, 0.075, 0.07], STOCK = [0.15, 0.15, 0.12], FACE = [0.19, 0.18, 0.12], LENS = [0.05, 0.08, 0.10];
@@ -27,7 +27,11 @@ function stream(seed) {
 export function sniperVertices(person) {
   const out = [], scale = person.height / 1.8;
   const az = person.heading * Math.PI / 180, c = Math.cos(az), s = Math.sin(az);
-  const vertex = ([x, y, z], [nx, ny, nz], color) => {
+  // Lie along the slope: positive pitch raises the boots (behind, -z).
+  const pitch = (person.pitch || 0) * Math.PI / 180, pc = Math.cos(pitch), ps = Math.sin(pitch);
+  const tilt = ([x, y, z]) => [x, y * pc - z * ps, y * ps + z * pc];
+  const vertex = (p, n, color) => {
+    const [x, y, z] = tilt(p), [nx, ny, nz] = tilt(n);
     out.push(person.x + (x * c + z * s) * scale, person.z + y * scale, -person.y + (x * s - z * c) * scale,
       nx * c + nz * s, ny, nx * s - nz * c, ...color);
   };
@@ -62,66 +66,62 @@ export function sniperVertices(person) {
   };
 
   // ---------------------------------------------------------------- pose
-  // Rifleman's stance: left foot forward, body bladed, rifle shouldered at the right.
-  const pelvis = [0, 0.96, 0], chest = [0.01, 1.36, 0.04];
-  const hipL = [-0.1, 0.94, 0.03], hipR = [0.1, 0.94, -0.03];
-  const kneeL = [-0.13, 0.5, 0.14], kneeR = [0.14, 0.5, -0.1];
-  const ankleL = [-0.15, 0.09, 0.2], ankleR = [0.17, 0.09, -0.2];
-  const shoulderL = [-0.18, 1.41, 0.1], shoulderR = [0.17, 1.42, -0.05];
-  const neck = [0.02, 1.5, 0.05], head = [0.05, 1.63, 0.09];
-  const elbowR = [0.3, 1.28, 0.04], gripR = [0.13, 1.39, 0.16];
-  const elbowL = [-0.15, 1.27, 0.33], forendL = [0.1, 1.41, 0.5];
+  // Prone on the elbows, cheek on the stock, legs spread for stability.
+  const head = [0, 0.3, 0], neck = [0, 0.26, -0.1];
+  const shoulderL = [-0.21, 0.22, -0.2], shoulderR = [0.2, 0.24, -0.22];
+  const chest = [0, 0.18, -0.27], pelvis = [0.02, 0.15, -0.78];
+  const hipL = [-0.1, 0.12, -0.8], hipR = [0.12, 0.12, -0.8];
+  const kneeL = [-0.24, 0.08, -1.2], kneeR = [0.24, 0.09, -1.17];
+  const ankleL = [-0.32, 0.08, -1.57], ankleR = [0.33, 0.09, -1.54];
+  const elbowL = [-0.24, 0.06, 0.06], elbowR = [0.28, 0.06, -0.04];
+  const handL = [0.06, 0.13, -0.08], gripR = [0.14, 0.18, -0.05];
 
-  // Legs and boots.
+  limb(chest, pelvis, 0.19, 0.17, SUIT, 9);
+  blob([0, 0.27, -0.42], [0.25, 0.1, 0.32], GHILLIE[4], 4, 9);      // ghillie cape over the back
+  limb(neck, chest, 0.07, 0.11, SUIT);
+  blob(head, [0.1, 0.105, 0.11], FACE);
+  blob([0, 0.34, -0.04], [0.135, 0.11, 0.14], GHILLIE[2], 4, 9);     // hood
   limb(hipL, kneeL, 0.1, 0.075, SUIT); limb(kneeL, ankleL, 0.075, 0.055, SUIT);
   limb(hipR, kneeR, 0.1, 0.075, SUIT); limb(kneeR, ankleR, 0.075, 0.055, SUIT);
-  for (const a of [ankleL, ankleR]) blob([a[0], 0.05, a[2] + 0.05], [0.055, 0.05, 0.12], BOOT, 3, 7);
-  // Torso, chest rig and hood.
-  limb(pelvis, chest, 0.18, 0.2, SUIT, 9);
-  blob([0, 1.4, -0.04], [0.23, 0.12, 0.17], GHILLIE[4], 4, 9); // ghillie cape over the shoulders
-  blob([0.01, 1.3, 0.12], [0.15, 0.12, 0.06], [0.19, 0.21, 0.1], 3, 8);
-  limb(chest, neck, 0.1, 0.06, SUIT);
-  blob(head, [0.1, 0.115, 0.105], FACE);
-  blob([head[0] - 0.01, head[1] + 0.03, head[2] - 0.03], [0.13, 0.12, 0.13], GHILLIE[2], 4, 9); // hood
-  // Arms on the rifle.
-  limb(shoulderR, elbowR, 0.06, 0.05, SUIT); limb(elbowR, gripR, 0.05, 0.04, SUIT);
-  limb(shoulderL, elbowL, 0.06, 0.05, SUIT); limb(elbowL, forendL, 0.05, 0.04, SUIT);
-  blob(gripR, [0.045, 0.04, 0.05], GLOVE, 3, 7); blob(forendL, [0.045, 0.04, 0.055], GLOVE, 3, 7);
+  for (const a of [ankleL, ankleR]) blob([a[0], 0.09, a[2] - 0.04], [0.055, 0.11, 0.05], BOOT, 3, 7); // toes dug in
+  limb(shoulderL, elbowL, 0.065, 0.055, SUIT); limb(elbowL, handL, 0.05, 0.04, SUIT);
+  limb(shoulderR, elbowR, 0.065, 0.055, SUIT); limb(elbowR, gripR, 0.05, 0.04, SUIT);
+  blob(handL, [0.045, 0.04, 0.05], GLOVE, 3, 7); blob(gripR, [0.045, 0.045, 0.05], GLOVE, 3, 7);
 
   // ---------------------------------------------------------------- rifle
-  const y = 1.45, x = 0.12;
-  limb([x, y - 0.05, -0.14], [x, y - 0.01, 0.12], 0.035, 0.03, STOCK, 6);      // stock
-  limb([x, y - 0.1, -0.16], [x, y - 0.02, -0.12], 0.02, 0.03, STOCK, 6);       // butt pad
-  limb([x, y, 0.1], [x, y, 0.46], 0.032, 0.03, METAL, 6);                      // receiver + forend
-  limb([x, y + 0.005, 0.46], [x, y + 0.005, 0.86], 0.011, 0.01, METAL, 6);     // barrel
-  limb([x, y + 0.005, 0.84], [x, y + 0.005, 1.05], 0.022, 0.022, METAL, 8);    // suppressor
-  limb([x, y + 0.075, 0.08], [x, y + 0.075, 0.4], 0.02, 0.02, METAL, 8);       // scope tube
-  limb([x, y + 0.075, 0.4], [x, y + 0.08, 0.5], 0.022, 0.032, METAL, 8);       // objective bell
-  limb([x, y + 0.08, 0.5], [x, y + 0.08, 0.505], 0.028, 0.028, LENS, 8);
-  limb([x, y + 0.075, 0.03], [x, y + 0.075, 0.09], 0.026, 0.02, METAL, 8);     // eyepiece
-  limb([x, y + 0.04, 0.22], [x, y + 0.115, 0.22], 0.012, 0.012, METAL, 6);     // turret
-  for (const k of [-1, 1]) limb([x, y - 0.03, 0.44], [x + k * 0.03, y - 0.06, 0.62], 0.006, 0.006, METAL, 4); // folded bipod
+  const x = 0.1, y = 0.2;
+  limb([x + 0.02, y - 0.03, -0.24], [x, y, 0.02], 0.035, 0.03, STOCK, 6);       // stock in the shoulder
+  limb([x, y, 0.02], [x, y + 0.005, 0.38], 0.032, 0.03, METAL, 6);              // receiver + forend
+  limb([x, y + 0.01, 0.38], [x, y + 0.01, 0.92], 0.011, 0.01, METAL, 6);        // barrel
+  limb([x, y + 0.01, 0.9], [x, y + 0.01, 1.12], 0.022, 0.022, METAL, 8);        // suppressor
+  limb([x, y + 0.075, -0.04], [x, y + 0.075, 0.3], 0.02, 0.02, METAL, 8);       // scope tube
+  limb([x, y + 0.075, 0.3], [x, y + 0.08, 0.4], 0.022, 0.032, METAL, 8);        // objective bell
+  limb([x, y + 0.08, 0.4], [x, y + 0.08, 0.405], 0.028, 0.028, LENS, 8);
+  limb([x, y + 0.075, -0.1], [x, y + 0.075, -0.04], 0.026, 0.02, METAL, 8);     // eyepiece at his eye
+  limb([x, y + 0.04, 0.12], [x, y + 0.115, 0.12], 0.012, 0.012, METAL, 6);      // turret
+  for (const k of [-1, 1]) limb([x, y - 0.02, 0.5], [x + k * 0.07, 0.0, 0.58], 0.007, 0.006, METAL, 4); // deployed bipod
 
   // -------------------------------------------------------------- ghillie
-  // Grass-like strands hanging from the shoulders, back, hood, arms and thighs
-  // break up the human outline the way a real ghillie suit does.
+  // Strands splay off the back, hood and legs and droop to the ground, so the
+  // outline reads as a grassy mound rather than a person.
   const rnd = stream(0x9e3779b1);
   const strands = [
-    [pelvis, chest, 0.19, 150], [[0, 1.36, -0.04], [0, 1.45, -0.04], 0.21, 60], [chest, neck, 0.11, 18],
-    [head, add(head, [0, 0.1, -0.04]), 0.13, 60],
-    [shoulderL, elbowL, 0.07, 26], [shoulderR, elbowR, 0.07, 26], [elbowL, forendL, 0.055, 12], [elbowR, gripR, 0.055, 12],
-    [hipL, kneeL, 0.1, 40], [hipR, kneeR, 0.1, 40], [kneeL, ankleL, 0.075, 22], [kneeR, ankleR, 0.075, 22],
+    [chest, pelvis, 0.19, 170], [[0, 0.28, -0.2], [0, 0.28, -0.62], 0.17, 70], [neck, chest, 0.1, 16],
+    [[0, 0.33, -0.02], [0, 0.36, -0.1], 0.14, 60],
+    [shoulderL, elbowL, 0.07, 22], [shoulderR, elbowR, 0.07, 22],
+    [hipL, kneeL, 0.1, 40], [hipR, kneeR, 0.1, 40], [kneeL, ankleL, 0.075, 24], [kneeR, ankleR, 0.075, 24],
   ];
   for (const [a, b, radius, count] of strands) {
     const axis = norm(sub(b, a)), helper = Math.abs(axis[1]) < 0.9 ? [0, 1, 0] : [1, 0, 0];
     const u = norm(cross(axis, helper)), v = cross(axis, u);
     for (let i = 0; i < count; i++) {
       const t = rnd(), ang = rnd() * Math.PI * 2, out0 = add(mul(u, Math.cos(ang)), mul(v, Math.sin(ang)));
+      if (out0[1] < -0.35) continue; // nothing grows into the ground
       const root = add(lerp3(a, b, t), mul(out0, radius * (0.85 + 0.2 * rnd())));
-      const len = 0.08 + 0.16 * rnd(), width = 0.025 + 0.035 * rnd();
-      // Strands splay outwards and droop under gravity.
-      const dir = norm(add(mul(out0, 0.8), [0, -0.9 + 0.5 * rnd(), 0]));
+      const width = 0.025 + 0.035 * rnd(), len = (0.08 + 0.16 * rnd()) * (out0[1] > 0.5 ? 0.6 : 1);
+      const dir = norm(add(mul(out0, 0.55), [0, -0.85 + 0.5 * rnd(), 0])); // lying flat, drooping
       const tip = add(root, mul(dir, len)), side = mul(norm(cross(dir, out0)), width / 2);
+      if (tip[1] < 0.005) tip[1] = 0.005;
       const color = GHILLIE[Math.floor(rnd() * GHILLIE.length)];
       tri(add(root, side), sub(root, side), tip, color);
       if (rnd() < 0.5) tri(root, add(tip, mul(side, 1.4)), sub(tip, mul(side, -0.2)), color);
@@ -129,7 +129,7 @@ export function sniperVertices(person) {
   }
   // Burlap wrap on the rifle so it does not read as a clean black line.
   for (let i = 0; i < 10; i++) {
-    const z = 0.15 + i * 0.07, r = rnd();
+    const z = 0.05 + i * 0.07, r = rnd();
     const root = [x + (r - 0.5) * 0.04, y + 0.03, z], tip = add(root, [(rnd() - 0.5) * 0.08, -0.07 - 0.05 * rnd(), 0.02]);
     tri(add(root, [0, 0, -0.015]), add(root, [0, 0, 0.015]), tip, GHILLIE[i % GHILLIE.length]);
   }
