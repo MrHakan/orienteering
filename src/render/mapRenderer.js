@@ -23,7 +23,7 @@ const COLORS = {
  * you?", or the single (unlabelled) observer point in "Which way?".
  */
 export function quizMarkers(quiz) {
-  if (quiz.grid) return [];
+  if (quiz.grid || quiz.mode === 'sniper') return [];
   if (quiz.mode === 'facing') return [{ label: '', x: quiz.point.x, y: quiz.point.y, correct: true }];
   return quiz.options;
 }
@@ -265,7 +265,27 @@ export class MapRenderer {
     if (this.data.grid) { this.drawGridLabels(); this.drawGridTarget(); }
     else if (this.data.trails) { if (!staticOnly) this.drawTrailLabels(); }
     else this.drawMarkers(); // last, so nothing ever hides an answer option
+    if (this.reveal && this.data.target) this.drawTarget();
     if (this.currentObserver()) this.drawObserver();
+  }
+
+  /** Sniper answer: the enemy and the line of fire, shown only after answering. */
+  drawTarget() {
+    const { ctx } = this, t = this.data.target, o = this.reveal.camera;
+    const [x, y] = this.toCanvas(t.x, t.y);
+    if (o) {
+      const [ox, oy] = this.toCanvas(o.x, o.y);
+      ctx.strokeStyle = 'rgba(232, 70, 60, .85)'; ctx.lineWidth = 1.6; ctx.setLineDash([6, 4]);
+      ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(x, y); ctx.stroke(); ctx.setLineDash([]);
+      const metres = Math.round(Math.hypot(t.x - o.x, t.y - o.y));
+      ctx.font = '800 11px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#ffb4ad'; ctx.strokeStyle = COLORS.bg; ctx.lineWidth = 3;
+      ctx.strokeText(`${metres} m`, (ox + x) / 2, (oy + y) / 2 - 9); ctx.fillText(`${metres} m`, (ox + x) / 2, (oy + y) / 2 - 9);
+    }
+    ctx.fillStyle = '#e8463c'; ctx.strokeStyle = COLORS.bg; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x, y - 8); ctx.lineTo(x + 7, y); ctx.lineTo(x, y + 8); ctx.lineTo(x - 7, y); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.font = '800 11px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#ffb4ad'; ctx.lineWidth = 3;
+    ctx.strokeText('ENEMY', x, y + 17); ctx.fillText('ENEMY', x, y + 17);
   }
 
   gridExtent() {

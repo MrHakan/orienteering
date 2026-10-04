@@ -1,6 +1,9 @@
+import { sniperVertices } from './sniperMesh.js';
+
 // A metre-scale low-poly walker: boots, separate legs, orange jacket, arms,
 // neck, head and cap. No screen-space sizing or always-visible billboard.
 export function personVertices(person, { wave = 0, time = 0 } = {}) {
+  if (person.skin === 'sniper') return sniperVertices(person);
   const out = [], scale = person.height / 1.8;
   wave = Number.isFinite(wave) ? Math.max(0, Math.min(1, wave)) : 0;
   time = Number.isFinite(time) ? time : 0;

@@ -104,6 +104,7 @@ body {
   width: 58px; height: 58px; border-radius: 50%; border: 2px solid #e9e4d8; background: transparent; color: #e9e4d8;
   font: 800 20px system-ui, sans-serif; cursor: pointer; transition: transform 0.08s, background 0.15s;
 }
+.answer.hold { width: auto; min-width: 76px; padding: 0 14px; border-radius: 24px; white-space: nowrap; }
 .answer:hover:not(:disabled) { background: #26313b; transform: translateY(-1px); }
 .answer.correct { border-color: var(--good); color: var(--good); }
 .answer.wrong { border-color: var(--bad); color: var(--bad); }

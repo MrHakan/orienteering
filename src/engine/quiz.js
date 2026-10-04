@@ -41,6 +41,10 @@ export async function generate(opts) {
 }
 
 async function generateMode(opts) {
+  if (opts.mode === 'sniper') {
+    const { generateSniperQuiz } = await import('./sniper.js');
+    return generateSniperQuiz({ ...opts, difficulty: opts.difficulty === 'sun-watch' ? 'medium' : opts.difficulty });
+  }
   if (opts.difficulty === 'sun-watch') {
     if (!supportsSunWatch(opts.mode || 'where-am-i')) opts = { ...opts, difficulty: 'medium' };
     else if (opts.mode !== 'grid') {

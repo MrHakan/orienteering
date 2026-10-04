@@ -16,6 +16,8 @@ import { TRAIL_COLORS, normaliseTrailAnswer } from '../engine/trailQuiz.js';
 import { KNIVES, normaliseAppearance } from '../render/knifeClips.js';
 import { TrailPlayback } from './trailPlayback.js';
 import { usesSunWatch, supportsSunWatch, sunWatchFrame, SUN_WATCH_DURATION } from '../engine/sunWatch.js';
+import { sniperFrame, SNIPER_DURATION, SNIPER_TIMING } from '../engine/sniper.js';
+import { drawSniperOverlay } from '../render/sniperOverlay.js';
 import { TerrainRenderer } from '../render/webglTerrain.js';
 import { CONDITIONS, WINDS, DENSITIES, normaliseEnvironment, weatherParams, environmentAnimated } from '../render/environment.js';
 import { TEXTURE_MODES, terrainTexture } from '../render/terrainTextures.js';
@@ -90,8 +92,10 @@ const trailPlayer = new TrailPlayback({
     $('trail-scrub').value = String(time); $('trail-scrub').max = String(duration);
   },
 });
+/** Fixed 15-second sequences (sun & watch, sniper) share one player and timeline. */
+const usesClip = (q) => usesSunWatch(q) || q?.mode === 'sniper';
 const sunPlayer = new TrailPlayback({ duration: SUN_WATCH_DURATION,
-  draw: (t) => { if (usesSunWatch(state.quiz) && !state.loading) { state.sunTime = t; renderScene(currentCamera()); } },
+  draw: (t) => { if (usesClip(state.quiz) && !state.loading) { state.sunTime = t; renderScene(currentCamera()); } },
   onState: ({ time, playing, duration }) => {
     state.sunTime = time;
     $('direction-play').textContent = playing ? 'Pause' : time >= duration ? 'Replay' : 'Play';
@@ -102,11 +106,11 @@ const sunPlayer = new TrailPlayback({ duration: SUN_WATCH_DURATION,
   },
 });
 $('direction-play').addEventListener('click', () => {
-  if (!usesSunWatch(state.quiz) || state.loading) return;
+  if (!usesClip(state.quiz) || state.loading) return;
   if (sunPlayer.playing) sunPlayer.pause(); else sunPlayer.play();
 });
-$('direction-replay').addEventListener('click', () => { if (usesSunWatch(state.quiz) && !state.loading) sunPlayer.replay(); });
-$('direction-scrub').addEventListener('input', () => { if (usesSunWatch(state.quiz) && !state.loading) sunPlayer.seek(Number($('direction-scrub').value)); });
+$('direction-replay').addEventListener('click', () => { if (usesClip(state.quiz) && !state.loading) sunPlayer.replay(); });
+$('direction-scrub').addEventListener('input', () => { if (usesClip(state.quiz) && !state.loading) sunPlayer.seek(Number($('direction-scrub').value)); });
 $('trail-play').addEventListener('click', () => {
   if (state.loading || state.quiz?.mode !== 'trail') return;
   if (trailPlayer.playing) trailPlayer.pause(); else trailPlayer.play();
@@ -115,7 +119,7 @@ $('trail-replay').addEventListener('click', () => { if (!state.loading && state.
 $('trail-inspect').addEventListener('click', () => { if (!state.loading && state.quiz?.mode === 'trail') trailPlayer.inspect(); });
 $('trail-scrub').addEventListener('input', () => { if (!state.loading && state.quiz?.mode === 'trail') trailPlayer.seek(Number($('trail-scrub').value)); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && state.quiz?.mode === 'trail') trailPlayer.pause(); });
-document.addEventListener('visibilitychange', () => { if (document.hidden && usesSunWatch(state.quiz)) sunPlayer.pause(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && usesClip(state.quiz)) sunPlayer.pause(); });
 document.addEventListener('visibilitychange', () => { if (document.hidden) stopFriendWave(); else scheduleFriendWave(); });
 
 function stopFriendWave() {
@@ -185,7 +189,7 @@ for (const key of ['weather', 'wind', 'texture', 'hd', 'foliage', 'nature', 'fol
 });
 reducedMotion.addEventListener('change', () => {
   stopFriendWave();
-  if (reducedMotion.matches && usesSunWatch(state.quiz)) sunPlayer.pause();
+  if (reducedMotion.matches && usesClip(state.quiz)) sunPlayer.pause();
   if (state.quiz && !state.loading) renderScene(currentCamera());
   scheduleFriendWave();
 });
@@ -383,6 +387,7 @@ function updateHash() {
     if (q.friend.challenge !== 'standard') parts.push(`fc=${q.friend.challenge}`);
     if (q.headingChoice !== 'auto') parts.push(`h=${q.headingChoice}`);
   }
+  else if (q.mode === 'sniper') parts.push('m=sniper');
   else if (q.mode === 'lookalike') {
     parts.push('m=lookalike');
     if (q.directionChoice !== 'auto') parts.push(`dir=${q.directionChoice}`);
@@ -402,6 +407,7 @@ function syncControls() {
   const friendGrid = $('mode').value === 'friend' && $('friend-answer').value === 'grid';
   const trailGrid = $('mode').value === 'trail' && $('trail-answer').value === 'grid';
   $('difficulty').querySelector('[value="sun-watch"]').disabled = !supportsSunWatch($('mode').value);
+  if ($('difficulty').value === 'sun-watch' && !supportsSunWatch($('mode').value)) $('difficulty').value = 'medium';
   const watch = $('difficulty').value === 'sun-watch';
   $('friend-answer-field').hidden = $('mode').value !== 'friend';
   $('friend-challenge-field').hidden = $('mode').value !== 'friend';
@@ -409,9 +415,10 @@ function syncControls() {
   $('trail-answer-field').hidden = $('mode').value !== 'trail';
   $('grid-size-field').hidden = !(grid || friendGrid || trailGrid);
   $('grid-challenge-field').hidden = !grid;
-  $('heading-field').hidden = watch || facing || lookalike || $('mode').value === 'trail' || (grid && $('grid-challenge').value === 'lost-compass');
+  $('heading-field').hidden = watch || facing || lookalike || ['trail', 'sniper'].includes($('mode').value) || (grid && $('grid-challenge').value === 'lost-compass');
   $('direction-field').hidden = watch || !lookalike;
-  $('scramble').hidden = facing || grid || friendGrid || trailGrid;
+  const sniper = $('mode').value === 'sniper';
+  $('scramble').hidden = facing || grid || friendGrid || trailGrid || sniper;
   if (typeof dev !== 'undefined') renderDevPanel();
 }
 
@@ -427,7 +434,7 @@ function show(quiz) {
   state.friendCinematicPlaying = !usesSunWatch(quiz) && quiz.mode === 'friend' && quiz.friend.skin === 'conquest';
   state.trailTime = 0; trailPlayer.reset(quiz.trail?.duration || 12);
   state.sunTime = 0; sunPlayer.reset(SUN_WATCH_DURATION);
-  $('direction-tools').hidden = !usesSunWatch(quiz);
+  $('direction-tools').hidden = !usesClip(quiz);
   $('trail-tools').hidden = quiz.mode !== 'trail';
   $('trail-legend').hidden = quiz.mode !== 'trail' || usesGrid(quiz);
   $('friend-tools').hidden = quiz.mode !== 'friend';
@@ -443,14 +450,16 @@ function show(quiz) {
   const facing = quiz.mode === 'facing';
   const lookalike = quiz.mode === 'lookalike';
   const grid = usesGrid(quiz), friendGrid = quiz.mode === 'friend' && grid;
-  $('quiz-title').textContent = quiz.mode === 'trail' ? grid ? 'WHERE DID YOU FINISH?' : 'WHICH TRAIL DID YOU FOLLOW?' : quiz.mode === 'friend' ? 'WHERE IS YOUR FRIEND?' : facing ? 'WHICH WAY ARE YOU FACING?' : lookalike ? 'LOOK-ALIKES' : grid ? `${quiz.grid.size} × ${quiz.grid.size} GRID` : 'WHERE ARE YOU?';
-  $('quiz-title').classList.toggle('long', facing || ['friend', 'trail'].includes(quiz.mode));
-  $('facing-text').textContent = quiz.mode === 'trail' ? grid ? 'BUNNY HOP · FIND YOUR FINISH CELL' : 'BUNNY HOP · READ THE MOVING TERRAIN' : facing ? 'YOU ARE AT THE MARKED POINT' : headingHidden(quiz) ? 'LOST COMPASS · FIND YOUR CELL' : quiz.heading.text;
-  $('facing-arrow').textContent = quiz.mode === 'trail' || headingHidden(quiz) || quiz.heading.mode === 'exact' ? '' : quiz.heading.arrow;
+  $('quiz-title').textContent = quiz.mode === 'sniper' ? 'SNIPER · WHICH HOLD?' : quiz.mode === 'trail' ? grid ? 'WHERE DID YOU FINISH?' : 'WHICH TRAIL DID YOU FOLLOW?' : quiz.mode === 'friend' ? 'WHERE IS YOUR FRIEND?' : facing ? 'WHICH WAY ARE YOU FACING?' : lookalike ? 'LOOK-ALIKES' : grid ? `${quiz.grid.size} × ${quiz.grid.size} GRID` : 'WHERE ARE YOU?';
+  $('quiz-title').classList.toggle('long', facing || ['friend', 'trail', 'sniper'].includes(quiz.mode));
+  $('facing-text').textContent = quiz.mode === 'sniper' ? `PRONE · ${quiz.heading.text} · POSITION UNKNOWN` : quiz.mode === 'trail' ? grid ? 'BUNNY HOP · FIND YOUR FINISH CELL' : 'BUNNY HOP · READ THE MOVING TERRAIN' : facing ? 'YOU ARE AT THE MARKED POINT' : headingHidden(quiz) ? 'LOST COMPASS · FIND YOUR CELL' : quiz.heading.text;
+  $('facing-arrow').textContent = quiz.mode === 'trail' || quiz.mode === 'sniper' || headingHidden(quiz) || quiz.heading.mode === 'exact' ? '' : quiz.heading.arrow;
   $('facing-text').closest('.facing').hidden = usesSunWatch(quiz);
   document.querySelector('.card').classList.toggle('sun-watch', usesSunWatch(quiz));
   document.querySelector('.about').hidden = usesSunWatch(quiz);
-  $('prompt').textContent = usesSunWatch(quiz) ? grid ? `${friendGrid ? "Locate your friend's cell" : 'Find your cell'}: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size}.`
+  $('prompt').textContent = quiz.mode === 'sniper'
+    ? `Which scope mark puts the round on the enemy sniper's head: ${quiz.options.map((o) => o.label).join(', ')}? Only your heading is known — find yourself and the target on the map, mind the height difference, or range his 1.80 m with the mil scale. Keys ${quiz.options.map((o) => String(o.metres / 100 % 10)).join('/')}.`
+    : usesSunWatch(quiz) ? grid ? `${friendGrid ? "Locate your friend's cell" : 'Find your cell'}: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size}.`
     : quiz.mode === 'friend' ? 'Where is your friend: A, B or C?' : 'You are at A, B or C. Which one?'
     : facing ? 'Which direction were you facing at the start?'
     : lookalike ? 'A, B and C have similar views in this direction. Match the ridge shapes and foreground to find your point.'
@@ -482,7 +491,8 @@ function show(quiz) {
     landmarks: quiz.landmarks,
     grid: grid ? { ...quiz.grid, correctLabel: quiz.correctLabel } : null,
     extent: quiz.mapExtent || null, trails: quiz.mode === 'trail', trailDuration: quiz.trail?.duration,
-    observer: friendObserver(quiz), friendMode: quiz.mode === 'friend',
+    observer: friendObserver(quiz), friendMode: quiz.mode === 'friend' || quiz.mode === 'sniper',
+    target: quiz.mode === 'sniper' ? quiz.sniper.target : null,
   });
   map.setOverlays({ ...state.settings, landforms: usesSunWatch(quiz) ? false : state.settings.landforms });
 
@@ -492,6 +502,7 @@ function show(quiz) {
   setAnswersEnabled(true);
   if (!usesSunWatch(quiz) && quiz.mode === 'friend' && quiz.friend.skin === 'conquest') startFriendArrival();
   if (quiz.mode === 'trail' && renderer && !window.matchMedia('(prefers-reduced-motion: reduce)').matches && !document.hidden) trailPlayer.play();
+  if (quiz.mode === 'sniper' && renderer && !reducedMotion.matches && !document.hidden && !$('export-dialog').open) sunPlayer.play();
   if (usesSunWatch(quiz) && renderer) renderer.prepareWatch().then(() => {
     if (state.quiz !== quiz || state.loading) return;
     if (!state.answered && !reducedMotion.matches && !document.hidden && !$('export-dialog').open) sunPlayer.play();
@@ -544,6 +555,7 @@ function renderAnswerButtons() {
     b.type = 'button';
     b.textContent = o.label;
     b.dataset.label = o.label;
+    if (state.quiz.mode === 'sniper') { b.classList.add('hold'); b.setAttribute('aria-label', `${o.label} scope mark`); }
     if (state.quiz.mode === 'trail') {
       b.classList.add('trail-choice'); b.style.setProperty('--trail-color', TRAIL_COLORS[o.label]);
       b.setAttribute('aria-label', `${o.label} — ${{A:'red', B:'green', C:'cyan'}[o.label]} trail`);
@@ -568,7 +580,14 @@ function renderScene(camera, playback = {}) {
     renderer.setPerson(friendPerson);
     if (!usesSunWatch(state.quiz) && state.friendZoom && !state.friendCinematicPlaying) camera = { ...camera, fov: 2 * Math.atan(Math.tan(camera.fov * Math.PI / 360) / 3) * 180 / Math.PI };
   }
-  if (state.quiz.mode === 'trail') {
+  if (state.quiz.mode === 'sniper') {
+    const canvas = $('scene'), aspect = (canvas.clientWidth || 16) / (canvas.clientHeight || 10);
+    const frame = sniperFrame(state.quiz, state.sunTime, aspect);
+    renderer.setPerson(state.quiz.sniper.target);
+    renderer.setViewmodel(null);
+    renderer.render(frame.camera, { ...environmentOptions, time: state.sunTime, sunHeading: state.quiz.camera.heading });
+    state.sniperFrame = frame; camera = frame.camera;
+  } else if (state.quiz.mode === 'trail') {
     const frame = trailFrame(state.quiz, state.trailTime, state.viewing || state.quiz.correctLabel, state.model);
     camera = frame.camera;
     renderer.setViewmodel(state.appearance);
@@ -606,12 +625,18 @@ function renderScene(camera, playback = {}) {
     relative.setAttribute('aria-label', `Relative bearing from starting view: ${bearing.text}`);
   }
   // In "Which way?" the bearing tape would give the answer away.
-  const tapeAllowed = !usesSunWatch(state.quiz) && (!headingHidden(state.quiz) || state.answered);
+  const tapeAllowed = !usesSunWatch(state.quiz) && (!headingHidden(state.quiz) || state.answered)
+    && !(state.quiz.mode === 'sniper' && state.sniperFrame?.raise > 0);
   const tape = $('tape');
   if (state.settings.tape && tapeAllowed) drawCompassTape(tape, camera, { exact: state.quiz.heading.mode === 'exact' });
   else {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     tape.width = Math.round(tape.clientWidth * dpr); tape.height = Math.round(tape.clientHeight * dpr);
+  }
+  if (state.quiz.mode === 'sniper' && state.sniperFrame) {
+    const dpr = tape.width / (tape.clientWidth || 1) || 1, ctx = tape.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawSniperOverlay(ctx, state.quiz, state.sniperFrame, { width: tape.clientWidth, height: tape.clientHeight });
   }
   // Developer check: engine skyline over the GPU render (hidden before answering in "Which way?").
   if (typeof dev !== 'undefined' && dev.enabled && dev.skyline && tapeAllowed) {
@@ -697,6 +722,7 @@ function showAnswerResult(label, right) {
   const quiz = state.quiz;
   if (quiz.mode === 'trail') { if (quiz.grid) showTrailGridResult(label, right); else showTrailResult(label, right); return; }
   if (quiz.mode === 'facing') { showFacingResult(label, right); return; }
+  if (quiz.mode === 'sniper') { showSniperResult(label, right); return; }
   if (quiz.mode === 'grid') { showGridResult(label, right); return; }
   if (quiz.mode === 'friend' && usesGrid(quiz)) { showFriendGridResult(label, right); return; }
   if (quiz.mode === 'friend') { showFriendResult(label, right); return; }
@@ -718,6 +744,21 @@ function showAnswerResult(label, right) {
   highlightView(quiz.correctLabel);
 }
 
+
+function showSniperResult(label, right) {
+  const q = state.quiz, s = q.sniper, res = $('result');
+  res.hidden = false;
+  const miss = (o) => `${Math.abs(o.miss) < 0.005 ? '0' : `${(Math.abs(o.miss) * 100).toFixed(0)} cm ${o.miss > 0 ? 'high' : 'low'}`}`;
+  const rows = q.options.map((o) => `<tr><td><strong>${o.label}</strong>${o.correct ? ' ✓' : o.label === label ? ' (your pick)' : ''}</td><td>${o.mil.toFixed(1)} mil</td><td>${miss(o)}</td><td>${Math.abs(o.miss) <= 0.12 ? 'head shot' : o.miss < 0 && o.miss >= -1.5 ? 'body, not the head' : 'miss'}</td></tr>`).join('');
+  res.innerHTML = `<div class="verdict ${right ? 'good' : 'bad'}">${right ? 'Hit' : 'Miss'} — the ${q.correctLabel} mark was right.</div>
+    <p>Target: ${Math.round(s.horizontal)} m horizontally, ${Math.abs(s.rise).toFixed(1)} m ${s.rise >= 0 ? 'higher' : 'lower'} (${Math.abs(s.angle).toFixed(1)}° ${s.rise >= 0 ? 'uphill' : 'downhill'}) · straight-line ${Math.round(s.slant)} m. YOU and the target are now on the map.</p>
+    <table><tr><th>Mark</th><th>Hold</th><th>Impact vs. head</th><th>Result</th></tr>${rows}</table>
+    <p class="note">Rifle zeroed at 100 m, ${s.rifle.muzzle} m/s. Each mark is the hold for that range on flat ground; up- or downhill, use the horizontal distance.</p>
+    <button type="button" class="btn ghost" id="sniper-replay">Replay the shot view</button>
+    <button type="button" class="btn primary" id="next">Next quiz (N)</button>`;
+  $('sniper-replay').addEventListener('click', () => sunPlayer.replay());
+  $('next').addEventListener('click', newQuiz);
+}
 
 function showTrailGridResult(label, right) {
   const q = state.quiz, res = $('result');
@@ -891,12 +932,14 @@ function renderFacts() {
   $('opt-tape').closest('label').hidden = usesSunWatch(q);
   $('legend').hidden = sealed || !state.settings.landforms;
   const facts = [
-    ['Mode', q.mode === 'trail' ? q.grid ? 'Bunny-hop · finish cell' : 'Bunny-hop trails' : q.mode === 'friend' ? `Where is your friend?${q.friend.challenge === 'depth-trap' ? ' · Depth trap' : ''}` : q.mode === 'facing' ? 'Which way are you facing?' : q.mode === 'lookalike' ? 'Look-alikes (A / B / C)' : q.mode === 'grid' ? `Grid ${q.grid.size} × ${q.grid.size}${q.grid.challenge === 'lost-compass' ? ' · Lost compass' : ''}` : 'Where are you?'],
+    ['Mode', q.mode === 'sniper' ? 'Sniper · holdover' : q.mode === 'trail' ? q.grid ? 'Bunny-hop · finish cell' : 'Bunny-hop trails' : q.mode === 'friend' ? `Where is your friend?${q.friend.challenge === 'depth-trap' ? ' · Depth trap' : ''}` : q.mode === 'facing' ? 'Which way are you facing?' : q.mode === 'lookalike' ? 'Look-alikes (A / B / C)' : q.mode === 'grid' ? `Grid ${q.grid.size} × ${q.grid.size}${q.grid.challenge === 'lost-compass' ? ' · Lost compass' : ''}` : 'Where are you?'],
     ...(!sealed ? [['Heading', headingHidden(q) && !state.answered ? 'hidden until you answer' : `${String(Math.round(q.camera.heading)).padStart(3, '0')}° (${q.mode === 'facing' ? 'one of 8 directions' : q.heading.mode})`]] : []),
     ...(q.mode === 'trail' ? [['Run', `${q.trail.duration} s · ${Math.round(q.trail.plan.length)} m · ${q.grid ? 'find the finish' : 'three matched routes'}`],
       ['Movement', q.trail.movement === 'classic' ? 'CS 1.6 style' : 'CS:GO style']] : []),
     ...(q.mode === 'trail' && q.grid ? [['Cells', `${q.options.length} · ${Math.round(q.grid.cellMetres)} m per side · finish at centre`]] : []),
     ...(q.mode === 'grid' ? [['Cells', `${q.options.length} · ${Math.round(q.grid.cellMetres)} m per side · observer at centre`]] : []),
+    ...(q.mode === 'sniper' ? [['Target', 'enemy sniper · 1.80 m · aim for the head'], ['Scope', 'BDC marks 200–1000 m · mil stadia 2/4/6/8 · zero 100 m'],
+      ['Viewpoint', state.answered ? `YOU · ${Math.round(q.sniper.horizontal)} m to the target` : 'unmarked · only the heading is known']] : []),
     ...(q.mode === 'friend' ? [['Person', 'orange jacket · 1.80 m tall'], ['Find by', q.grid ? `${q.grid.size} × ${q.grid.size} grid · ${Math.round(q.grid.cellMetres)} m per side` : 'Point · A / B / C'], ['Viewpoint', q.friend.observerHidden && !state.answered ? 'unmarked · infer from terrain' : 'YOU · observer position'], ['Map area', `${Math.round(q.mapExtent.size)} m × ${Math.round(q.mapExtent.size)} m`]] : []),
     ['Field of view', `${q.camera.fov}° · eye ${q.camera.eyeHeight} m`],
     ['Relief', `${Math.round(q.terrain.min)}–${Math.round(q.terrain.max)} m`],
@@ -956,7 +999,7 @@ function newQuiz() {
  */
 function scrambleOptions() {
   const q = state.quiz;
-  if (!q || state.answered || state.loading || q.mode === 'facing' || usesGrid(q)) return;
+  if (!q || state.answered || state.loading || q.mode === 'facing' || q.mode === 'sniper' || usesGrid(q)) return;
   // Derived from the unscrambled quiz so "&s=N" in a link reproduces it.
   const quiz = scrambleLabels(state.baseQuiz, (q.scramble || 0) + 1);
   state.quiz = quiz;
@@ -1040,7 +1083,7 @@ document.addEventListener('keydown', (e) => {
   if ($('export-dialog').open) return;
   if (e.target.matches('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key.toUpperCase();
-  if (usesSunWatch(state.quiz) && e.code === 'Space') {
+  if (usesClip(state.quiz) && e.code === 'Space') {
     e.preventDefault(); if (sunPlayer.playing) sunPlayer.pause(); else sunPlayer.play(); return;
   }
   if (state.quiz?.mode === 'trail' && (e.code === 'Space' || k === 'F')) {
@@ -1052,6 +1095,11 @@ document.addEventListener('keydown', (e) => {
     // Q W E / A · D / Z X C laid out like the compass rose.
     const dir = { Q: 'NW', W: 'N', E: 'NE', A: 'W', D: 'E', Z: 'SW', X: 'S', C: 'SE' }[k];
     if (dir) { state.answered ? viewFrom(dir) : answer(dir); return; }
+  }
+  if (state.quiz?.mode === 'sniper' && /^[0-9]$/.test(k)) {
+    const label = `${(Number(k) || 10) * 100} m`; // 0 = 1000 m
+    if (!state.answered) answer(label);
+    return;
   }
   if (k === 'N') newQuiz();
   else if (k === 'P') newPositions();
@@ -1155,8 +1203,8 @@ function stopPreview() { cancelAnimationFrame(exportUi.raf); }
 function openExport() {
   if (!state.quiz || !renderer) return;
   stopFriendWave();
-  exportUi.sunResume = usesSunWatch(state.quiz) && sunPlayer.playing;
-  if (usesSunWatch(state.quiz)) sunPlayer.pause();
+  exportUi.sunResume = usesClip(state.quiz) && sunPlayer.playing;
+  if (usesClip(state.quiz)) sunPlayer.pause();
   $('export-sequence-note').hidden = !usesSunWatch(state.quiz);
   if (state.quiz.mode === 'trail') trailPlayer.pause();
   exportUi.now = new Date();
@@ -1191,7 +1239,7 @@ function closeExport() {
   exportUi.composer?.dispose();
   exportUi.composer = null;
   $('export-dialog').close();
-  if (exportUi.sunResume && usesSunWatch(state.quiz) && !state.answered && !document.hidden && !reducedMotion.matches) sunPlayer.play();
+  if (exportUi.sunResume && usesClip(state.quiz) && !state.answered && !document.hidden && !reducedMotion.matches) sunPlayer.play();
   scheduleFriendWave();
 }
 
@@ -1299,7 +1347,7 @@ function parseHash() {
   const h = p.get('h');
   return {
     seed: p.get('seed'), world: normaliseWorld(p.get('w')), difficulty: d && DIFFICULTIES[d] ? d : null, variant: v, scramble: sc,
-    mode: ['facing', 'lookalike', 'grid', 'friend', 'trail'].includes(p.get('m')) ? p.get('m') : 'where-am-i',
+    mode: ['facing', 'lookalike', 'grid', 'friend', 'trail', 'sniper'].includes(p.get('m')) ? p.get('m') : 'where-am-i',
     gridSize: normaliseGridSize(p.get('g')),
     trailAnswer: normaliseTrailAnswer(p.get('ta')),
     gridChallenge: normaliseGridChallenge(p.get('gc')),
