@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { encodeCanvasVideo } from '../src/export/recorder.js';
+import { EXPORT_FPS, encodeCanvasVideo } from '../src/export/recorder.js';
 
 // A slow encoder retains frames until its asynchronous worker consumes them.
 // This reproduces the backlog that previously exhausted memory on full exports.
@@ -16,7 +16,8 @@ function slowEncoder(t, { fail = false } = {}) {
     static async isConfigSupported() { return { supported: true }; }
     constructor(callbacks) { this.callbacks = callbacks; this.queue = []; this.state = 'unconfigured'; instance = this; }
     get encodeQueueSize() { return this.queue.length; }
-    configure() {
+    configure(config) {
+      state.config = config;
       this.state = 'configured';
       this.worker = setInterval(() => {
         const sample = this.queue.shift();
@@ -59,6 +60,18 @@ test('slow encoding stays bounded and awaits each drawn frame at the exact clip 
   assert.equal(state.closed, true);
   assert.equal(result.blob.type, 'video/mp4');
   assert.ok(result.blob.size > 60);
+});
+
+test('default export is 900 frames at 60 fps with an H.264 level that allows 1080p60', async t => {
+  const state = slowEncoder(t), times = [];
+  const result = await encodeCanvasVideo({ width: 1080, height: 1920 }, async time => { times.push(time); });
+  assert.equal(EXPORT_FPS, 60);
+  assert.equal(times.length, 900);
+  assert.equal(times.at(-1), 899 / 60);
+  assert.equal(state.config.framerate, 60);
+  assert.equal(state.config.codec, 'avc1.64002A');
+  assert.ok(state.config.bitrate > 10_000_000);
+  assert.equal(result.codec, 'avc1.64002A');
 });
 
 test('a failed source frame closes the encoder and rejects export', async t => {

@@ -25,7 +25,7 @@ import { relativeBearing } from '../render/relativeBearing.js';
 import { drawSkylineOverlay } from '../render/skylineOverlay.js';
 import { ExportComposer, exportDuration } from '../export/composer.js';
 import { planForChoice, describePlan, EASTER_CHOICES } from '../easter/index.js';
-import { encodeCanvasVideo, pickVideoPath } from '../export/recorder.js';
+import { EXPORT_FPS, encodeCanvasVideo, pickVideoPath } from '../export/recorder.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1237,12 +1237,12 @@ async function exportVideo() {
   setExportBusy(true);
   const progress = $('export-progress');
   progress.hidden = false;
-  setExportStatus(exportUi.videoPath?.kind === 'recorder' ? `Recording ${c.options.duration} s in real time — keep this tab visible…` : `Rendering ${Math.round(c.options.duration * 30)} frames…`);
+  setExportStatus(exportUi.videoPath?.kind === 'recorder' ? `Recording ${c.options.duration} s in real time — keep this tab visible…` : `Rendering ${Math.round(c.options.duration * EXPORT_FPS)} frames…`);
   try {
     c.animated = true;
     const d = c.options.duration;
     const { blob, extension, h264 } = await encodeCanvasVideo(c.canvas, (t) => c.drawFrameReady(t, { reveal: c.options.reveal && t >= d - 3 }), {
-      duration: d, fps: 30, onProgress: (p) => { progress.value = p; },
+      duration: d, fps: EXPORT_FPS, onProgress: (p) => { progress.value = p; },
     });
     const name = exportName('', extension);
     download(blob, name);

@@ -34,7 +34,7 @@ One-time setup: **Settings → Pages → Build and deployment → Source: GitHub
 
 Weather is purely visual and never changes the terrain. Position puzzles keep their fixed viewpoint, friend videos follow the zoom sequence, and Bunny-hop trails follows the same terrain-selected run as the page.
 
-Videos are encoded frame by frame with WebCodecs and muxed into MP4 by a small built-in muxer (`src/export/mp4.js`). The output is always exactly 30 fps and 15.0 s, however fast the machine renders. In Chrome, Edge and Safari the codec is **H.264**, which is what Instagram expects. Browsers without an H.264 encoder fall back to VP9 (or real-time MediaRecorder WebM), and the dialog warns that the file needs converting before upload. On phones, the **Share…** button hands the file to the system share sheet, which includes Instagram.
+Videos are encoded frame by frame with WebCodecs and muxed into MP4 by a small built-in muxer (`src/export/mp4.js`). The output is always exactly 60 fps and 15.0 s (900 frames), however fast the machine renders; H.264 uses level 4.2, which 1080×1920 at 60 fps requires. In Chrome, Edge and Safari the codec is **H.264**, which is what Instagram expects. Browsers without an H.264 encoder fall back to VP9 (or real-time MediaRecorder WebM), and the dialog warns that the file needs converting before upload. On phones, the **Share…** button hands the file to the system share sheet, which includes Instagram.
 
 ## Seasonal Easter eggs
 

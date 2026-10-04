@@ -1,18 +1,27 @@
 // Video export. Preferred path: WebCodecs VideoEncoder, frame by frame, muxed
-// into MP4 — exact 30 fps and exact duration regardless of machine speed, and
+// into MP4 — exact 60 fps (900 frames for 15 s) and exact duration regardless of machine speed, and
 // H.264 where the browser can encode it (Chrome, Edge, Safari), which is what
 // Instagram expects. Fallback: real-time MediaRecorder capture.
 
 import { muxMp4 } from './mp4.js';
 
-const WEBCODECS_CODECS = ['avc1.640028', 'avc1.4d0028', 'avc1.42E028', 'vp09.00.40.08'];
-const RECORDER_TYPES = ['video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1.42E01E', 'video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+/** Export frame rate: a 15 s clip is 900 frames. */
+export const EXPORT_FPS = 60;
 
-export async function pickVideoPath(width, height, fps = 30) {
+// 1080×1920 at 60 fps needs H.264 level 4.2 (level 4.0 stops at ~30 fps) and
+// VP9 level 4.1; the level 4.0 entries remain for low-frame-rate encodes.
+const WEBCODECS_CODECS = ['avc1.64002A', 'avc1.4d002A', 'avc1.42E02A', 'avc1.640028', 'avc1.4d0028', 'avc1.42E028',
+  'vp09.00.41.08', 'vp09.00.40.08'];
+const RECORDER_TYPES = ['video/mp4;codecs=avc1.64002A', 'video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1.42E01E', 'video/mp4;codecs=avc1', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
+
+/** Twice the frames keep the same per-frame quality with a higher bitrate. */
+export const videoBitrate = (fps) => (fps > 30 ? 16_000_000 : 10_000_000);
+
+export async function pickVideoPath(width, height, fps = EXPORT_FPS) {
   if (typeof VideoEncoder !== 'undefined' && typeof VideoFrame !== 'undefined') {
     for (const codec of WEBCODECS_CODECS) {
       try {
-        const { supported } = await VideoEncoder.isConfigSupported({ codec, width, height, bitrate: 10_000_000, framerate: fps });
+        const { supported } = await VideoEncoder.isConfigSupported({ codec, width, height, bitrate: videoBitrate(fps), framerate: fps });
         if (supported) return { kind: 'webcodecs', codec, h264: codec.startsWith('avc1') };
       } catch { /* try next */ }
     }
@@ -28,7 +37,7 @@ export async function pickVideoPath(width, height, fps = 30) {
  * Awaits drawFrame(t) for t in [0, duration) and encodes it.
  * @returns {Promise<{blob:Blob, extension:string, h264:boolean, codec:string}>}
  */
-export async function encodeCanvasVideo(canvas, drawFrame, { duration = 15, fps = 30, onProgress = () => {} } = {}) {
+export async function encodeCanvasVideo(canvas, drawFrame, { duration = 15, fps = EXPORT_FPS, onProgress = () => {} } = {}) {
   const path = await pickVideoPath(canvas.width, canvas.height, fps);
   if (!path) throw new Error('This browser cannot encode video.');
   if (path.kind === 'webcodecs') return encodeWebCodecs(canvas, drawFrame, path, { duration, fps, onProgress });
@@ -49,7 +58,7 @@ async function encodeWebCodecs(canvas, drawFrame, { codec, h264 }, { duration, f
     },
     error: (e) => { failure = e; },
   });
-  const config = { codec, width: canvas.width, height: canvas.height, bitrate: 10_000_000, framerate: fps, latencyMode: 'quality' };
+  const config = { codec, width: canvas.width, height: canvas.height, bitrate: videoBitrate(fps), framerate: fps, latencyMode: 'quality' };
   if (h264) config.avc = { format: 'avc' };
   const frames = Math.round(duration * fps);
   const us = 1e6 / fps;
@@ -80,7 +89,7 @@ async function encodeWebCodecs(canvas, drawFrame, { codec, h264 }, { duration, f
 
 async function recordRealtime(canvas, drawFrame, { type, h264 }, { duration, fps, onProgress }) {
   const stream = canvas.captureStream(fps);
-  const rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 10_000_000 });
+  const rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: videoBitrate(fps) });
   const chunks = [];
   rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
   const stopped = new Promise((resolve) => { rec.onstop = resolve; });

@@ -15,7 +15,7 @@ import { generate } from '../src/engine/quiz.js';
 import { scrambleLabels } from '../src/engine/scramble.js';
 
 const at = (iso) => new Date(`${iso}T12:00:00`);
-const LAST_FRAME = 449 / 30; // final frame of the 15 s, 30 fps video
+const LAST_FRAME = 899 / 60; // final frame of the 15 s, 60 fps (900-frame) video
 
 // --------------------------------------------------------------- helpers
 
@@ -442,8 +442,8 @@ test('May 4: one brief flash, never a strobe', () => {
   // Full-scene flashes per second stay far below the 3/s photosensitivity guideline: this is 1 in the whole render.
   const egg = makeEgg(may4Plan());
   const flashFills = (t) => drawLog(egg, t).log.filter((e, i, l) => e[0] === 'fillRect' && l[i - 1] && l[i - 1][0] === '=fillStyle' && l[i - 1][1] === 'rgb(255, 248, 230)').length;
-  const total = Array.from({ length: 450 }, (_, i) => flashFills(i / 30)).filter(Boolean).length;
-  assert.ok(total >= 1 && total <= 30, `${total} frames carry the flash`);
+  const total = Array.from({ length: 900 }, (_, i) => flashFills(i / 60)).filter(Boolean).length;
+  assert.ok(total >= 1 && total <= 60, `${total} frames carry the flash`);
 });
 
 test('May 4: reduced motion is a still scene: no flash, no explosion, nothing moves or twinkles', () => {

@@ -33,8 +33,8 @@ const server = createServer(async (req, res) => {
 const port = server.address().port;
 
 const times = egg === 'may4'
-  ? { start: 0.4, patrol: 4.2, mid: 7.5, charge: 10.2, explosion: 11.12, blast: 11.6, flyaway: 12.6, late: 13.8, end: 449 / 30 }
-  : { start: 0.4, mid: 7.5, entering: 10.5, flyby: 12.2, leaving: 13.7, end: 449 / 30 };
+  ? { start: 0.4, patrol: 4.2, mid: 7.5, charge: 10.2, explosion: 11.12, blast: 11.6, flyaway: 12.6, late: 13.8, end: 899 / 60 }
+  : { start: 0.4, mid: 7.5, entering: 10.5, flyby: 12.2, leaving: 13.7, end: 899 / 60 };
 
 const browser = await pw.chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const page = await browser.newPage({ viewport: { width: 700, height: 1100 } });
