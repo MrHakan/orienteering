@@ -15,7 +15,7 @@ import { KNIVES, normaliseAppearance } from '../render/knifeClips.js';
 import { TrailPlayback } from './trailPlayback.js';
 import { usesSunWatch, supportsSunWatch, sunWatchFrame, SUN_WATCH_DURATION } from '../engine/sunWatch.js';
 import { TerrainRenderer } from '../render/webglTerrain.js';
-import { CONDITIONS, WINDS, normaliseEnvironment, weatherParams, environmentAnimated } from '../render/environment.js';
+import { CONDITIONS, WINDS, DENSITIES, normaliseEnvironment, weatherParams, environmentAnimated } from '../render/environment.js';
 import { TEXTURE_MODES, terrainTexture } from '../render/terrainTextures.js';
 import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
@@ -145,7 +145,12 @@ function setEnvironmentControls(prefix, value) {
   $(`${prefix}-weather`).value = env.condition; $(`${prefix}-wind`).value = env.wind;
   $(`${prefix}-texture`).value = env.texture;
   for (const key of ['hd', 'foliage', 'nature']) $(`${prefix}-${key}`).checked = env[key];
+  for (const key of ['foliage', 'nature']) $(`${prefix}-${key}-density`).value = env[`${key}Density`];
+  updateDensityControls(prefix);
   updateTextureNote(prefix);
+}
+function updateDensityControls(prefix) {
+  for (const key of ['foliage', 'nature']) $(`${prefix}-${key}-density`).disabled = !$(`${prefix}-${key}`).checked;
 }
 function updateTextureNote(prefix) {
   const mode = $(`${prefix}-texture`).value;
@@ -156,17 +161,21 @@ function updateTextureNote(prefix) {
 function readEnvironmentControls(prefix) {
   return normaliseEnvironment({ condition: $(`${prefix}-weather`).value, wind: $(`${prefix}-wind`).value,
     texture: $(`${prefix}-texture`).value,
+    foliageDensity: $(`${prefix}-foliage-density`).value, natureDensity: $(`${prefix}-nature-density`).value,
     hd: $(`${prefix}-hd`).checked, foliage: $(`${prefix}-foliage`).checked, nature: $(`${prefix}-nature`).checked });
 }
 for (const prefix of ['scene', 'export']) {
   $(`${prefix}-weather`).innerHTML = CONDITIONS.map(c => `<option value="${c.id}">${c.label}</option>`).join('');
   $(`${prefix}-wind`).innerHTML = WINDS.map(w => `<option value="${w.id}">${w.label}</option>`).join('');
   $(`${prefix}-texture`).innerHTML = TEXTURE_MODES.map(t => `<option value="${t.id}">${t.label}</option>`).join('');
+  for (const key of ['foliage', 'nature'])
+    $(`${prefix}-${key}-density`).innerHTML = DENSITIES.map(d => `<option value="${d.id}">${d.label}</option>`).join('');
   setEnvironmentControls(prefix, state.environment);
 }
-for (const key of ['weather', 'wind', 'texture', 'hd', 'foliage', 'nature']) $(`scene-${key}`).addEventListener('change', () => {
+for (const key of ['weather', 'wind', 'texture', 'hd', 'foliage', 'nature', 'foliage-density', 'nature-density']) $(`scene-${key}`).addEventListener('change', () => {
   state.environment = readEnvironmentControls('scene'); store.set('otq.environment', state.environment);
   updateTextureNote('scene');
+  updateDensityControls('scene');
   stopFriendWave();
   if (state.quiz && !state.loading) renderScene(currentCamera());
   scheduleFriendWave();
@@ -1244,6 +1253,7 @@ $('export-dialog').addEventListener('cancel', (e) => { e.preventDefault(); close
 $('export-form').addEventListener('change', () => {
   const opts = exportOptions();
   updateTextureNote('export');
+  updateDensityControls('export');
   store.set('otq.export', persistableExportOptions(opts));
   const { easter, ...composerOptions } = opts;
   void easter;

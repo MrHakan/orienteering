@@ -5,7 +5,7 @@
 import { personVertices } from './personMesh.js';
 import { KnifeViewModel } from './knifeViewModel.js';
 import { FriendSprite } from './friendSprite.js';
-import { windGust } from './environment.js';
+import { windGust, densityProfile } from './environment.js';
 import { EnvironmentTextures, terrainHeightPixels, TERRAIN_MATERIAL_GLSL } from './terrainDetail.js';
 import { buildNatureMeshes, buildGroundCover, NATURE_STRIDE, NATURE_VERT, NATURE_FRAG } from './natureMesh.js';
 import { WatchViewModel } from './watchViewModel.js';
@@ -203,8 +203,9 @@ void main() {
   // A small flock in the world sky, never over the ground or map.
   if (uNature > 0.0 && elev > .03) {
     float az = uHeading + atan(vNdc.x * uTanHalfH);
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 8; i++) {
       float fi = float(i);
+      if (fi >= uNature) continue;
       float birdAz = uBirdHeading - .12 + fi * .027 + uTime * .006;
       float dx = atan(sin(az - birdAz), cos(az - birdAz));
       float dy = elev - (.20 + fi * .012 + sin(uTime * .45 + fi) * .008);
@@ -449,19 +450,21 @@ export class TerrainRenderer {
     }
     if ((environment.foliage || environment.nature) && !this.plantTextures)
       this.plantTextures = new EnvironmentTextures(gl, { foliage: 'foliage-atlas.webp' }, redraw);
-    if ((environment.foliage || environment.nature) && !this.natureMeshes) {
-      const data = buildNatureMeshes(this.model);
-      this.natureMeshes = {};
-      for (const key of ['foliage', 'nature']) {
-        const buffer = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    const densities = { foliage: densityProfile(environment.foliageDensity).id, nature: densityProfile(environment.natureDensity).id };
+    const changed = ['foliage', 'nature'].filter(key => environment[key] && this.natureMeshes?.[key]?.density !== densities[key]);
+    if (changed.length) {
+      const data = buildNatureMeshes(this.model, { foliageDensity: densities.foliage, natureDensity: densities.nature });
+      this.natureMeshes ||= {};
+      for (const key of changed) {
+        const buffer = this.natureMeshes[key]?.buffer || gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
         gl.bufferData(gl.ARRAY_BUFFER, data[key], gl.STATIC_DRAW);
-        this.natureMeshes[key] = { buffer, count: data[key].length / NATURE_STRIDE };
+        this.natureMeshes[key] = { buffer, count: data[key].length / NATURE_STRIDE, density: densities[key] };
       }
     }
     if (environment.foliage && camera) {
-      const key = `${Math.floor(camera.x / 16)}:${Math.floor(camera.y / 16)}`;
+      const key = `${Math.floor(camera.x / 16)}:${Math.floor(camera.y / 16)}:${densities.foliage}`;
       if (key !== this.groundCover?.key) {
-        const data = buildGroundCover(this.model, camera);
+        const data = buildGroundCover(this.model, camera, 85, densities.foliage);
         const buffer = this.groundCover?.buffer || gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, buffer); gl.bufferData(gl.ARRAY_BUFFER, data.vertices, gl.DYNAMIC_DRAW);
         this.groundCover = { buffer, count: data.vertices.length / NATURE_STRIDE, key };
@@ -642,7 +645,7 @@ export class TerrainRenderer {
     gl.uniform1f(gl.getUniformLocation(this.sky, 'uCloud'), Math.max(cloud, wet * 0.9));
     gl.uniform2fv(gl.getUniformLocation(this.sky, 'uWind'), weather.cloudWind || wind);
     gl.uniform1f(gl.getUniformLocation(this.sky, 'uWet'), wet);
-    gl.uniform1f(gl.getUniformLocation(this.sky, 'uNature'), environment.nature ? 1 : 0);
+    gl.uniform1f(gl.getUniformLocation(this.sky, 'uNature'), environment.nature ? densityProfile(environment.natureDensity).birds : 0);
     gl.uniform1f(gl.getUniformLocation(this.sky, 'uBirdHeading'), (weather.skyHeading ?? sunHeading) * Math.PI / 180);
     gl.uniform1f(gl.getUniformLocation(this.sky, 'uSolar'), solar ? 1 : 0);
     gl.uniform3fv(gl.getUniformLocation(this.sky, 'uSolarSun'), solar?.direction || [0, 1, 0]);

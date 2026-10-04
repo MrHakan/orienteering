@@ -258,6 +258,13 @@ irregular boulders, ferns, wildflowers and distant birds. Vegetation is seeded f
 the terrain, rests on the rendered ground, and uses the terrain depth buffer. All three are optional
 and off by default. These settings never modify elevations, contours or answers.
 
+Foliage and Nature each have an independent **Light / Moderate / Heavy** density
+selector. Light keeps a sparse subset of the seeded placements; Moderate preserves
+the original amount; Heavy adds another seeded layer. Nature density also controls
+the bird flock size. Changing one category keeps the other category's placement
+unchanged. Density choices are remembered locally, survive toggling a category off,
+and carry into the export dialog, where they can be adjusted for PNGs and videos.
+
 **Terrain texture → Auto — by seed** chooses one of five surface styles:
 Green meadow, Mossy moorland, Autumn grassland, Desert sandstone or Alpine scree.
 Each has its own ground/rock palette, soil and rock coverage, and detail scale.

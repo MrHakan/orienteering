@@ -1,5 +1,6 @@
 import { Random } from '../engine/rng.js';
 import { surfaceElevation } from '../engine/terrainSurface.js';
+import { densityProfile } from './environment.js';
 
 export const NATURE_STRIDE = 16;
 export const NATURE_VERT = `
@@ -107,13 +108,29 @@ function stone(out, root, radius, rng) {
 }
 
 /** Bounded landscape plants. Roots rest on the exact rendered triangle surface. */
-export function buildNatureMeshes(model) {
-  const foliage = [], nature = [], roots = [], rng = new Random(`${model.seed}|nature-v2`);
+export function buildNatureMeshes(model, { foliageDensity, natureDensity } = {}) {
+  const foliage = [], nature = [], roots = [];
+  const coverage = { foliage: densityProfile(foliageDensity).coverage, nature: densityProfile(natureDensity).coverage };
+  buildLandscapeLayer(model, `${model.seed}|nature-v2`, coverage, foliage, nature, roots);
+  if (coverage.foliage > 1 || coverage.nature > 1) {
+    buildLandscapeLayer(model, `${model.seed}|nature-heavy-v1`, {
+      foliage: Math.max(0, coverage.foliage - 1), nature: Math.max(0, coverage.nature - 1),
+    }, foliage, nature, roots);
+  }
+  return { foliage: new Float32Array(foliage), nature: new Float32Array(nature), roots };
+}
+
+function buildLandscapeLayer(model, seed, coverage, foliage, nature, roots) {
+  const rng = new Random(seed);
+  // Density streams never consume placement randomness or reshuffle the other category.
+  const foliageRng = new Random(`${seed}|foliage-density`), natureRng = new Random(`${seed}|nature-density`);
   const axis = Math.min(56, Math.max(4, Math.floor(model.size / 18))), step = model.size / axis;
   for (let j = 0; j < axis; j++) for (let i = 0; i < axis; i++) {
+    const foliageStart = foliage.length, natureStart = nature.length;
+    const keepFoliage = foliageRng.next() < coverage.foliage, keepNature = natureRng.next() < coverage.nature;
     const x = (i + rng.range(.18, .82)) * step, y = (j + rng.range(.18, .82)) * step;
     const z = surfaceElevation(model, x, y), root = [x, z, -y], slope = model.getSlope(x, y);
-    roots.push({ x, y, z });
+    if (keepFoliage || keepNature) roots.push({ x, y, z });
     if (slope < 32) {
       const a = rng.range(0, Math.PI * 2), tint = rng.range(.84, 1.07);
       plant(foliage, root, rng.range(1.2, 2.2), rng.range(.55, .95), rng.int(0, 1), a, tint);
@@ -137,18 +154,29 @@ export function buildNatureMeshes(model) {
       }
     }
     if (rng.chance(.085)) stone(nature, root, rng.range(.4, 1.35), rng);
+    // Generate each original cell before filtering so Moderate stays byte-for-byte identical.
+    if (!keepFoliage) foliage.length = foliageStart;
+    if (!keepNature) nature.length = natureStart;
   }
-  return { foliage: new Float32Array(foliage), nature: new Float32Array(nature), roots };
 }
 
 /** Dense nearby meadow streamed by world cells, independent of playback/seek order. */
-export function buildGroundCover(model, camera, radius = 85) {
-  const vertices = [], roots = [], step = 3.5;
+export function buildGroundCover(model, camera, radius = 85, density = 'moderate') {
+  const vertices = [], roots = [], profile = densityProfile(density);
   // Quantising the centre avoids regenerating buffers for every small camera movement.
   const cx = Math.floor(camera.x / 16) * 16 + 8, cy = Math.floor(camera.y / 16) * 16 + 8;
+  buildMeadowLayer(model, cx, cy, radius, 'meadow', Math.min(1, profile.coverage), vertices, roots);
+  if (profile.coverage > 1) buildMeadowLayer(model, cx, cy, radius, 'meadow-heavy-v1', profile.coverage - 1, vertices, roots);
+  return { vertices: new Float32Array(vertices), roots, key: `${Math.floor(camera.x / 16)}:${Math.floor(camera.y / 16)}:${profile.id}` };
+}
+
+function buildMeadowLayer(model, cx, cy, radius, layer, coverage, vertices, roots) {
+  const step = 3.5;
   for (let j = Math.floor((cy - radius) / step); j <= Math.ceil((cy + radius) / step); j++) {
     for (let i = Math.floor((cx - radius) / step); i <= Math.ceil((cx + radius) / step); i++) {
-      const rng = new Random(`${model.seed}|meadow|${i}|${j}`);
+      const seed = `${model.seed}|${layer}|${i}|${j}`;
+      if (coverage < 1 && new Random(`${seed}|density`).next() >= coverage) continue;
+      const rng = new Random(seed);
       const x = (i + rng.range(.12, .88)) * step, y = (j + rng.range(.12, .88)) * step;
       if (!model.inside(x, y) || Math.hypot(x - cx, y - cy) > radius || model.getSlope(x, y) > 36) continue;
       const z = surfaceElevation(model, x, y), root = [x, z, -y], a = rng.range(0, Math.PI * 2);
@@ -158,5 +186,4 @@ export function buildGroundCover(model, camera, radius = 85) {
       if (rng.chance(.035)) plant(vertices, root, rng.range(1.1, 1.8), rng.range(.7, 1.15), 3, a, .92, .25);
     }
   }
-  return { vertices: new Float32Array(vertices), roots, key: `${Math.floor(camera.x / 16)}:${Math.floor(camera.y / 16)}` };
 }

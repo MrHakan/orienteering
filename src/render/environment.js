@@ -10,6 +10,15 @@ export const WINDS = [
   { id: 'calm', label: 'Calm' }, { id: 'breeze', label: 'Light breeze' },
   { id: 'strong', label: 'Strong breeze' },
 ];
+export const DENSITIES = [
+  { id: 'light', label: 'Light', coverage: .4, birds: 2 },
+  { id: 'moderate', label: 'Moderate', coverage: 1, birds: 4 },
+  { id: 'heavy', label: 'Heavy', coverage: 1.7, birds: 8 },
+];
+
+export function densityProfile(value) {
+  return DENSITIES.find(d => d.id === value) || DENSITIES[1];
+}
 
 export function normaliseEnvironment(value = {}) {
   value = value && typeof value === 'object' ? value : {};
@@ -17,6 +26,8 @@ export function normaliseEnvironment(value = {}) {
     condition: CONDITIONS.some(c => c.id === value.condition) ? value.condition : 'clear',
     wind: WINDS.some(w => w.id === value.wind) ? value.wind : 'calm',
     texture: normaliseTextureMode(value.texture),
+    foliageDensity: densityProfile(value.foliageDensity).id,
+    natureDensity: densityProfile(value.natureDensity).id,
     hd: value.hd === true, foliage: value.foliage === true, nature: value.nature === true,
   };
 }
