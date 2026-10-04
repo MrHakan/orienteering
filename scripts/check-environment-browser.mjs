@@ -66,7 +66,8 @@ try {
   await page.locator('#scene-nature').check();
   await page.locator('#scene-wind').selectOption('strong');
   await page.locator('#scene-weather').selectOption('storm');
-  await page.waitForFunction(() => window.environmentFrames.length > 8);
+  // Heavy HD storm frames are software-rendered in CI; allow the same budget as app readiness.
+  await page.waitForFunction(() => window.environmentFrames.length > 8, null, { timeout: 90000 });
   await page.evaluate(() => window.sceneRenderer.prepareEnvironmentReady({ hd: true, foliage: true, nature: true, foliageDensity: 'heavy', natureDensity: 'light' }));
   const live = await page.evaluate(() => window.environmentFrames.at(-1));
   assert.deepEqual(live.camera, q.camera);
