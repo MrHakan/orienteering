@@ -10,8 +10,9 @@ Surface textures are derived from Poly Haven's CC0 assets:
 [Poly Haven's license](https://polyhaven.com/license): CC0 1.0 public-domain dedication.
 Full source metadata, physical sizes and atlas slots are in `materials.json`.
 
-Two 2048×2048 WebP atlases pack four 1008×1008 material cells with eight-pixel
-wrapped gutters. RGB stores diffuse color/OpenGL tangent normals; alpha stores
+Two 2048×2048 WebP atlases pack four 1024×1024 cells (`cellSize` in
+`materials.json`): a 1008×1008 material inside eight-pixel wrapped gutters
+(`padding`). RGB stores diffuse color/OpenGL tangent normals; alpha stores
 roughness/ambient occlusion respectively. Upload without premultiplying alpha.
 
 `foliage-atlas.webp` is an original AI-generated botanical atlas created for this

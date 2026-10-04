@@ -311,7 +311,10 @@ style in live play, shared seed links, PNGs and videos.
 
 HD and plant assets load only when selected; exports wait for all selected
 materials before capturing a frame. Ground cover streams in bounded, seeded world
-cells, so replaying or seeking a clip restores the same plants. Surface asset
+cells, so replaying or seeking a clip restores the same plants. Plants are purely
+decorative and never hide the clue: they draw only over rendered terrain, so the
+skyline stays the exact terrain silhouette used by validation and answer
+explanations, and nothing is drawn within 3 m of the observer. Surface asset
 sources and licenses are recorded in `src/assets/environment/README.md`. The export
 dialog uses a smaller scene preview; PNG/video captures restore native resolution.
 

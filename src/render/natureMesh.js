@@ -36,6 +36,8 @@ float grain(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453)
 void main() {
   vec3 n = normalize(vNormal), col = vColor;
   float d = length(vWorld - uEye);
+  // Whole objects rooted at the observer's feet would fill the frame and hide the clue.
+  if (length(vRoot.xz - uEye.xz) < 3.0) discard;
   if (vKind > .5) {
     // Alpha-tested leaves write depth like solid geometry; crossed cards need no sorting.
     vec4 leaf = texture2D(uFoliage, vUV);

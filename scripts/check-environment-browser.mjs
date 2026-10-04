@@ -173,6 +173,17 @@ try {
     r.render(q.camera, { environment: { foliage: true } }); const foliage = pixels();
     r.render(q.camera, { environment: { nature: true } }); const nature = pixels();
     if (difference(basic, foliage) < .0001 || difference(basic, nature) < .0001) throw new Error('Missing foliage/nature');
+    // Plants may cover ground but never the sky: the skyline must stay the terrain silhouette.
+    const meshes = r.meshes; r.meshes = []; r.render(q.camera); const terrainless = pixels(); r.meshes = meshes;
+    const dense = { environment: { foliage: true, nature: true, foliageDensity: 'heavy', natureDensity: 'heavy' }, time: 4 };
+    r.render(q.camera, dense); const planted = pixels();
+    const drawNature = r.drawNature; r.drawNature = () => {}; r.render(q.camera, dense); const unplanted = pixels(); r.drawNature = drawNature;
+    let sky = 0, covered = 0;
+    for (let i = 0; i < basic.length; i += 4) if (basic[i] === terrainless[i] && basic[i + 1] === terrainless[i + 1] && basic[i + 2] === terrainless[i + 2]) {
+      sky++; if (planted[i] !== unplanted[i] || planted[i + 1] !== unplanted[i + 1] || planted[i + 2] !== unplanted[i + 2]) covered++;
+    }
+    if (!sky || covered) throw new Error(`Plants covered ${covered} of ${sky} sky pixels`);
+    if (difference(planted, unplanted) < .0001) throw new Error('Dense plants were not drawn over the terrain');
     result.texture.changed = difference(basic, hd);
     result.densities = [];
     for (const { id, birds } of DENSITIES) {

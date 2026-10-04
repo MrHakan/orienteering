@@ -310,7 +310,8 @@ function materialProgram(gl) {
 export class TerrainRenderer {
   constructor(canvas) {
     this.canvas = canvas;
-    const opts = { antialias: true, preserveDrawingBuffer: true, depth: true };
+    // Stencil marks rendered terrain so decorative plants can never cut into the sky.
+    const opts = { antialias: true, preserveDrawingBuffer: true, depth: true, stencil: true };
     const gl = canvas.getContext('webgl2', opts) || canvas.getContext('webgl', opts);
     if (!gl) throw new Error('WebGL is not available');
     this.gl = gl;
@@ -697,8 +698,16 @@ export class TerrainRenderer {
     // wrong skyline). Splitting keeps the error below ~1 m even with 16 bits.
     // Anything drawn in the near pass is closer than everything left from the
     // far pass on the same pixel, so clearing depth in between is exact.
+    // Terrain writes stencil 1 in both passes; plants draw only over it, so the
+    // skyline stays the exact terrain silhouette the quiz and its explanation use.
+    gl.stencilMask(0xff);
+    gl.clearStencil(0);
+    gl.clear(gl.STENCIL_BUFFER_BIT);
     for (const [near, far] of RANGES) {
       gl.clear(gl.DEPTH_BUFFER_BIT);
+      gl.enable(gl.STENCIL_TEST);
+      gl.stencilFunc(gl.ALWAYS, 1, 0xff);
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE);
       const projection = perspective(vfov, aspect, near, far);
       gl.useProgram(p);
       // Plants and friend sprites bind textures too: restore all material units in BOTH passes.
@@ -716,7 +725,10 @@ export class TerrainRenderer {
       }
       gl.disableVertexAttribArray(aPos);
       gl.disableVertexAttribArray(aNor);
+      gl.stencilFunc(gl.EQUAL, 1, 0xff);
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
       this.drawNature(projection, view, eye, sun, horizon, fogDensity, environment, weather, environmentTime, gust);
+      gl.disable(gl.STENCIL_TEST);
       this.drawPerson(projection, view, eye, sun, horizon, fogDensity, camera);
     }
     this.drawWeather(weather, camera, environmentTime, gust);
