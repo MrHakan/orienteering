@@ -21,7 +21,7 @@ export const DIRECTIONS = [
 /**
  * @param {{seed:string, difficulty?:string, variant?:number, maxTerrainAttempts?:number, onProgress?:(msg:string)=>void}} opts
  */
-export function generateFacingQuiz({ seed, difficulty = 'medium', variant = 0, tuning = null, size, n, maxTerrainAttempts = 4, onProgress = () => {} }) {
+export function generateFacingQuiz({ seed, world = 'classic', difficulty = 'medium', variant = 0, tuning = null, size, n, maxTerrainAttempts = 4, onProgress = () => {} }) {
   const t0 = now();
   const base = applyTuning(getDifficulty(difficulty), tuning);
   const preset = { ...base, heading: 'intercardinal' };
@@ -33,7 +33,7 @@ export function generateFacingQuiz({ seed, difficulty = 'medium', variant = 0, t
 
   for (let attempt = 0; attempt < maxTerrainAttempts; attempt++) {
     onProgress(`Generating terrain (attempt ${attempt + 1})`);
-    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n });
+    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n, world });
     if (!terrainCheck.ok) { log.push({ attempt, stage: 'terrain', issues: terrainCheck.issues }); continue; }
 
     onProgress('Scoring viewpoints in all 8 directions');

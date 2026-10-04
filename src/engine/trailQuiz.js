@@ -95,7 +95,7 @@ export function trailMapExtent(model) {
   return { x: model.size / 2, y: model.size / 2, size: model.size };
 }
 
-export function generateTrailQuiz({ seed, difficulty = 'medium', variant = 0, headingMode = null, movement = 'go',
+export function generateTrailQuiz({ seed, world = 'classic', difficulty = 'medium', variant = 0, headingMode = null, movement = 'go',
   tuning = null, size, n, maxTerrainAttempts = 4, onProgress = () => {} }) {
   const t0 = now(), preset = getTrailPreset(difficulty, tuning), band = preset.trailBand;
   const headingStyle = ['exact', 'cardinal', 'intercardinal'].includes(headingMode) ? headingMode : preset.heading;
@@ -103,7 +103,7 @@ export function generateTrailQuiz({ seed, difficulty = 'medium', variant = 0, he
   const fov = 90, eyeHeight = 1.7;
   for (let attempt = 0; attempt < maxTerrainAttempts; attempt++) {
     onProgress(`Generating bunny-hop terrain (attempt ${attempt + 1})`);
-    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n });
+    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n, world });
     if (!terrainCheck.ok) { log.push({ attempt, stage: 'terrain', issues: terrainCheck.issues }); continue; }
     const rng = seeds.stream('trail', attempt, variant, headingStyle);
     const headings = rng.fork('headings').shuffle(candidateHeadings(headingStyle, rng.fork('angles')));

@@ -21,7 +21,7 @@ function cueVisible(pair, a, b, pitch, fov, times) {
     - pitch - route.views[index].pitchOffset) < 25);
 }
 
-export function generateTrailGridQuiz({ seed, difficulty = 'medium', variant = 0, headingMode = null,
+export function generateTrailGridQuiz({ seed, world = 'classic', difficulty = 'medium', variant = 0, headingMode = null,
   movement = 'go', gridSize = 6, tuning = null, size, n, maxTerrainAttempts = 4, onProgress = () => {} }) {
   const t0 = now(), preset = getTrailPreset(difficulty, tuning), band = preset.trailBand;
   const divisions = normaliseGridSize(gridSize), physics = normaliseMovement(movement);
@@ -29,7 +29,7 @@ export function generateTrailGridQuiz({ seed, difficulty = 'medium', variant = 0
   const seeds = new SeedManager(seed + '#' + difficulty), fov = 90, eyeHeight = 1.7, log = [];
   for (let attempt = 0; attempt < maxTerrainAttempts; attempt++) {
     onProgress('Generating bunny-hop grid terrain (attempt ' + (attempt + 1) + ')');
-    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n });
+    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n, world });
     if (!terrainCheck.ok) { log.push({ attempt, stage: 'terrain', issues: terrainCheck.issues }); continue; }
     const rng = seeds.stream('trail-grid', attempt, variant, divisions, style);
     const cells = gridCells(model.size, divisions);

@@ -8,7 +8,8 @@
 import { LandformGenerator } from './landforms.js';
 import { FractalNoise, DomainWarp } from './noise.js';
 import { ErosionProcessor } from './erosion.js';
-import { meanStd } from './grid.js';
+import { meanStd, smoothstep } from './grid.js';
+import { WORLDS } from './worlds.js';
 
 export const DEFAULT_SIZE = 2000; // metres
 export const DEFAULT_RES = 257;   // grid nodes per side
@@ -26,22 +27,33 @@ export class TerrainGenerator {
   /**
    * @param {import('./rng.js').Random} rng
    * @param {object} terrainPreset difficulty.terrain
+   * @param {{size?:number, n?:number, world?:string}} options `world` is a
+   *   WORLDS id; 'classic' (default) is the original, unchanged recipe.
    */
-  static generate(rng, terrainPreset, { size = DEFAULT_SIZE, n = DEFAULT_RES } = {}) {
+  static generate(rng, terrainPreset, { size = DEFAULT_SIZE, n = DEFAULT_RES, world = 'classic' } = {}) {
     const cell = size / (n - 1);
-    const archetypeCount = rng.fork('count').int(terrainPreset.archetypes[0], terrainPreset.archetypes[1]);
+    const recipe = world !== 'classic' ? WORLDS[world] : null;
+    if (world !== 'classic' && !recipe) throw new Error(`Unknown world type: ${world}`);
+    const tuned = recipe ? {
+      ...terrainPreset,
+      relief: terrainPreset.relief * recipe.terrain.relief,
+      complexity: Math.min(1, terrainPreset.complexity * recipe.terrain.complexity),
+      archetypes: recipe.terrain.archetypes,
+    } : terrainPreset;
+    const archetypeCount = rng.fork('count').int(tuned.archetypes[0], tuned.archetypes[1]);
 
     const landforms = new LandformGenerator(rng.fork('landforms'), {
-      size, relief: terrainPreset.relief, complexity: terrainPreset.complexity, archetypeCount,
+      size, relief: tuned.relief, complexity: tuned.complexity, archetypeCount, world: recipe,
     }).build();
 
     const warp = new DomainWarp(rng.fork('warp'), {
-      amplitude: rng.fork('warp-amp').range(55, 110),
+      amplitude: rng.fork('warp-amp').range(...(recipe?.warp || [55, 110])),
     });
-    const noise = new FractalNoise(rng.fork('noise'), NOISE_OCTAVES);
+    const octaves = recipe ? NOISE_OCTAVES.map((o, i) => ({ ...o, amplitude: o.amplitude * recipe.noise[i] })) : NOISE_OCTAVES;
+    const noise = new FractalNoise(rng.fork('noise'), octaves);
 
     // Calibrate the noise share on a coarse grid: std(noise) / (std(struct) + std(noise)) = share.
-    const share = rng.fork('share').range(terrainPreset.noiseShare[0], terrainPreset.noiseShare[1]);
+    const share = rng.fork('share').range(tuned.noiseShare[0], tuned.noiseShare[1]);
     const cn = 49;
     const cs = new Float32Array(cn * cn), cz = new Float32Array(cn * cn);
     const w = { x: 0, y: 0 };
@@ -67,8 +79,9 @@ export class TerrainGenerator {
 
     // Erosion and drainage.
     const erosion = new ErosionProcessor({ n, cell });
-    erosion.fluvial(heights, { strength: 0.9 + 0.6 * terrainPreset.complexity, threshold: 25, iterations: 2 });
-    erosion.thermal(heights, { talusDeg: 33, iterations: 14 });
+    erosion.fluvial(heights, { strength: (0.9 + 0.6 * tuned.complexity) * (recipe?.erosion.fluvial ?? 1), threshold: 25, iterations: 2 });
+    erosion.thermal(heights, { talusDeg: recipe?.erosion.talus ?? 33, iterations: recipe?.erosion.thermalIterations ?? 14, ...(recipe?.erosion.thermalRate ? { rate: recipe.erosion.thermalRate } : {}) });
+    if (recipe?.terrace) TerrainGenerator.terrace(heights, recipe.terrace);
     const spikes = erosion.despike(heights, 2.0);
     // Small closed hollows (kettles, sinks) are post-erosion micro-landforms.
     landforms.applyDepressions(heights, n, cell, rng.fork('depressions'));
@@ -94,6 +107,7 @@ export class TerrainGenerator {
     return {
       size, n, cell, heights,
       meta: {
+        world,
         archetypes: landforms.meta.archetypes,
         landforms: landforms.meta,
         base: landforms.base,
@@ -104,5 +118,18 @@ export class TerrainGenerator {
         closedDepressions: depressions,
       },
     };
+  }
+
+  /**
+   * Soft stair-stepping of resistant rock beds (canyon worlds): each `step`
+   * metres the ground eases into a bench and then a steeper riser. Blended by
+   * `strength`, so slopes steepen by at most ~1.9x and never become cliffs.
+   */
+  static terrace(heights, { step, strength }) {
+    for (let k = 0; k < heights.length; k++) {
+      const h = heights[k], base = Math.floor(h / step) * step;
+      const stepped = base + step * smoothstep(0.25, 0.75, (h - base) / step);
+      heights[k] = h + strength * (stepped - h);
+    }
   }
 }

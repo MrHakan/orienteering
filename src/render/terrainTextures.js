@@ -1,4 +1,5 @@
 import { Random } from '../engine/rng.js';
+import { WORLDS } from '../engine/worlds.js';
 
 // Surface appearance has its own seed stream; it never enters terrain or quiz generation.
 // mix = soil coverage, exposed rock, slope-to-rock weight, scanned-color tint.
@@ -21,10 +22,14 @@ export const TEXTURE_MODES = [{ id: 'auto', label: 'Auto — by seed' },
 
 export const normaliseTextureMode = value => TEXTURE_MODES.some(mode => mode.id === value) ? value : 'auto';
 
-/** Raw quiz seed keeps the style stable across difficulty, variants and terrain retries. */
-export function terrainTexture(seed, mode = 'auto') {
+/**
+ * Raw quiz seed keeps the style stable across difficulty, variants and terrain retries.
+ * In Auto, a world type with a natural surface (alpine scree, desert sand…) uses it.
+ */
+export function terrainTexture(seed, mode = 'auto', world = 'classic') {
   const rng = new Random(`terrain-texture-v1|${String(seed ?? '')}`);
-  const automatic = rng.pick(TERRAIN_TEXTURES);
+  const seeded = rng.pick(TERRAIN_TEXTURES);
+  const automatic = TERRAIN_TEXTURES.find(p => p.id === WORLDS[world]?.texture) || seeded;
   const profile = TERRAIN_TEXTURES.find(p => p.id === normaliseTextureMode(mode)) || automatic;
   const brightness = rng.range(.96, 1.04);
   return { ...profile,

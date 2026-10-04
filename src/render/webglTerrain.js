@@ -405,7 +405,7 @@ export class TerrainRenderer {
   }
 
   /** @param {import('../engine/terrainModel.js').TerrainModel} model */
-  setTerrain(model, { seed = model.seed } = {}) {
+  setTerrain(model, { seed = model.seed, world = model.meta?.world || 'classic' } = {}) {
     const gl = this.gl;
     if (this.natureMeshes) for (const mesh of Object.values(this.natureMeshes)) gl.deleteBuffer(mesh.buffer);
     this.natureMeshes = null;
@@ -416,6 +416,7 @@ export class TerrainRenderer {
     for (const m of this.meshes) { gl.deleteBuffer(m.vbo); gl.deleteBuffer(m.ibo); }
     this.model = model;
     this.textureSeed = seed;
+    this.textureWorld = world;
     this.textureMode = null;
     const L = model.size, n = model.n;
     const main = [];
@@ -601,7 +602,7 @@ export class TerrainRenderer {
     const textureMode = normaliseTextureMode(environment.texture);
     if (textureMode !== this.textureMode) {
       this.textureMode = textureMode;
-      this.terrainTexture = terrainTexture(this.textureSeed, textureMode);
+      this.terrainTexture = terrainTexture(this.textureSeed, textureMode, this.textureWorld);
     }
     this.lastFrame = { camera, options: { weather, environment, time, environmentTime, motion, personMotion, sunHeading, solar, watch } };
     this.prepareEnvironment(environment, camera);

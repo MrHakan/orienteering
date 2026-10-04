@@ -50,7 +50,7 @@ export function parseCell(value, divisions) {
  * Lost compass checks other cells in all eight directions, not only the
  * true heading. No unvalidated fallback question is returned.
  */
-export function generateGridQuiz({ seed, difficulty = 'medium', variant = 0, headingMode = null,
+export function generateGridQuiz({ seed, world = 'classic', difficulty = 'medium', variant = 0, headingMode = null,
   gridSize = 4, gridChallenge = 'standard', tuning = null, size, n, maxTerrainAttempts = 4, onProgress = () => {} }) {
   const t0 = now(), divisions = normaliseGridSize(gridSize), challenge = normaliseGridChallenge(gridChallenge);
   const hidden = challenge === 'lost-compass';
@@ -65,7 +65,7 @@ export function generateGridQuiz({ seed, difficulty = 'medium', variant = 0, hea
 
   for (let attempt = 0; attempt < maxTerrainAttempts; attempt++) {
     onProgress(`Generating grid terrain (attempt ${attempt + 1})`);
-    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n });
+    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n, world });
     if (!terrainCheck.ok) { log.push({ attempt, stage: 'terrain', issues: terrainCheck.issues }); continue; }
     const cells = gridCells(model.size, divisions);
     const rng = seeds.stream('view', attempt, ...vt);

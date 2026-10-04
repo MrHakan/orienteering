@@ -82,7 +82,7 @@ export function finishFriendQuiz(quiz, opts) {
 // Each answer has a physically valid observation point at the SAME range and
 // bearing. Full-body visibility and matched apparent height prevent distance
 // alone from eliminating a letter. Only one observer's terrain view matches.
-function generateTerrainFriendQuiz({ seed, difficulty = 'medium', variant = 0, headingMode = null,
+function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medium', variant = 0, headingMode = null,
   friendChallenge = 'standard', tuning = null, size, n, maxTerrainAttempts = 4, onProgress = () => {} }) {
   const t0 = now(), challenge = normaliseFriendChallenge(friendChallenge);
   const base = applyTuning(getDifficulty(difficulty), tuning), band = FRIEND_BANDS[difficulty] || FRIEND_BANDS.medium;
@@ -91,7 +91,7 @@ function generateTerrainFriendQuiz({ seed, difficulty = 'medium', variant = 0, h
   const fov = 50, eyeHeight = 1.7, elevationTolerance = challenge === 'depth-trap' ? 0.25 : 0.5;
   for (let attempt = 0; attempt < maxTerrainAttempts; attempt++) {
     onProgress(`Generating friend terrain (attempt ${attempt + 1})`);
-    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n });
+    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n, world });
     if (!terrainCheck.ok) { log.push({ attempt, stage: 'terrain', issues: terrainCheck.issues }); continue; }
     const rng = seeds.stream('friend-terrain', attempt, challenge, heading, variant);
     const vg = new ViewpointGenerator(model, preset, rng.fork('viewpoints'), {
@@ -209,7 +209,7 @@ function generateTerrainFriendQuiz({ seed, difficulty = 'medium', variant = 0, h
   throw new Error('No clear friend sighting found. Try another seed or a lower difficulty.');
 }
 
-function generateKnownFriendQuiz({ seed, difficulty = 'medium', variant = 0, headingMode = null,
+function generateKnownFriendQuiz({ seed, world = 'classic', difficulty = 'medium', variant = 0, headingMode = null,
   friendChallenge = 'standard', tuning = null, size, n, maxTerrainAttempts = 4, onProgress = () => {} }) {
   const t0 = now(), challenge = normaliseFriendChallenge(friendChallenge);
   const base = applyTuning(getDifficulty(difficulty), tuning);
@@ -218,7 +218,7 @@ function generateKnownFriendQuiz({ seed, difficulty = 'medium', variant = 0, hea
   const fov = 50, eyeHeight = 1.7;
   for (let attempt = 0; attempt < maxTerrainAttempts; attempt++) {
     onProgress(`Generating friend terrain (attempt ${attempt + 1})`);
-    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n });
+    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n, world });
     if (!terrainCheck.ok) { log.push({ attempt, stage: 'terrain', issues: terrainCheck.issues }); continue; }
     const rng = seeds.stream('friend', attempt, challenge, heading, variant);
     const vg = new ViewpointGenerator(model, preset, rng.fork('viewpoints'), {

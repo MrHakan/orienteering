@@ -47,7 +47,7 @@ function friendTargets(model, cameras, rng, elevationTolerance) {
   return null;
 }
 
-export function generateSunWatchQuiz({ seed, difficulty = 'sun-watch', mode = 'where-am-i', variant = 0,
+export function generateSunWatchQuiz({ seed, world = 'classic', difficulty = 'sun-watch', mode = 'where-am-i', variant = 0,
   size, n, maxTerrainAttempts = 8, onProgress = () => {}, tuning = null, ...opts }) {
   const t0 = now(), friendMode = mode === 'friend', preset = getDifficulty('sun-watch');
   const latitude = applyTuning(preset, tuning).sunWatchLatitude;
@@ -55,7 +55,7 @@ export function generateSunWatchQuiz({ seed, difficulty = 'sun-watch', mode = 'w
   const fov = friendMode ? 50 : 64, eyeHeight = 1.7;
   for (let attempt = 0; attempt < maxTerrainAttempts; attempt++) {
     onProgress(`Generating terrain (attempt ${attempt + 1})`);
-    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n });
+    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n, world });
     if (!terrainCheck.ok) { log.push({ attempt, stage: 'terrain', issues: terrainCheck.issues }); continue; }
     const rng = seeds.stream('sun-places', mode, attempt, variant);
     const vg = new ViewpointGenerator(model, preset, rng.fork('positions'), { fov, eyeHeight, gridSize: 18, margin: 210 });

@@ -12,6 +12,7 @@ import { formatHeading } from './heading.js';
 import { clamp } from './grid.js';
 import { supportsSunWatch } from './sunWatch.js';
 import { withAnswerExplanation } from './answerExplanation.js';
+import { normaliseWorld, resolveWorld } from './worlds.js';
 
 export const LABELS = ['A', 'B', 'C', 'D', 'E'];
 
@@ -21,9 +22,11 @@ export const HEADING_MODES = ['cardinal', 'intercardinal', 'exact'];
  * Terrain for (seed, difficulty, attempt). Shared by every quiz mode, so one
  * seed gives the same landscape in "Where are you?" and "Which way?".
  */
-export function buildTerrain({ seed, difficulty, attempt, preset, seeds, size = DEFAULT_SIZE, n = DEFAULT_RES }) {
-  const terrain = TerrainGenerator.generate(seeds.stream('terrain', attempt), preset.terrain, { size, n });
-  const model = new TerrainModel({ ...terrain, seed: `${seed}#${difficulty}#${attempt}` });
+export function buildTerrain({ seed, difficulty, attempt, preset, seeds, size = DEFAULT_SIZE, n = DEFAULT_RES, world = 'classic' }) {
+  // Classic keeps its original streams and model seed; other worlds get their own.
+  const tag = world === 'classic' ? [] : [world];
+  const terrain = TerrainGenerator.generate(seeds.stream('terrain', attempt, ...tag), preset.terrain, { size, n, world });
+  const model = new TerrainModel({ ...terrain, seed: [`${seed}#${difficulty}#${attempt}`, ...tag].join('#') });
   const interval = model.chooseContourInterval();
   const terrainCheck = QuizValidator.validateTerrain(model, model.getContours(interval));
   return { model, interval, terrainCheck };
@@ -31,6 +34,13 @@ export function buildTerrain({ seed, difficulty, attempt, preset, seeds, size = 
 
 /** Dispatch on quiz mode; existing location quizzes retain their defaults. */
 export async function generate(opts) {
+  const worldChoice = normaliseWorld(opts.world);
+  const quiz = await generateMode({ ...opts, world: resolveWorld(worldChoice, opts.seed) });
+  quiz.worldChoice = worldChoice;
+  return quiz;
+}
+
+async function generateMode(opts) {
   if (opts.difficulty === 'sun-watch') {
     if (!supportsSunWatch(opts.mode || 'where-am-i')) opts = { ...opts, difficulty: 'medium' };
     else if (opts.mode !== 'grid') {
@@ -73,7 +83,7 @@ export async function generate(opts) {
  * ('cardinal' | 'intercardinal' | 'exact'). `tuning` holds developer-mode
  * overrides (see TUNABLES in difficulty.js).
  */
-export function generateQuiz({ seed, difficulty = 'medium', variant = 0, headingMode = null, tuning = null, size = DEFAULT_SIZE, n = DEFAULT_RES, maxTerrainAttempts = 4, maxViewTries = 8, onProgress = () => {} }) {
+export function generateQuiz({ seed, world = 'classic', difficulty = 'medium', variant = 0, headingMode = null, tuning = null, size = DEFAULT_SIZE, n = DEFAULT_RES, maxTerrainAttempts = 4, maxViewTries = 8, onProgress = () => {} }) {
   const t0 = now();
   const base = applyTuning(getDifficulty(difficulty), tuning);
   const override = HEADING_MODES.includes(headingMode) && headingMode !== base.heading ? headingMode : null;
@@ -87,7 +97,7 @@ export function generateQuiz({ seed, difficulty = 'medium', variant = 0, heading
 
   for (let attempt = 0; attempt < maxTerrainAttempts; attempt++) {
     onProgress(`Generating terrain (attempt ${attempt + 1})`);
-    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n });
+    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n, world });
     if (!terrainCheck.ok) {
       log.push({ attempt, stage: 'terrain', issues: terrainCheck.issues });
       continue;
@@ -180,6 +190,7 @@ export function terrainSummary(model, interval, terrainCheck) {
     size: model.size, n: model.n, heights: model.heights,
     modelSeed: model.seed,
     min: model.min, max: model.max,
+    world: model.meta.world || 'classic',
     archetypes: model.meta.archetypes,
     noiseShare: model.meta.noiseShare,
     contourInterval: interval,

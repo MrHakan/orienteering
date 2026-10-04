@@ -69,6 +69,10 @@ jobs:
         env:
           CHECK_SITE: _site
         run: node scripts/check-explanation-browser.mjs browser-artifacts
+      - name: Test world types in Chromium
+        env:
+          CHECK_SITE: _site
+        run: node scripts/check-world-browser.mjs browser-artifacts
       - uses: actions/upload-artifact@v4
         if: always()
         with:

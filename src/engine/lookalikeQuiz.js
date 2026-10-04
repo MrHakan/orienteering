@@ -198,7 +198,7 @@ function usable(desc, quality, preset) {
  * A bounded failure is explicit: never fall back to an unrelated puzzle or
  * label a broken/ambiguous two-option result as a look-alike question.
  */
-export function generateLookalikeQuiz({ seed, difficulty = 'medium', variant = 0, direction = 'auto', tuning = null,
+export function generateLookalikeQuiz({ seed, world = 'classic', difficulty = 'medium', variant = 0, direction = 'auto', tuning = null,
   size, n, maxTerrainAttempts = 8, onProgress = () => {} }) {
   const t0 = now();
   const preset = getLookalikePreset(difficulty, tuning);
@@ -208,7 +208,7 @@ export function generateLookalikeQuiz({ seed, difficulty = 'medium', variant = 0
   const log = [];
   for (let attempt = 0; attempt < maxTerrainAttempts; attempt++) {
     onProgress(`Generating look-alike terrain (attempt ${attempt + 1})`);
-    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n });
+    const { model, interval, terrainCheck } = buildTerrain({ seed, difficulty, attempt, preset, seeds, size, n, world });
     if (!terrainCheck.ok) { log.push({ attempt, stage: 'terrain', issues: terrainCheck.issues }); continue; }
     const rng = seeds.stream('view', attempt, ...vt);
     const fov = Math.round(rng.range(...preset.fov));

@@ -100,18 +100,24 @@ export const ARCHETYPES = {
   depression:    { weight: 0.45 },
 };
 
-/** Pick 2-5 compatible archetypes, always including at least one major system. */
-export function chooseArchetypes(rng, count) {
+/**
+ * Pick 2-5 compatible archetypes, always including at least one major system.
+ * `weights` (world types) overrides ARCHETYPES weights; a zero weight removes it.
+ */
+export function chooseArchetypes(rng, count, weights = null) {
   const chosen = [];
+  if (count <= 0) return chosen; // a world built only from its own landforms (dunes)
+  const weight = (k) => (weights && k in weights ? weights[k] : ARCHETYPES[k].weight);
   const allowed = (name) =>
     !chosen.includes(name) &&
     !chosen.some((c) => (ARCHETYPES[c].excludes || []).includes(name) || (ARCHETYPES[name].excludes || []).includes(c));
-  const majors = Object.keys(ARCHETYPES).filter((k) => ARCHETYPES[k].major);
-  chosen.push(rng.weighted(majors, (k) => ARCHETYPES[k].weight));
+  const usable = (k) => !weights || weight(k) > 0;
+  const majors = Object.keys(ARCHETYPES).filter((k) => ARCHETYPES[k].major && usable(k));
+  chosen.push(rng.weighted(majors, weight));
   while (chosen.length < count) {
-    const options = Object.keys(ARCHETYPES).filter(allowed);
+    const options = Object.keys(ARCHETYPES).filter((k) => allowed(k) && usable(k));
     if (!options.length) break;
-    chosen.push(rng.weighted(options, (k) => ARCHETYPES[k].weight));
+    chosen.push(rng.weighted(options, weight));
   }
   return chosen;
 }
@@ -119,7 +125,8 @@ export function chooseArchetypes(rng, count) {
 export class LandformGenerator {
   /**
    * @param {import('./rng.js').Random} rng
-   * @param {object} opts { size, relief, complexity, archetypeCount }
+   * @param {object} opts { size, relief, complexity, archetypeCount, world }
+   * `world` is a WORLDS entry; null/undefined is the classic landscape.
    */
   constructor(rng, opts) {
     this.rng = rng;
@@ -127,6 +134,7 @@ export class LandformGenerator {
     this.relief = opts.relief;        // amplitude multiplier
     this.complexity = opts.complexity; // 0..1: spurs, re-entrants, extra knolls
     this.archetypeCount = opts.archetypeCount;
+    this.world = opts.world || null;
     this.primitives = [];
     this.meta = { archetypes: [], ridges: [], valleys: [], spurs: [], reentrants: [], hills: [], plateaus: [], depressions: [], saddles: [] };
     this.unionK = 10;
@@ -143,7 +151,7 @@ export class LandformGenerator {
       downhill: tiltDir + Math.PI, // direction in which the base plane descends
     };
 
-    const names = chooseArchetypes(rng.fork('archetypes'), this.archetypeCount);
+    const names = chooseArchetypes(rng.fork('archetypes'), this.archetypeCount, this.world?.weights);
     // Build large structures first so drainage-following valleys can use them.
     const order = ['basin', 'plateau', 'broadValley', 'mountainRidge', 'ridgeNetwork', 'rollingHills', 'saddlePass', 'narrowValley', 'knoll', 'depression'];
     names.sort((a, b) => order.indexOf(a) - order.indexOf(b));
@@ -153,6 +161,8 @@ export class LandformGenerator {
     }
     // Every landscape gets a little small-scale morphology.
     if (!names.includes('knoll') && rng.chance(0.4 + 0.4 * this.complexity)) this.knoll(rng.fork('extra-knoll'), 1, 2);
+    // World-specific landforms (forks never disturb the classic random stream).
+    for (const feature of this.world?.features || []) this[feature](rng.fork(`world-${feature}`));
     this.primitivesByChannel = {
       add: this.primitives.filter((p) => p.channel === 'add'),
       union: this.primitives.filter((p) => p.channel === 'union'),
@@ -235,6 +245,7 @@ export class LandformGenerator {
       if (rootProfile) k *= rootProfile(t);
       return amp0 * k;
     };
+    width0 *= this.world?.ridgeWidth ?? 1; // sharper arêtes in alpine worlds
     const width = (t) => width0 * widthShape(t);
     const ridge = new SplineLandform({ type: 'ridge', points: pts, amplitude: amp, width, maxWidth: width0 * 1.3, channel: 'union' });
     this.primitives.push(ridge);
@@ -511,7 +522,7 @@ export class LandformGenerator {
         const r = Math.max(2, Math.round(d.sigma / cell));
         const k = j * n + i;
         const g = Math.hypot(heights[k + r] - heights[k - r], heights[k + r * n] - heights[k - r * n]) / (2 * r * cell);
-        if (this.meta.depressions.some((q) => Math.hypot(q.x - i * cell, q.y - j * cell) < 250)) continue;
+        if (this.meta.depressions.some((q) => Math.hypot(q.x - i * cell, q.y - j * cell) < (d.spacing ?? 250))) continue;
         if (g < bestG) { bestG = g; best = { x: i * cell, y: j * cell }; }
       }
       if (!best) continue;
@@ -521,8 +532,154 @@ export class LandformGenerator {
       for (let j = Math.max(0, cj - reach); j <= Math.min(n - 1, cj + reach); j++) {
         for (let i = Math.max(0, ci - reach); i <= Math.min(n - 1, ci + reach); i++) heights[j * n + i] += hill.evaluate(i * cell, j * cell);
       }
-      this.meta.depressions.push({ ...best, depth: d.depth, radius: 150, kind: 'depression' });
+      this.meta.depressions.push({ ...best, depth: d.depth, radius: d.radius ?? 150, kind: d.kind ?? 'depression' });
     }
   }
 
+  // ------------------------------------------------------- world landforms
+
+  /** Well-spaced random points (simple dart throwing). */
+  scatter(rng, count, spacing, margin = 0) {
+    const pts = [];
+    for (let tries = 0; pts.length < count && tries < count * 40; tries++) {
+      const p = this.randomPoint(rng, margin);
+      if (pts.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < spacing)) continue;
+      pts.push(p);
+    }
+    return pts;
+  }
+
+  /** Alpine: bowl-shaped cirques cut into ridge flanks, open downhill. */
+  cirques(rng) {
+    const ridges = this.primitives.filter((p) => p.type === 'ridge' && p.width);
+    if (!ridges.length) return;
+    const n = rng.int(2, 3 + Math.round(this.complexity));
+    for (let i = 0; i < n; i++) {
+      const ridge = rng.pick(ridges);
+      const t = rng.range(0.2, 0.8), p = ridge.field.at(t), side = rng.sign();
+      const w = ridge.width(t), amp = ridge.amplitude(t);
+      const nx = -p.ty * side, ny = p.tx * side;
+      const c = { x: p.x + nx * w * 1.25, y: p.y + ny * w * 1.25 };
+      const r = rng.range(95, 150);
+      this.primitives.push(new EllipticalHill({
+        x: c.x, y: c.y, sx: r * rng.range(0.9, 1.2), sy: r * rng.range(0.7, 0.95), theta: Math.atan2(ny, nx),
+        amplitude: -amp * rng.range(0.28, 0.42), harmonics: [rng.range(-0.12, 0.12), rng.range(0, TAU), 0, 0],
+      }));
+      this.meta.reentrants.push({ points: [c, { x: p.x, y: p.y }], kind: 'cirque' });
+    }
+  }
+
+  /** Glacial: swarm of streamlined hills aligned with the former ice flow. */
+  drumlins(rng) {
+    this.iceFlow ??= this.base.downhill + rng.range(-0.35, 0.35);
+    const pts = this.scatter(rng, rng.int(14, 20 + Math.round(6 * this.complexity)), 115, 0.04 * this.L);
+    for (const p of pts) {
+      const theta = this.iceFlow + rng.normal(0, 0.12), along = rng.range(80, 140), across = along / rng.range(2.4, 3.4);
+      const amp = rng.range(9, 17) * clamp(this.relief, 0.9, 1.6);
+      this.primitives.push(new EllipticalHill({ x: p.x, y: p.y, sx: along, sy: across, theta, amplitude: amp,
+        harmonics: [rng.range(-0.08, 0.08), rng.range(0, TAU), 0.12, Math.PI] }));
+      // A blunt stoss end faces up-ice; the tail tapers down-ice.
+      this.primitives.push(new EllipticalHill({ x: p.x - Math.cos(theta) * along * 0.45, y: p.y - Math.sin(theta) * along * 0.45,
+        sx: along * 0.45, sy: across * 1.05, theta, amplitude: amp * 0.35 }));
+      this.meta.hills.push({ ...p, kind: 'drumlin' });
+    }
+  }
+
+  /** Glacial: long, narrow, sinuous gravel ridges left by sub-glacial rivers. */
+  eskers(rng) {
+    this.iceFlow ??= this.base.downhill + rng.range(-0.35, 0.35);
+    const n = rng.int(1, 2);
+    for (let i = 0; i < n; i++) {
+      const { a, b } = this.lineAcross(rng, 0.7, 1.1, 0.25, this.iceFlow + rng.normal(0, 0.2));
+      const pts = this.guideSpline(rng, a, b, rng.int(6, 8), 0.05 * this.L);
+      const profile = randomProfile(rng, 6, 0.55, 1);
+      const amp = rng.range(7, 11), w = rng.range(16, 22);
+      this.primitives.push(new SplineLandform({ type: 'esker', points: pts, channel: 'union', maxWidth: w,
+        amplitude: (t) => amp * profile(t) * smoothstep(0, 0.08, t) * smoothstep(0, 0.08, 1 - t), width: () => w }));
+      this.meta.ridges.push({ points: pts, kind: 'esker' });
+    }
+  }
+
+  /** Glacial: kettle holes left by stranded ice blocks (closed depressions). */
+  kettles(rng) {
+    this.pendingDepressions ??= [];
+    const n = rng.int(3, 6);
+    for (let i = 0; i < n; i++) this.pendingDepressions.push({ depth: rng.range(4, 8), sigma: rng.range(26, 44), aspect: rng.range(1, 1.4),
+      theta: rng.range(0, Math.PI), spacing: 140, radius: 110, kind: 'kettle' });
+  }
+
+  /** Karst: fields of small solution dolines (closed depressions). */
+  dolines(rng) {
+    this.pendingDepressions ??= [];
+    const n = rng.int(9, 14 + Math.round(5 * this.complexity));
+    for (let i = 0; i < n; i++) this.pendingDepressions.push({ depth: rng.range(3.5, 7.5), sigma: rng.range(18, 34), aspect: rng.range(1, 1.35),
+      theta: rng.range(0, Math.PI), spacing: 85, radius: 80, kind: 'doline' });
+  }
+
+  /** Karst: steep, rounded limestone cone hills (fengcong). */
+  coneKarst(rng) {
+    const pts = this.scatter(rng, rng.int(5, 8 + Math.round(4 * this.complexity)), 170, 0.04 * this.L);
+    for (const p of pts) {
+      const s = rng.range(48, 80);
+      this.hill(rng, p.x, p.y, rng.range(16, 32) * clamp(this.relief, 0.9, 1.5), s, s * 1.15, 1.25, 0.14);
+      this.meta.hills.push({ ...p, kind: 'cone' });
+    }
+  }
+
+  /** Canyon country: steep-sided mesas and buttes. */
+  mesas(rng) {
+    const pts = this.scatter(rng, rng.int(2, 4), 420, 0.12 * this.L);
+    for (const [i, p] of pts.entries()) {
+      const rx = i === 0 ? rng.range(180, 280) : rng.range(70, 150); // one mesa, smaller buttes
+      this.primitives.push(new Plateau({ ...p, rx, ry: rx * rng.range(0.6, 0.95), theta: rng.range(0, Math.PI),
+        amplitude: rng.range(24, 40) * clamp(this.relief, 0.9, 1.6), power: rng.range(8, 11) }));
+      this.meta.plateaus.push(p);
+    }
+  }
+
+  /** Canyon country: one deep, winding gorge following the drainage. */
+  canyon(rng) {
+    const samples = Array.from({ length: 40 }, () => {
+      const p = this.randomPoint(rng, 0.15 * this.L);
+      return { ...p, h: this.evaluate(p.x, p.y) };
+    }).sort((a, b) => b.h - a.h);
+    const path = this.traceDescent(rng, samples[rng.int(0, 6)]);
+    if (path.length < 8) return;
+    const pts = catmullRom(path.filter((_, i) => i % 2 === 0 || i === path.length - 1), 6);
+    const depth = rng.range(34, 50) * clamp(this.relief, 0.9, 1.5), w = rng.range(40, 56);
+    this.primitives.push(new SplineLandform({ type: 'valley', points: pts, channel: 'carve', maxWidth: w * 1.2,
+      amplitude: (t) => depth * (0.35 + 0.65 * smoothstep(0, 0.3, t)), width: (t) => w * (0.85 + 0.3 * t) }));
+    this.meta.valleys.push({ points: pts, kind: 'canyon' });
+  }
+
+  /** Sand sea: transverse dune crests (gentle stoss, steep lee) on broad draa ridges. */
+  duneField(rng) {
+    const L = this.L, wind = rng.range(0, TAU);
+    const crest = wind + Math.PI / 2, wx = Math.cos(wind), wy = Math.sin(wind);
+    // Draa: giant compound ridges give the skyline its large shapes.
+    const draaSpacing = rng.range(520, 720);
+    for (let k = -1.5; k <= 1.5; k += draaSpacing / L) {
+      const c = { x: L / 2 + wx * k * L + rng.normal(0, 40), y: L / 2 + wy * k * L + rng.normal(0, 40) };
+      this.primitives.push(new EllipticalHill({ x: c.x, y: c.y, sx: rng.range(650, 1100), sy: rng.range(150, 220), theta: crest + rng.normal(0, 0.1),
+        amplitude: rng.range(22, 38) * clamp(this.relief, 0.9, 1.4), harmonics: [rng.range(-0.15, 0.15), rng.range(0, TAU), rng.range(-0.1, 0.1), rng.range(0, TAU)] }));
+    }
+    // Superimposed dunes: two offset Gaussians make each crest asymmetric.
+    const spacing = rng.range(140, 200);
+    for (let k = -0.62; k <= 0.62; k += spacing / L) {
+      const off = k * L + rng.normal(0, 18);
+      const c = { x: L / 2 + wx * off, y: L / 2 + wy * off };
+      const half = 0.85 * L;
+      const a = { x: c.x - Math.cos(crest) * half, y: c.y - Math.sin(crest) * half };
+      const b = { x: c.x + Math.cos(crest) * half, y: c.y + Math.sin(crest) * half };
+      const pts = this.guideSpline(rng, a, b, rng.int(6, 9), 0.035 * L);
+      const amp = rng.range(9, 15), profile = randomProfile(rng, 7, 0.45, 1);
+      const stoss = rng.range(46, 62), lee = rng.range(19, 26);
+      const shifted = pts.map((p) => ({ x: p.x - wx * stoss * 0.45, y: p.y - wy * stoss * 0.45 }));
+      this.primitives.push(new SplineLandform({ type: 'dune', points: shifted, channel: 'union', maxWidth: stoss,
+        amplitude: (t) => amp * 0.8 * profile(t), width: () => stoss }));
+      this.primitives.push(new SplineLandform({ type: 'dune', points: pts, channel: 'union', maxWidth: lee,
+        amplitude: (t) => amp * profile(t), width: () => lee }));
+      this.meta.ridges.push({ points: pts, kind: 'dune' });
+    }
+  }
 }

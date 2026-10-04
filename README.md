@@ -95,6 +95,7 @@ There is exactly **one** elevation model per quiz (`TerrainModel`). The WebGL sc
 ```
 seed ─► SeedManager (named, independent sfc32 streams)
      ─► TerrainGenerator
+          worlds.js           world recipe: archetype weights, noise, erosion, extras
           LandformGenerator   2–5 compatible archetypes → primitives
                               (elliptical Gaussian hills/knolls, spline ridges with
                                varying width/amplitude, spurs, re-entrants,
@@ -125,6 +126,23 @@ seed ─► SeedManager (named, independent sfc32 streams)
 ```
 
 The view comparison (`descriptorDistance`) uses only what's inside the field of view: the horizon angle plus terrain angles at 40/120/350 m for each column. That means the difference between the answer and each distractor can always be seen in the scene.
+
+## World types
+
+The **World** selector picks the terrain recipe. Map size (2 km × 2 km), quiz modes and difficulties are unchanged; validation and answer explanations work the same on every world.
+
+| World | Landscape | Own landforms |
+|---|---|---|
+| **Classic** (default) | Mixed hills, ridges, valleys and hollows | — |
+| **Alpine** | High relief, sharper arêtes, rugged mid-scale noise | Cirque bowls cut into ridge flanks |
+| **Karst** | Limestone plateau, little surface drainage | Steep cone hills (fengcong), fields of closed dolines |
+| **Glacial** | Smooth, ice-moulded ground, broad U-valleys | Drumlin swarms aligned with the ice flow (blunt up-ice end), sinuous eskers, kettle holes |
+| **Canyon** | Stepped benches from resistant rock beds | Mesas and buttes, one deep winding gorge following the drainage |
+| **Dunes** | Sand sea, almost no erosion | Asymmetric transverse dune crests (gentle stoss, steep lee) on giant draa ridges |
+
+**Auto** chooses a world from the seed (`world-v1|seed`), so a shared `w=auto` link reproduces it. In Auto texture mode a world with a natural surface uses it (alpine scree, mossy karst, glacial meadow, desert sand); an explicit texture still wins.
+
+Classic is byte-for-byte the original generator, so old links and saved quizzes keep their terrain: links carry `w=<world>` only for other worlds. New worlds use their own terrain stream and model seed (`…#<world>`), tune the archetype mix, noise spectrum, domain warp and erosion (`src/engine/worlds.js`), and add their landforms in `LandformGenerator`. The chosen world is remembered locally for new quizzes.
 
 ## Difficulty
 

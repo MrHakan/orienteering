@@ -19,6 +19,7 @@ import { usesSunWatch, supportsSunWatch, sunWatchFrame, SUN_WATCH_DURATION } fro
 import { TerrainRenderer } from '../render/webglTerrain.js';
 import { CONDITIONS, WINDS, DENSITIES, normaliseEnvironment, weatherParams, environmentAnimated } from '../render/environment.js';
 import { TEXTURE_MODES, terrainTexture } from '../render/terrainTextures.js';
+import { WORLDS, WORLD_CHOICES, normaliseWorld, worldLabel } from '../engine/worlds.js';
 import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
 import { relativeBearing } from '../render/relativeBearing.js';
@@ -157,7 +158,7 @@ function updateDensityControls(prefix) {
 function updateTextureNote(prefix) {
   const mode = $(`${prefix}-texture`).value;
   $(`${prefix}-texture-note`).textContent = state.quiz
-    ? `${mode === 'auto' ? 'Seed style' : 'Texture style'}: ${terrainTexture(state.quiz.seed, mode).label}.`
+    ? `${mode === 'auto' ? 'Seed style' : 'Texture style'}: ${terrainTexture(state.quiz.seed, mode, state.quiz.terrain.world).label}.`
     : 'Auto chooses a texture style for each seed.';
 }
 function readEnvironmentControls(prefix) {
@@ -263,14 +264,14 @@ function getWorker() {
   return worker;
 }
 
-function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning }) {
+function requestQuiz({ seed, world, difficulty, variant = 0, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning }) {
   const id = ++state.requestId;
   return new Promise((resolve, reject) => {
     const w = getWorker();
     if (!w) {
       // Fallback: generate on the main thread.
       import('../engine/quiz.js').then(({ generate }) => {
-        setTimeout(() => generate({ seed, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning }).then(resolve, reject), 30);
+        setTimeout(() => generate({ seed, world, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning }).then(resolve, reject), 30);
       }, reject);
       return;
     }
@@ -282,7 +283,7 @@ function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, directi
       else reject(new Error(e.data.message));
     };
     w.addEventListener('message', onMessage);
-    w.postMessage({ id, seed, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning });
+    w.postMessage({ id, seed, world, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning });
   });
 }
 
@@ -293,6 +294,7 @@ function requestQuiz({ seed, difficulty, variant = 0, mode, headingMode, directi
 async function load(req) {
   const r = {
     seed: req.seed || SeedManager.randomSeed(),
+    world: normaliseWorld(req.world ?? $('world').value),
     difficulty: req.difficulty || $('difficulty').value,
     variant: req.variant || 0,
     scramble: req.scramble || 0,
@@ -318,6 +320,7 @@ async function load(req) {
   if (r.mode === 'lookalike') r.headingMode = 'auto';
   if (r.mode === 'grid' && r.gridChallenge === 'lost-compass') r.headingMode = 'auto';
   $('seed').value = r.seed;
+  $('world').value = r.world;
   $('difficulty').value = r.difficulty;
   $('mode').value = r.mode;
   $('heading-mode').value = r.headingMode;
@@ -357,6 +360,7 @@ function updateHash() {
   const q = state.quiz;
   if (!q) return;
   const parts = [`seed=${encodeURIComponent(q.seed)}`, `d=${q.difficulty}`];
+  if ((q.worldChoice || 'classic') !== 'classic') parts.push(`w=${q.worldChoice}`);
   if (q.mode === 'facing') parts.push('m=facing');
   else if (q.mode === 'grid') {
     parts.push('m=grid', `g=${q.grid.size}`);
@@ -458,14 +462,14 @@ function show(quiz) {
     : 'You are at one of the marked points, facing the direction shown. Which one?';
   $('prompt').classList.toggle('grid-remark', grid);
   (grid ? document.querySelector('.map-wrap') : document.querySelector('.answer-row')).before($('prompt'));
-  $('credit').textContent = `seed ${quiz.seed}${quiz.variant ? ` · positions #${quiz.variant}` : ''} · ${DIFFICULTIES[quiz.difficulty].label.toLowerCase()} · ${Math.round(t.size / 1000 * 10) / 10} km × ${Math.round(t.size / 1000 * 10) / 10} km`;
+  $('credit').textContent = `seed ${quiz.seed}${quiz.variant ? ` · positions #${quiz.variant}` : ''} · ${DIFFICULTIES[quiz.difficulty].label.toLowerCase()}${t.world && t.world !== 'classic' ? ` · ${worldLabel(t.world).toLowerCase()} world` : ''} · ${Math.round(t.size / 1000 * 10) / 10} km × ${Math.round(t.size / 1000 * 10) / 10} km`;
   $('viewing-badge').hidden = true;
   $('result').hidden = true;
   $('prompt').hidden = false;
   $('map').setAttribute('aria-label', quiz.mode === 'trail' && !grid ? 'Contour map showing three candidate trails: A red, B green, C cyan. Tap a trail or choose its letter.' : grid ? `${quiz.grid.size} by ${quiz.grid.size} contour grid. Rows A to ${String.fromCharCode(64 + quiz.grid.size)} from north to south; columns 1 to ${quiz.grid.size} from west to east. Enter a cell code below to answer.` : 'Topographic contour map with candidate locations');
 
   if (renderer) {
-    renderer.setTerrain(state.model, { seed: quiz.seed });
+    renderer.setTerrain(state.model, { seed: quiz.seed, world: quiz.terrain.world });
     renderer.setPerson(quiz.friend || null);
     renderScene(quiz.camera);
   }
@@ -969,6 +973,7 @@ function newPositions() {
   if (!state.quiz) return;
   const q = state.quiz;
   const same = $('difficulty').value === q.difficulty && $('seed').value.trim() === q.seed
+    && $('world').value === (q.worldChoice || 'classic')
     && $('mode').value === q.mode && $('heading-mode').value === (q.headingChoice || 'auto')
     && (q.mode !== 'lookalike' || $('lookalike-direction').value === q.directionChoice);
   const gridSame = q.mode !== 'grid' || (Number($('grid-size').value) === q.grid.size && $('grid-challenge').value === q.grid.challenge);
@@ -987,7 +992,7 @@ $('new-quiz').addEventListener('click', newQuiz);
 $('new-positions').addEventListener('click', newPositions);
 $('scramble').addEventListener('click', scrambleOptions);
 // Changing mode, difficulty or heading style keeps the seed, so the terrain carries over.
-for (const id of ['difficulty', 'mode', 'heading-mode', 'lookalike-direction', 'grid-size', 'grid-challenge', 'friend-challenge', 'friend-answer', 'movement', 'trail-answer']) {
+for (const id of ['world', 'difficulty', 'mode', 'heading-mode', 'lookalike-direction', 'grid-size', 'grid-challenge', 'friend-challenge', 'friend-answer', 'movement', 'trail-answer']) {
   $(id).addEventListener('change', () => { syncControls(); load({ seed: $('seed').value.trim() }); });
 }
 $('copy-link').addEventListener('click', async () => {
@@ -1293,7 +1298,7 @@ function parseHash() {
   const sc = Math.max(0, Math.floor(+p.get('s') || 0));
   const h = p.get('h');
   return {
-    seed: p.get('seed'), difficulty: d && DIFFICULTIES[d] ? d : null, variant: v, scramble: sc,
+    seed: p.get('seed'), world: normaliseWorld(p.get('w')), difficulty: d && DIFFICULTIES[d] ? d : null, variant: v, scramble: sc,
     mode: ['facing', 'lookalike', 'grid', 'friend', 'trail'].includes(p.get('m')) ? p.get('m') : 'where-am-i',
     gridSize: normaliseGridSize(p.get('g')),
     trailAnswer: normaliseTrailAnswer(p.get('ta')),
@@ -1312,7 +1317,7 @@ function parseHash() {
 window.addEventListener('hashchange', () => {
   const h = parseHash();
   const q = state.quiz;
-  if (h.seed && (h.seed !== q?.seed || h.difficulty !== q?.difficulty || h.variant !== (q?.variant || 0) || h.scramble !== (q?.scramble || 0)
+  if (h.seed && (h.seed !== q?.seed || h.world !== (q?.worldChoice || 'classic') || h.difficulty !== q?.difficulty || h.variant !== (q?.variant || 0) || h.scramble !== (q?.scramble || 0)
     || h.mode !== q?.mode || h.headingMode !== (q?.headingChoice || 'auto')
     || (h.mode === 'lookalike' && h.direction !== q?.directionChoice)
     || (h.mode === 'trail' && (h.movement !== q?.trail?.movement || h.trailAnswer !== q?.trail?.answerMode
@@ -1422,10 +1427,13 @@ $('friend-challenge').addEventListener('change', () => store.set('otq.friend', $
 $('friend-answer').value = normaliseFriendAnswer(store.get('otq.friendAnswer', 'point'));
 $('friend-answer').addEventListener('change', () => store.set('otq.friendAnswer', $('friend-answer').value));
 $('friend-skin').value = normaliseFriendSkin(store.get('otq.friendSkin', 'classic'));
+$('world').innerHTML = WORLD_CHOICES.map((id) => `<option value="${id}" title="${id === 'auto' ? 'A world type chosen from the seed' : WORLDS[id].description}">${id === 'auto' ? 'Auto — by seed' : worldLabel(id)}</option>`).join('');
+$('world').value = normaliseWorld(store.get('otq.world', 'classic'));
 const initial = parseHash();
 adoptLinkTuning(initial.tuning);
 renderDevPanel();
 if (initial.seed) load({ ...initial, difficulty: initial.difficulty || store.get('otq.difficulty', 'medium') });
 else load({ difficulty: store.get('otq.difficulty', 'medium'), mode: store.get('otq.mode', 'where-am-i') });
 $('difficulty').addEventListener('change', () => store.set('otq.difficulty', $('difficulty').value));
+$('world').addEventListener('change', () => store.set('otq.world', $('world').value));
 $('mode').addEventListener('change', () => store.set('otq.mode', $('mode').value));
