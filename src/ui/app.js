@@ -423,7 +423,7 @@ function show(quiz) {
   $('facing-text').closest('.facing').hidden = usesSunWatch(quiz);
   document.querySelector('.card').classList.toggle('sun-watch', usesSunWatch(quiz));
   document.querySelector('.about').hidden = usesSunWatch(quiz);
-  $('prompt').textContent = usesSunWatch(quiz) ? grid ? `Locate your friend's cell: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size}.`
+  $('prompt').textContent = usesSunWatch(quiz) ? grid ? `${friendGrid ? "Locate your friend's cell" : 'Find your cell'}: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size}.`
     : quiz.mode === 'friend' ? 'Where is your friend: A, B or C?' : 'You are at A, B or C. Which one?'
     : facing ? 'Which direction were you facing at the start?'
     : lookalike ? 'A, B and C have similar views in this direction. Match the ridge shapes and foreground to find your point.'
@@ -766,7 +766,7 @@ function showGridResult(label, right) {
     <div class="views">${options.map((o) => `<button type="button" class="btn ghost" data-view="${o.label}">View ${o.label}${o.correct ? ' (true)' : o.label === label ? ' (your pick)' : ' (closest match)'}</button>`).join('')}</div>
     <table><tr><th>Cell</th><th>Landform</th><th>Elevation</th><th>View diff.</th>${headingHidden(q) ? '<th>Compared heading</th>' : ''}</tr>
     ${options.map((o) => `<tr><td><strong>${o.label}</strong></td><td>${o.landform}</td><td>${Math.round(o.z)} m</td><td>${o.correct ? '—' : `${o.D.toFixed(1)}°`}</td>${headingHidden(q) ? `<td>${String(o.heading).padStart(3, '0')}°</td>` : ''}</tr>`).join('')}</table>
-    <p class="note">Views are compared from cell centres.${headingHidden(q) ? ' Wrong cells use their closest-looking compass direction.' : ''}</p>
+    <p class="note">Views are compared from cell centres.${q.grid.challenge === 'lost-compass' ? ' Wrong cells use their closest-looking compass direction.' : ''}</p>
     <button type="button" class="btn primary" id="next">Next quiz (N)</button>`;
   res.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => viewFrom(b.dataset.view)));
   $('next').addEventListener('click', newQuiz);
@@ -856,7 +856,7 @@ function renderFacts() {
   $('opt-tape').closest('label').hidden = usesSunWatch(q);
   $('legend').hidden = sealed || !state.settings.landforms;
   const facts = [
-    ['Mode', q.mode === 'trail' ? q.grid ? 'Bunny-hop · finish cell' : 'Bunny-hop trails' : q.mode === 'friend' ? `Where is your friend?${q.friend.challenge === 'depth-trap' ? ' · Depth trap' : ''}` : q.mode === 'facing' ? 'Which way are you facing?' : q.mode === 'lookalike' ? 'Look-alikes (A / B / C)' : q.mode === 'grid' ? `Grid ${q.grid.size} × ${q.grid.size}${headingHidden(q) ? ' · Lost compass' : ''}` : 'Where are you?'],
+    ['Mode', q.mode === 'trail' ? q.grid ? 'Bunny-hop · finish cell' : 'Bunny-hop trails' : q.mode === 'friend' ? `Where is your friend?${q.friend.challenge === 'depth-trap' ? ' · Depth trap' : ''}` : q.mode === 'facing' ? 'Which way are you facing?' : q.mode === 'lookalike' ? 'Look-alikes (A / B / C)' : q.mode === 'grid' ? `Grid ${q.grid.size} × ${q.grid.size}${q.grid.challenge === 'lost-compass' ? ' · Lost compass' : ''}` : 'Where are you?'],
     ...(!sealed ? [['Heading', headingHidden(q) && !state.answered ? 'hidden until you answer' : `${String(Math.round(q.camera.heading)).padStart(3, '0')}° (${q.mode === 'facing' ? 'one of 8 directions' : q.heading.mode})`]] : []),
     ...(q.mode === 'trail' ? [['Run', `${q.trail.duration} s · ${Math.round(q.trail.plan.length)} m · ${q.grid ? 'find the finish' : 'three matched routes'}`],
       ['Movement', q.trail.movement === 'classic' ? 'CS 1.6 style' : 'CS:GO style']] : []),

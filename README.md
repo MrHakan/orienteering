@@ -167,9 +167,10 @@ the marked point; this mode uses the ordinary terrain view.
 
 ### Sun & watch difficulty
 
-Select **Difficulty → Sun & watch** in Where are you?, Look-alikes or Where is
-your friend? A/B/C remain three separate locations. Their views match at three
-different bearings, at least 90° apart. All three pairs are checked at full ray
+Select **Difficulty → Sun & watch** in Where are you?, Look-alikes, Grid method or
+Where is your friend? In point questions, A/B/C remain three separate locations.
+Their views match at three different bearings, at least 90° apart. All three
+pairs are checked at full ray
 resolution, and all six wrong-location/observed-bearing combinations must differ
 by at least 3.4° RMS. Inferring the bearing from the clock and sun therefore
 helps eliminate the similar-looking wrong locations.
@@ -197,6 +198,12 @@ No absolute heading text, compass tape, tutorial, skyline overlay or pre-answer
 question diagnostics are shown. The clock and sun provide the physical scene;
 the game does not explain how to interpret them. The answer and comparisons
 appear after the player submits a location.
+
+Grid method keeps cell-centre answers for 4×4, 6×6, 8×8 and 16×16. The same
+15-second watch and sun sequence replaces the visible compass. Every other cell
+is checked at the starting bearing; Lost compass additionally checks all eight
+directions. Grid links retain `d=sun-watch`, for example
+`#seed=grid-check&d=sun-watch&m=grid&g=6`.
 
 The seeded watch uses simulated local solar time, an equinox and **0° latitude
 (the equator)** by default. The morning sun is due east (090°); the afternoon

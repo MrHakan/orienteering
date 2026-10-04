@@ -43,6 +43,17 @@ is no second direction answer. After answering, the true bearing is revealed.
 Wrong-cell comparison buttons show the direction at that cell that most closely
 matches the original view.
 
+## Sun & watch
+
+Choose **Difficulty → Sun & watch** with any grid size. The 15-second clip shows
+the wristwatch, turns toward the sun and returns to the starting view. Play,
+pause, replay and the timeline inspect the sequence. The heading and compass
+tape are hidden; answer by selecting or typing your own cell as usual.
+
+Standard checks every other cell at the starting bearing. Lost compass checks
+all eight bearings at every other cell. Both retain the same cell-centre rule
+and validated answer set. The developer latitude setting also applies to Grid.
+
 ## How generation works
 
 The engine uses the existing seeded terrain model and contour validation.
@@ -77,16 +88,20 @@ Examples:
 - `#seed=grid-check&d=medium&m=grid&g=6`
 - `#seed=grid-check&d=medium&m=grid&g=8`
 - `#seed=grid-check&d=medium&m=grid&g=16&gc=lost-compass`
+- `#seed=grid-check&d=sun-watch&m=grid&g=6`
 
 PNG and video exports use the same grid and give a short instruction such as
 “Find your cell: A1–P16.” between the view and map. The answer replaces that
 remark on reveal. Question frames hide the
 origin; answer frames highlight the true cell. Lost compass exports also hide
 the heading and tape before the reveal, even when the export tape setting is on.
+Sun & watch exports include the watch, sun and relative turn through the same
+15-second sequence, with no absolute compass tape.
 
 ## Validation
 
 `npm test` includes coordinate boundaries, input validation, rotated pointer
 selection, all four grid sizes with both challenges, deterministic replay,
 fixed references across variants, heading overrides, all-direction comparison,
-short captions and refusal to emit an unvalidated question.
+short captions, Sun & watch visibility and playback, latitude tuning and refusal
+to emit an unvalidated question.

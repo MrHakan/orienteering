@@ -7,6 +7,7 @@ import { TerrainModel } from '../src/engine/terrainModel.js';
 import { descriptorDistance } from '../src/engine/skyline.js';
 import { scrambleLabels } from '../src/engine/scramble.js';
 import { captionText } from '../src/export/composer.js';
+import { supportsSunWatch, usesSunWatch, sunWatchFrame, solarPosition } from '../src/engine/sunWatch.js';
 
 test('grid references run A1 west to east, then B1 north to south', () => {
   for (const n of [4, 6, 8, 16]) {
@@ -84,6 +85,58 @@ test('grid replay and new positions retain fixed references; heading overrides a
   assert.equal(a.heading.mode, 'cardinal'); assert.equal(a.camera.heading % 90, 0);
   assert.deepEqual(a.options.map((o) => [o.label, o.x, o.y]), c.options.map((o) => [o.label, o.x, o.y]));
   assert.notDeepEqual(a.camera, c.camera);
+});
+
+for (const gridSize of [4, 6, 8, 16]) for (const gridChallenge of ['standard', 'lost-compass']) {
+  test(`sun/watch ${gridSize}×${gridSize} ${gridChallenge} retains validated cells and a visible solar cue`, async () => {
+    const q = await generate({ seed: 'grid-check', mode: 'grid', difficulty: 'sun-watch', gridSize, gridChallenge });
+    assert.equal(supportsSunWatch(q.mode), true);
+    assert.equal(q.difficulty, 'sun-watch'); assert.equal(usesSunWatch(q), true);
+    assert.equal(q.grid.size, gridSize); assert.equal(q.grid.challenge, gridChallenge);
+    assert.equal(q.options.length, gridSize ** 2);
+    assert.equal(q.options.filter(o => o.correct).length, 1);
+    assert.equal(cellAt(q.camera.x, q.camera.y, q.terrain.size, gridSize), q.correctLabel);
+    assert.deepEqual(q.heading, { degrees: q.camera.heading, text: '', arrow: '', mode: 'hidden' });
+    assert.equal(headingHidden(q), true); assert.deepEqual(quizMarkers(q), []);
+    assert.equal(scrambleLabels(q, 3), q);
+    assert.equal(q.validation.ok, true); assert.equal(q.lowConfidence, false);
+    const model = new TerrainModel({ ...q.terrain, seed: q.terrain.modelSeed });
+    const view = (p, heading) => model.skyline.viewDescriptor(p.x, p.y, heading, q.camera.fov,
+      { eyeHeight: q.camera.eyeHeight, columns: 49 });
+    const target = view(q.camera, q.camera.heading);
+    const headings = gridChallenge === 'lost-compass' ? [0, 45, 90, 135, 180, 225, 270, 315] : [q.camera.heading];
+    let closest = Infinity;
+    for (const p of q.options.filter(o => !o.correct)) {
+      const difference = Math.min(...headings.map(h => descriptorDistance(target, view(p, h))));
+      assert.ok(Math.abs(difference - p.D) < 1e-9);
+      assert.ok(difference >= q.validation.minRequiredDistance);
+      closest = Math.min(closest, difference);
+    }
+    assert.ok(Math.abs(closest - q.validation.minDistance) < 1e-9);
+    assert.equal(q.stats.directionsChecked, headings.length);
+    const sun = solarPosition(q.sunWatch.hour24, q.sunWatch.minute, 0, q.sunWatch.latitude);
+    assert.ok(sun.altitude > model.skyline.castRay(q.camera.x, q.camera.y, q.camera.z, sun.azimuth).angle + 4);
+    assert.equal(sunWatchFrame(q, 4).watch.progress, 1);
+    assert.ok(Math.abs(sunWatchFrame(q, 4).camera.pitch + 64) < 1e-9);
+    assert.deepEqual(sunWatchFrame(q, 15).camera, q.camera);
+    assert.equal(captionText(q), `Find your cell: A1–${String.fromCharCode(64 + gridSize)}${gridSize}.`);
+  });
+}
+
+test('sun/watch grid replay preserves cells, ignores heading overrides and applies latitude tuning', async () => {
+  const opts = { seed: 'grid-check', mode: 'grid', difficulty: 'sun-watch', gridSize: 6 };
+  const a = await generate(opts), b = await generate({ ...opts, headingMode: 'exact' });
+  assert.deepEqual(a.camera, b.camera); assert.deepEqual(a.options, b.options); assert.deepEqual(a.sunWatch, b.sunWatch);
+  const tuned = await generate({ ...opts, tuning: { sunLat: 40 } });
+  assert.equal(tuned.sunWatch.latitude, 40);
+  assert.deepEqual(tuned.camera, a.camera); assert.deepEqual(tuned.options, a.options);
+  const next = await generate({ ...opts, variant: 1 });
+  assert.deepEqual(next.terrain.heights, a.terrain.heights);
+  assert.notDeepEqual(next.camera, a.camera);
+  assert.deepEqual(next.options.map(o => [o.label, o.x, o.y]), a.options.map(o => [o.label, o.x, o.y]));
+  const ordinary = await generate({ ...opts, difficulty: 'medium' });
+  assert.equal(usesSunWatch(ordinary), false); assert.equal(headingHidden(ordinary), false);
+  assert.ok(ordinary.heading.text.length > 0);
 });
 
 test('lost compass compares every wrong cell in all eight directions', async () => {

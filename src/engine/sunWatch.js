@@ -5,7 +5,7 @@ export const SUN_WATCH_DURATION = 15;
 export const DEFAULT_SUN_LATITUDE = 0;
 export const WATCH_TIMING = Object.freeze({ down: 2, readable: 2.5, end: 5.5, sky: 6.4, aim: 10.2, return: 11.2, finish: 15 });
 export const FRIEND_WATCH_TIMING = Object.freeze({ down: 6, readable: 6.5, end: 9.5, sky: 10.2, aim: 12.3, return: 12.9, finish: 15 });
-export const supportsSunWatch = mode => ['where-am-i', 'lookalike', 'friend'].includes(mode);
+export const supportsSunWatch = mode => ['where-am-i', 'lookalike', 'friend', 'grid'].includes(mode);
 export const usesSunWatch = quiz => quiz?.difficulty === 'sun-watch' && !!quiz.sunWatch;
 export const watchTiming = quiz => quiz?.mode === 'friend' ? FRIEND_WATCH_TIMING : WATCH_TIMING;
 

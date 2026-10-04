@@ -10,6 +10,7 @@ import { QuizValidator } from './validator.js';
 import { getDifficulty, applyTuning } from './difficulty.js';
 import { formatHeading } from './heading.js';
 import { clamp } from './grid.js';
+import { supportsSunWatch } from './sunWatch.js';
 
 export const LABELS = ['A', 'B', 'C', 'D', 'E'];
 
@@ -29,11 +30,13 @@ export function buildTerrain({ seed, difficulty, attempt, preset, seeds, size = 
 
 /** Dispatch on quiz mode; existing location quizzes retain their defaults. */
 export async function generate(opts) {
-  if (opts.difficulty === 'sun-watch' && ['where-am-i', 'lookalike', 'friend', undefined].includes(opts.mode)) {
-    const { generateSunWatchQuiz } = await import('./sunWatchQuiz.js');
-    return generateSunWatchQuiz(opts);
+  if (opts.difficulty === 'sun-watch') {
+    if (!supportsSunWatch(opts.mode || 'where-am-i')) opts = { ...opts, difficulty: 'medium' };
+    else if (opts.mode !== 'grid') {
+      const { generateSunWatchQuiz } = await import('./sunWatchQuiz.js');
+      return generateSunWatchQuiz(opts);
+    }
   }
-  if (opts.difficulty === 'sun-watch') opts = { ...opts, difficulty: 'medium' };
   if (opts.mode === 'trail') {
     if (opts.trailAnswer === 'grid') {
       const { generateTrailGridQuiz } = await import('./trailGridQuiz.js');

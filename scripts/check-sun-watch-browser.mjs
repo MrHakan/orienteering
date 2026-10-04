@@ -40,7 +40,7 @@ try {
   page.on('response', response => { if (response.status() >= 400 && /\.(js|webp)($|\?)/.test(response.url())) errors.push(`Missing asset: ${response.url()}`); });
   const q = await generate({ seed: 'sun-places', difficulty: 'sun-watch', mode: 'where-am-i' });
   await page.goto(`${url}/#seed=sun-places&d=sun-watch`); await ready(page);
-  await page.evaluate(async () => {
+  const observeScene = () => page.evaluate(async () => {
     const src = new URL('../', document.querySelector('script[type="module"]').src);
     const { TerrainRenderer } = await import(new URL('render/webglTerrain.js', src));
     const render = TerrainRenderer.prototype.render;
@@ -51,6 +51,7 @@ try {
       return result;
     };
   });
+  await observeScene();
   assert.equal(await page.locator('#direction-tools').isVisible(), true);
   assert.equal(await page.locator('#relative-bearing').isVisible(), true);
   assert.equal(await page.locator('.facing').isVisible(), false);
@@ -168,8 +169,78 @@ try {
     await writeFile(join(out, `sun-watch-${e.format}-${key}.png`), Buffer.from(e[key].split(',')[1], 'base64'));
   }
   console.log('Location difficulty, solar visibility and 15-second video exports passed.');
-  // Leaving the mode restores the existing interface and never runs its camera clock.
+  // Standalone Grid keeps the difficulty and uses the same watch/sun clock.
   await page.locator('#mode').selectOption('grid'); await ready(page);
+  let exportGrid;
+  for (const gridSize of [4, 6, 8, 16]) {
+    if (gridSize !== 4) { await page.locator('#grid-size').selectOption(String(gridSize)); await ready(page); }
+    const grid = await generate({ seed: 'sun-places', mode: 'grid', difficulty: 'sun-watch', gridSize });
+    assert.equal(await page.locator('#difficulty').inputValue(), 'sun-watch');
+    assert.equal(await page.locator('#difficulty option[value="sun-watch"]').isEnabled(), true);
+    assert.equal(await page.locator('#direction-tools').isVisible(), true);
+    assert.equal(await page.locator('#grid-answer').isVisible(), true);
+    assert.equal(await page.locator('#grid-cell-label').textContent(), 'Your cell');
+    assert.equal(await page.locator('#prompt').textContent(), `Find your cell: A1–${String.fromCharCode(64 + gridSize)}${gridSize}.`);
+    assert.equal(await page.locator('.facing').isVisible(), false);
+    assert.equal(await page.locator('#facts').isVisible(), false);
+    for (const t of [4, 11, 15]) {
+      await seek(page, t);
+      const actual = await page.evaluate(() => window.sunFrames.at(-1)), expected = sunWatchFrame(grid, t);
+      for (const [key, value] of Object.entries(expected.camera))
+        assert.ok(Math.abs(actual.camera[key] - value) < 1e-9, `grid ${gridSize} ${key} at ${t}`);
+      assert.deepEqual(actual.options.watch, expected.watch);
+      assertSolar(actual.options.solar, expected.solar);
+      assert.equal(await page.locator('#relative-bearing-value').textContent(), relativeBearing(expected.camera.heading, grid.camera.heading, expected.relativeTurn).text);
+    }
+    if (gridSize === 6) {
+      exportGrid = { ...grid, terrain: { ...grid.terrain, heights: [...grid.terrain.heights] } };
+      await seek(page, 4);
+      if (out) await page.locator('.card').screenshot({ path: join(out, 'sun-grid6-question.png') });
+      await page.locator('#grid-cell').fill('G1'); await page.locator('#grid-submit').click();
+      assert.equal(await page.locator('#grid-cell').getAttribute('aria-invalid'), 'true');
+    }
+    await page.locator('#grid-cell').fill(grid.correctLabel.toLowerCase()); await page.locator('#grid-cell').press('Enter');
+    assert.match(await page.locator('#result .verdict').textContent(), new RegExp(`Correct — your cell was ${grid.correctLabel}`));
+    assert.equal(await page.locator('#direction-scrub').inputValue(), '15');
+    assert.equal(await page.locator('#grid-submit').isDisabled(), true);
+  }
+  const gridExports = await page.evaluate(async q => {
+    const src = new URL('../', document.querySelector('script[type="module"]').src);
+    const { TerrainModel } = await import(new URL('engine/terrainModel.js', src));
+    const { ExportComposer } = await import(new URL('export/composer.js', src));
+    const model = new TerrainModel({ ...q.terrain, heights: new Float32Array(q.terrain.heights), seed: q.terrain.modelSeed });
+    const results = [];
+    for (const format of ['reels', 'post']) {
+      const c = new ExportComposer(q, model, { format, tape: true, easterEgg: null });
+      const texts = [], fillText = c.ctx.fillText.bind(c.ctx);
+      c.ctx.fillText = (...args) => { texts.push(args[0]); return fillText(...args); };
+      const png = await c.toImage({ time: 4 });
+      if (png.size < 10000 || c.renderer.lastFrame.options.watch.progress !== 1) throw new Error('Grid export lost watch');
+      if (!texts.includes('Find your cell: A1–F6.') || texts.some(t => t.startsWith('FACING'))) throw new Error('Grid export caption/heading');
+      const question = c.canvas.toDataURL();
+      c.animated = true; await c.drawFrameReady(11);
+      if (Math.abs(c.renderer.lastFrame.camera.heading - c.renderer.lastFrame.options.solar.azimuth) > 1e-9) throw new Error('Grid export lost sun turn');
+      await c.drawFrameReady(15, { reveal: true });
+      if (!texts.includes('Answer: ' + q.correctLabel) || JSON.stringify(c.renderer.lastFrame.camera) !== JSON.stringify(q.camera)) throw new Error('Grid export lost answer');
+      if (c.renderer.gl.getError()) throw new Error('Grid watch export WebGL error');
+      results.push({ format, question, answer: c.canvas.toDataURL() }); c.dispose();
+    }
+    return results;
+  }, exportGrid);
+  if (out) for (const e of gridExports) for (const stage of ['question', 'answer'])
+    await writeFile(join(out, `sun-grid6-${e.format}-${stage}.png`), Buffer.from(e[stage].split(',')[1], 'base64'));
+  await page.locator('#grid-challenge').selectOption('lost-compass'); await ready(page);
+  assert.equal(await page.locator('#difficulty').inputValue(), 'sun-watch');
+  assert.equal(await page.locator('#direction-tools').isVisible(), true);
+  await page.reload(); await ready(page);
+  await observeScene();
+  assert.equal(await page.locator('#difficulty').inputValue(), 'sun-watch');
+  assert.equal(await page.locator('#grid-size').inputValue(), '16');
+  assert.equal(await page.locator('#grid-challenge').inputValue(), 'lost-compass');
+  await seek(page, 4); assert.equal(await page.locator('#relative-bearing').isVisible(), true);
+  console.log('Standalone Grid passed: all four sizes, cell answers, watch/sun frames, exports and replay links.');
+  // Switching difficulty or choosing an unsupported mode restores ordinary controls.
+  await page.locator('#difficulty').selectOption('medium'); await ready(page);
   assert.equal(await page.locator('#relative-bearing').isVisible(), false);
   assert.equal(await page.locator('#direction-tools').isVisible(), false);
   assert.equal(await page.locator('.facing').isVisible(), true);
@@ -295,6 +366,11 @@ try {
   await developer.locator('#dev-reset').click(); await ready(developer); await checkLatitude(developerDefault);
   assert.equal(await latitudeField.inputValue(), '');
   await developer.locator('#mode').selectOption('grid'); await ready(developer);
+  assert.equal(await latitudeField.isEnabled(), true);
+  assert.equal(await developer.locator('#dev-sun-note').isVisible(), true);
+  await latitudeField.fill('40'); await developer.locator('#dev-form [type="submit"]').click(); await ready(developer);
+  await checkLatitude(await generate({ seed: 'sun-places', mode: 'grid', difficulty: 'sun-watch', tuning: { sunLat: 40 } }));
+  await developer.locator('#mode').selectOption('facing'); await ready(developer);
   assert.equal(await latitudeField.isDisabled(), true);
   assert.equal(await developer.locator('#dev-sun-note').isVisible(), false);
   await developer.close();
@@ -320,6 +396,21 @@ try {
   assert.equal(await mobile.locator('#relative-bearing-value').textContent(), 'RIGHT 73°');
   await seek(mobile, 15);
   assert.equal(await mobile.locator('#relative-bearing-value').textContent(), 'START 0°');
+  await mobile.goto(`${url}/#seed=grid-check&d=sun-watch&m=grid&g=16&gc=lost-compass`); await ready(mobile);
+  await seek(mobile, 4);
+  assert.equal(await mobile.locator('#difficulty').inputValue(), 'sun-watch');
+  assert.equal(await mobile.locator('.facing').isVisible(), false);
+  assert.equal(await mobile.locator('#scene-error').isVisible(), false);
+  assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  const mobileGrid = await generate({ seed: 'grid-check', mode: 'grid', difficulty: 'sun-watch', gridSize: 16, gridChallenge: 'lost-compass' });
+  await mobile.locator('#map').scrollIntoViewIfNeeded();
+  const bounds = await mobile.locator('#map').boundingBox(), scale = Math.min(bounds.width, bounds.height) - 56;
+  await mobile.touchscreen.tap(bounds.x + bounds.width / 2 + (mobileGrid.camera.x / mobileGrid.terrain.size - .5) * scale,
+    bounds.y + bounds.height / 2 + (.5 - mobileGrid.camera.y / mobileGrid.terrain.size) * scale);
+  assert.equal(await mobile.locator('#grid-cell').inputValue(), mobileGrid.correctLabel);
+  await mobile.locator('#grid-submit').tap();
+  assert.match(await mobile.locator('#result .verdict').textContent(), /^Correct/);
+  if (out) await mobile.screenshot({ path: join(out, 'sun-grid16-mobile.png'), fullPage: true });
   await mobile.close(); assert.deepEqual(errors, []);
-  console.log('Sun/watch browser checks passed: difficulty, three locations, 15s video, varied sun bearings, no absolute heading, dynamic relative RIGHT/LEFT bearing, direct sun turn then return to friend, friend zoom then watch, point/6×6 grid, both skins and export formats, replay/pause, ordinary modes restored, mobile and WebGL 1.');
+  console.log('Sun/watch browser checks passed: difficulty, three locations, 15s video, varied sun bearings, no absolute heading, dynamic relative RIGHT/LEFT bearing, direct sun turn then return to friend, standalone 4/6/8/16 grids, friend zoom then watch, point/6×6 grid, both skins and export formats, replay/pause, ordinary modes restored, mobile and WebGL 1.');
 } finally { await browser.close(); server.close(); }

@@ -8,6 +8,7 @@ import { descriptorDistance } from './skyline.js';
 import { distinguishingCue } from './quizCandidates.js';
 import { buildTerrain, terrainSummary, landmarkSummary, framingPitch, now } from './quiz.js';
 import { saturate } from './grid.js';
+import { createSunWatch } from './sunWatch.js';
 
 export const GRID_SIZES = [4, 6, 8, 16];
 export const normaliseGridSize = (value) => GRID_SIZES.includes(Number(value)) ? Number(value) : 4;
@@ -52,8 +53,9 @@ export function generateGridQuiz({ seed, difficulty = 'medium', variant = 0, hea
   gridSize = 4, gridChallenge = 'standard', tuning = null, size, n, maxTerrainAttempts = 4, onProgress = () => {} }) {
   const t0 = now(), divisions = normaliseGridSize(gridSize), challenge = normaliseGridChallenge(gridChallenge);
   const hidden = challenge === 'lost-compass';
+  const watch = difficulty === 'sun-watch';
   const base = applyTuning(getDifficulty(difficulty), tuning);
-  const heading = hidden ? 'intercardinal' : ['cardinal', 'intercardinal', 'exact'].includes(headingMode) ? headingMode : base.heading;
+  const heading = hidden || watch ? 'intercardinal' : ['cardinal', 'intercardinal', 'exact'].includes(headingMode) ? headingMode : base.heading;
   const preset = { ...base, heading };
   const seeds = new SeedManager(`${seed}#${difficulty}`);
   const vt = ['grid', divisions, challenge, heading, variant];
@@ -111,13 +113,14 @@ export function generateGridQuiz({ seed, difficulty = 'medium', variant = 0, hea
     valid.sort((a, b) => b.hardness - a.hardness);
     const e = rng.fork('choice').pick(valid.slice(0, base.search?.shortlist || 1));
     const options = e.options.map((o) => ({ ...o, z: model.getElevation(o.x, o.y), landform: model.analyzer.classify(o.x, o.y) }));
-    return {
+    const quiz = {
       version: 1, mode: 'grid', seed, difficulty, variant, lowConfidence: false,
       grid: { size: divisions, challenge, origin: 'cell-centre', cellMetres: model.size / divisions },
       terrain: terrainSummary(model, interval, terrainCheck),
       camera: { x: e.vp.x, y: e.vp.y, z: model.getElevation(e.vp.x, e.vp.y) + eyeHeight,
         heading: e.vp.heading, eyeHeight, fov, pitch: framingPitch(Array.from(e.correct.horizon)), roll: 0 },
-      heading: { degrees: e.vp.heading, ...formatHeading(e.vp.heading, heading), mode: heading },
+      heading: watch ? { degrees: e.vp.heading, text: '', arrow: '', mode: 'hidden' }
+        : { degrees: e.vp.heading, ...formatHeading(e.vp.heading, heading), mode: heading },
       mapRotation: base.mapRotation ? rng.fork('rotation').pick([0, 90, 180, 270]) : 0,
       options, correctLabel: cellAt(e.vp.x, e.vp.y, model.size, divisions), closestLabel: e.closest.label,
       quality: { total: e.vp.quality.total, ...e.vp.quality.components, blockedFrac: e.correct.blockedFrac,
@@ -127,6 +130,8 @@ export function generateGridQuiz({ seed, difficulty = 'medium', variant = 0, hea
       stats: { viewpointsEvaluated: evaluated, cellsChecked: cells.length, directionsChecked: hidden ? 8 : 1,
         questionsCompared: valid.length, terrainAttempt: attempt, ms: Math.round(now() - t0) }, log,
     };
+    if (watch) quiz.sunWatch = createSunWatch(quiz, model, { latitude: base.sunWatchLatitude });
+    return quiz;
   }
   throw new Error('No unambiguous grid question found. Try a new seed or a lower difficulty.');
 }
