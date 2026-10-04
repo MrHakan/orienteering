@@ -1,4 +1,6 @@
 // Visual settings have their own stream. They never participate in quiz generation.
+import { normaliseTextureMode } from './terrainTextures.js';
+
 export const CONDITIONS = [
   ['clear', 'Clear'], ['clouds', 'Passing clouds'], ['overcast', 'Overcast'],
   ['drizzle', 'Light drizzle'], ['rain', 'Rain'], ['storm', 'Rainstorm'],
@@ -14,6 +16,7 @@ export function normaliseEnvironment(value = {}) {
   return {
     condition: CONDITIONS.some(c => c.id === value.condition) ? value.condition : 'clear',
     wind: WINDS.some(w => w.id === value.wind) ? value.wind : 'calm',
+    texture: normaliseTextureMode(value.texture),
     hd: value.hd === true, foliage: value.foliage === true, nature: value.nature === true,
   };
 }

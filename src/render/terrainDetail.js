@@ -62,6 +62,14 @@ export function terrainHeightPixels(model, size = 256) {
 export const TERRAIN_MATERIAL_GLSL = `
 uniform sampler2D uAlbedo, uNormalMap, uTerrainHeight;
 uniform float uMapSize;
+uniform vec3 uGrassLow, uGrassHigh, uDry, uRock;
+uniform vec4 uTextureMix;
+uniform vec2 uTextureOffset;
+uniform float uTextureScale;
+vec3 textureTint(vec3 color, vec3 tint) {
+  float detail = .55 + 1.4 * dot(color, vec3(.2126, .7152, .0722));
+  return mix(color, tint * detail, uTextureMix.w);
+}
 vec2 materialUV(vec2 uv, vec2 slot) { return slot * .5 + .00390625 + fract(uv) * .4921875; }
 vec3 materialDX, materialDY;
 vec4 sampleMaterial(sampler2D atlas, vec2 uv, vec2 slot, vec2 dx, vec2 dy) {
@@ -88,6 +96,7 @@ vec4 surfaceNormalZY(vec3 p, float scale, vec2 slot) { return sampleMaterial(uNo
 struct SurfaceMaterial { vec3 color; vec3 normal; float roughness; float ao; };
 SurfaceMaterial surfaceMaterial(vec3 p, vec3 n, float distance, float h) {
   // Materials use fixed world scales: moving/zooming never slides their UVs.
+  p = p / uTextureScale + vec3(uTextureOffset.x, 0.0, uTextureOffset.y);
   vec3 detailPos = p + vec3(vnoise(p.xz / 37.0), vnoise(p.xy / 43.0), vnoise(p.zy / 39.0)) * 8.0;
 #ifdef MATERIAL_GRADIENTS
   // Compute once in uniform control flow, before slope/distance material branches.
@@ -96,11 +105,13 @@ SurfaceMaterial surfaceMaterial(vec3 p, vec3 n, float distance, float h) {
   materialDX = vec3(0.0); materialDY = vec3(0.0);
 #endif
   float patchNoise = vnoise(p.xz / 38.0), broad = vnoise(p.xz / 155.0);
-  float bare = smoothstep(.58, .82, patchNoise) * (.16 + .28 * smoothstep(.35, .8, h));
-  float rock = clamp(smoothstep(.025, .16, 1.0 - n.y + (patchNoise - .5) * .017) * .92 + smoothstep(.65, .96, h) * .28, 0.0, .98);
+  float bare = uTextureMix.x + (1.0 - uTextureMix.x) * smoothstep(.58, .82, patchNoise) * (.16 + .28 * smoothstep(.35, .8, h));
+  float rock = clamp(uTextureMix.y + smoothstep(.025, .16, 1.0 - n.y + (patchNoise - .5) * .017) * uTextureMix.z + smoothstep(.65, .96, h) * .28, 0.0, .98);
   vec4 grass = surfaceColorXZ(detailPos, 2.5, vec2(0.0));
   if (bare > .005) grass = mix(grass, surfaceColorXZ(detailPos, 3.2, vec2(0.0, 1.0)), bare);
   vec3 vegetation = mix(grass.rgb, surfaceColorXZ(p, 95.0, vec2(1.0)).rgb, .22 + .28 * smoothstep(120.0, 1000.0, distance));
+  vec3 groundTint = mix(uGrassLow, uGrassHigh, smoothstep(.1, .8, h + (broad - .5) * .3));
+  vegetation = textureTint(vegetation, mix(groundTint, uDry, bare));
   vegetation *= .88 + .24 * broad;
   float strength = .48 * (1.0 - smoothstep(80.0, 450.0, distance));
   vec3 groundN = n;
@@ -132,7 +143,7 @@ SurfaceMaterial surfaceMaterial(vec3 p, vec3 n, float distance, float h) {
     }
   }
   SurfaceMaterial m;
-  m.color = pow(mix(vegetation, stone.rgb * (.9 + .2 * broad), rock), vec3(2.2));
+  m.color = pow(mix(vegetation, textureTint(stone.rgb, uRock) * (.9 + .2 * broad), rock), vec3(2.2));
   m.normal = normalize(mix(n, normalize(mix(groundN, rockN, rock)), strength));
   m.roughness = mix(grass.a, stone.a, rock);
   m.ao = mix(groundAO, rockAO, rock);

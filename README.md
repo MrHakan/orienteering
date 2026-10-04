@@ -258,6 +258,18 @@ irregular boulders, ferns, wildflowers and distant birds. Vegetation is seeded f
 the terrain, rests on the rendered ground, and uses the terrain depth buffer. All three are optional
 and off by default. These settings never modify elevations, contours or answers.
 
+**Terrain texture → Auto — by seed** chooses one of five surface styles:
+Green meadow, Mossy moorland, Autumn grassland, Desert sandstone or Alpine scree.
+Each has its own ground/rock palette, soil and rock coverage, and detail scale.
+The quiz seed also sets the texture pattern's world offset and scale variation.
+The same seed keeps its style across difficulty changes, new positions and
+terrain retries. Styles work with both standard shading and **HD terrain texture**;
+HD adds the existing scanned color, normal and roughness detail.
+
+Choose a style manually to override Auto. The selection is remembered locally,
+and the export dialog starts with the scene's choice. Auto reproduces the same
+style in live play, shared seed links, PNGs and videos.
+
 HD and plant assets load only when selected; exports wait for all selected
 materials before capturing a frame. Ground cover streams in bounded, seeded world
 cells, so replaying or seeking a clip restores the same plants. Surface asset

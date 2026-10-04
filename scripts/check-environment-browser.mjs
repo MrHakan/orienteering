@@ -4,6 +4,7 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generate } from '../src/engine/quiz.js';
+import { terrainTexture } from '../src/render/terrainTextures.js';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const root = fileURLToPath(new URL(process.env.CHECK_SITE ? '../' + process.env.CHECK_SITE + '/' : '..', import.meta.url));
@@ -43,6 +44,11 @@ try {
   await page.goto(`${url}/#seed=friend-demo&d=easy&m=friend&fa=grid&g=6`); await ready(page); await instrument(page);
   const hash = new URL(page.url()).hash;
   const mapBefore = await page.locator('#map').evaluate(canvas => canvas.toDataURL());
+  assert.equal(await page.locator('#scene-texture').inputValue(), 'auto');
+  assert.equal(await page.locator('#scene-texture option').count(), 6);
+  assert.equal(await page.locator('#scene-texture-note').textContent(), `Seed style: ${terrainTexture(q.seed).label}.`);
+  await page.locator('#scene-texture').selectOption('desert');
+  assert.equal(await page.locator('#scene-texture-note').textContent(), 'Texture style: Desert sandstone.');
   for (const key of ['hd', 'foliage', 'nature']) await page.locator(`#scene-${key}`).check();
   await page.locator('#scene-wind').selectOption('strong');
   await page.locator('#scene-weather').selectOption('storm');
@@ -54,6 +60,8 @@ try {
   assert.equal(live.options.environment.hd, true);
   assert.equal(live.options.environment.foliage, true);
   assert.equal(live.options.environment.nature, true);
+  assert.equal(live.options.environment.texture, 'desert');
+  assert.equal(await page.evaluate(() => window.sceneRenderer.terrainTexture.id), 'desert');
   assert.equal(new URL(page.url()).hash, hash);
   assert.equal(await page.locator('#map').evaluate(canvas => canvas.toDataURL()), mapBefore);
   if (out) await page.screenshot({ path: join(out, 'environment-live-storm.png') });
@@ -61,18 +69,23 @@ try {
   await page.reload(); await ready(page); await instrument(page);
   assert.equal(await page.locator('#scene-weather').inputValue(), 'storm');
   assert.equal(await page.locator('#scene-hd').isChecked(), true);
+  assert.equal(await page.locator('#scene-texture').inputValue(), 'desert');
   await page.locator('#scene-weather').selectOption('snow');
   await page.locator('#scene-wind').selectOption('breeze');
   await page.locator('#open-export').click();
   for (const key of ['hd', 'foliage', 'nature']) assert.equal(await page.locator(`#export-${key}`).isChecked(), true);
   assert.equal(await page.locator('#export-weather').inputValue(), 'snow');
   assert.equal(await page.locator('#export-wind').inputValue(), 'breeze');
+  assert.equal(await page.locator('#export-texture').inputValue(), 'desert');
   const pausedCount = await page.evaluate(() => window.environmentFrames.length);
   await page.waitForTimeout(150);
   assert.equal(await page.evaluate(() => window.environmentFrames.length), pausedCount);
   await page.locator('#export-weather').selectOption('sunset');
+  await page.locator('#export-texture').selectOption('alpine');
+  assert.equal(await page.locator('#export-texture-note').textContent(), 'Texture style: Alpine scree.');
   await page.locator('#export-close').click();
   assert.equal(await page.locator('#scene-weather').inputValue(), 'snow');
+  assert.equal(await page.locator('#scene-texture').inputValue(), 'desert');
   await page.waitForFunction(count => window.environmentFrames.length > count, pausedCount);
 
   // Reduced motion freezes weather, without changing the camera or quiz.
@@ -83,6 +96,12 @@ try {
   assert.equal(await page.evaluate(() => window.environmentFrames.length), reducedCount);
   await page.locator('#grid-cell').fill(q.correctLabel); await page.locator('#grid-cell').press('Enter');
   assert.match(await page.locator('#result .verdict').textContent(), /^Correct/);
+  await page.locator('#scene-texture').selectOption('auto');
+  const seedTexture = terrainTexture(q.seed);
+  await page.locator('#new-positions').click(); await ready(page);
+  assert.deepEqual(await page.evaluate(() => window.sceneRenderer.terrainTexture), seedTexture);
+  await page.locator('#difficulty').selectOption('medium'); await ready(page);
+  assert.deepEqual(await page.evaluate(() => window.sceneRenderer.terrainTexture), seedTexture);
 
   console.log('Live preferences, quiz/map and reduced motion passed.');
   const plain = { ...q, terrain: { ...q.terrain, heights: [...q.terrain.heights] } };
@@ -93,8 +112,9 @@ try {
     const { CONDITIONS, weatherParams } = await import(new URL('render/environment.js', src));
     const { ExportComposer } = await import(new URL('export/composer.js', src));
     const { encodeCanvasVideo } = await import(new URL('export/recorder.js', src));
+    const { TERRAIN_TEXTURES, terrainTexture } = await import(new URL('render/terrainTextures.js', src));
     const model = new TerrainModel({ ...q.terrain, heights: new Float32Array(q.terrain.heights), seed: q.terrain.modelSeed });
-    const canvas = document.createElement('canvas'), r = new TerrainRenderer(canvas); r.setTerrain(model); r.setFixedSize(480, 300);
+    const canvas = document.createElement('canvas'), r = new TerrainRenderer(canvas); r.setTerrain(model, { seed: q.seed }); r.setFixedSize(480, 300);
     const pixels = () => { const data = new Uint8Array(canvas.width * canvas.height * 4); r.gl.readPixels(0, 0, canvas.width, canvas.height, r.gl.RGBA, r.gl.UNSIGNED_BYTE, data); return data; };
     const difference = (a, b) => { let n = 0; for (let i = 0; i < a.length; i += 4) if (Math.max(Math.abs(a[i] - b[i]), Math.abs(a[i + 1] - b[i + 1]), Math.abs(a[i + 2] - b[i + 2])) > 2) n++; return n / (a.length / 4); };
     const environment = { hd: true, foliage: true, nature: true, wind: 'strong' };
@@ -126,6 +146,30 @@ try {
     r.render(q.camera, { environment: { nature: true } }); const nature = pixels();
     if (difference(basic, foliage) < .0001 || difference(basic, nature) < .0001) throw new Error('Missing foliage/nature');
     result.texture.changed = difference(basic, hd);
+    result.texture.styles = [];
+    for (const detail of [false, true]) {
+      const shots = [];
+      for (const { id, label } of TERRAIN_TEXTURES) {
+        const options = { environment: { hd: detail, texture: id } };
+        r.render(q.camera, options); const image = pixels();
+        r.render(q.camera, options);
+        if (difference(image, pixels()) > .001) throw new Error(`Unstable ${id} texture`);
+        for (const other of shots) if (difference(other, image) < .03) throw new Error(`Indistinguishable ${id} texture`);
+        if (r.gl.getError()) throw new Error(`Texture WebGL error: ${id}`);
+        shots.push(image);
+        result.texture.styles.push({ id, label, hd: detail, image: canvas.toDataURL() });
+      }
+    }
+    r.render(q.camera, { environment: { hd: true, texture: 'auto' } }); const automatic = pixels();
+    if (r.terrainTexture.id !== terrainTexture(q.seed).id) throw new Error('Renderer did not use the raw quiz seed');
+    const nextSeed = Array.from({ length: 20 }, (_, i) => `other-texture-${i}`).find(seed => terrainTexture(seed).id !== terrainTexture(q.seed).id);
+    r.setTerrain(model, { seed: nextSeed }); await r.prepareEnvironmentReady({ hd: true });
+    r.render(q.camera, { environment: { hd: true } });
+    if (difference(automatic, pixels()) < .03) throw new Error('Changing seed did not change the automatic texture');
+    r.setTerrain(model, { seed: q.seed }); await r.prepareEnvironmentReady({ hd: true, foliage: true, nature: true });
+    r.render(q.camera, { environment: { hd: true } });
+    if (difference(automatic, pixels()) > .001) throw new Error('Replaying the seed changed its automatic texture');
+    r.render(q.camera, { environment: { hd: true, foliage: true, nature: true } });
     if (r.groundCover.count < 1000) throw new Error('Nearby ground cover is missing');
     // The Conquest sprite must not replace the HD texture between depth passes.
     const away = { ...q.camera, heading: (q.camera.heading + 180) % 360 };
@@ -136,12 +180,16 @@ try {
     r.dispose();
 
     for (const format of ['reels', 'post']) {
-      const c = new ExportComposer(q, model, { format, environment: { ...environment, condition: 'snow', wind: 'breeze' }, easterEgg: null });
+      const c = new ExportComposer(q, model, { format, environment: { ...environment, texture: 'moss', condition: 'snow', wind: 'breeze' }, easterEgg: null });
       c.animated = true; c.drawFrame(0, { preview: true });
       if (c.glCanvas.width > 720) throw new Error('Export preview exceeded its render budget');
       await c.drawFrameReady(4);
       if (c.glCanvas.width !== c.layout.scene.w || !c.renderer.surfaceTextures.loaded || !c.renderer.plantTextures.loaded) throw new Error('Export captured a reduced or incomplete frame');
       if (c.renderer.lastFrame.options.environmentTime !== 4 || c.weather.snow !== 1) throw new Error('Export lost environment clock/settings');
+      if (c.renderer.terrainTexture.id !== 'moss') throw new Error('Export lost selected texture');
+      c.setOptions({ environment: { ...c.environment, texture: 'auto' } }); await c.drawFrameReady(4);
+      if (JSON.stringify(c.renderer.terrainTexture) !== JSON.stringify(terrainTexture(q.seed))) throw new Error('Export auto texture differs from the live seed');
+      c.setOptions({ environment: { ...c.environment, texture: 'moss' } }); await c.drawFrameReady(4);
       const question = c.canvas.toDataURL();
       await c.drawFrameReady(13, { reveal: true }); const answer = c.canvas.toDataURL();
       const png = await c.toImage({ time: 4 });
@@ -158,6 +206,9 @@ try {
   }, plain);
   assert.equal(audit.conditions.length, 9);
   assert.ok(audit.video.bytes > 1000);
+  assert.equal(audit.texture.styles.length, 10);
+  if (out) for (const style of audit.texture.styles)
+    await writeFile(join(out, `texture-${style.id}-${style.hd ? 'hd' : 'standard'}.png`), Buffer.from(style.image.split(',')[1], 'base64'));
   if (out) for (const e of audit.exports) for (const stage of ['question', 'answer']) {
     await writeFile(join(out, `environment-${e.format}-${stage}.png`), Buffer.from(e[stage].split(',')[1], 'base64'));
   }
@@ -196,15 +247,17 @@ try {
   });
   await mobile.goto(`${url}/#seed=friend-demo&d=easy&m=friend&fa=grid&g=6`); await ready(mobile); await instrument(mobile);
   await mobile.locator('#scene-hd').check(); await mobile.locator('#scene-foliage').check();
+  await mobile.locator('#scene-texture').selectOption('alpine');
   await mobile.locator('#scene-weather').selectOption('rain');
   await mobile.evaluate(() => window.sceneRenderer.prepareEnvironmentReady({ hd: true, foliage: true }));
   assert.equal(await mobile.locator('#scene-error').isVisible(), false);
   assert.equal(await mobile.evaluate(() => window.sceneRenderer.gl.getError()), 0);
+  assert.equal(await mobile.evaluate(() => window.sceneRenderer.terrainTexture.id), 'alpine');
   assert.equal(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   if (out) await mobile.screenshot({ path: join(out, 'environment-mobile.png'), fullPage: true });
   await mobile.close();
   assert.deepEqual(errors, []);
-  console.log('Environment browser checks passed: 9 animated conditions, gusts, HD detail, foliage/nature, preferences, stable quiz/map, reduced motion, PNG/video, Conquest texture isolation, paused trails/knife inspect, mobile and WebGL 1.');
+  console.log('Environment browser checks passed: 5 distinct seeded texture styles in standard/HD, raw-seed replay, live/export selection, 9 animated conditions, gusts, HD detail, foliage/nature, preferences, stable quiz/map, reduced motion, PNG/video, Conquest texture isolation, paused trails/knife inspect, mobile and WebGL 1.');
 } finally {
   await browser.close(); server.close();
 }

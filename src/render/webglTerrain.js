@@ -9,6 +9,7 @@ import { windGust } from './environment.js';
 import { EnvironmentTextures, terrainHeightPixels, TERRAIN_MATERIAL_GLSL } from './terrainDetail.js';
 import { buildNatureMeshes, buildGroundCover, NATURE_STRIDE, NATURE_VERT, NATURE_FRAG } from './natureMesh.js';
 import { WatchViewModel } from './watchViewModel.js';
+import { normaliseTextureMode, terrainTexture } from './terrainTextures.js';
 
 const PERSON_VERT = `
 attribute vec3 aPos;
@@ -88,15 +89,15 @@ void main() {
     material = surfaceMaterial(vWorld, n, d, h);
     col = material.color;
   } else {
-    vec3 grassLow = vec3(0.19, 0.28, 0.11), grassHigh = vec3(0.33, 0.35, 0.16), dry = vec3(0.46, 0.38, 0.21);
-    float patchN = vnoise(vWorld.xz / 160.0) - 0.5;
-    col = mix(grassLow, grassHigh, smoothstep(0.1, 0.6, h + patchN * 0.3));
-    col = mix(col, dry, smoothstep(0.35, 0.95, h + patchN * 0.2) * 0.85);
-    col = mix(col, dry * 0.92, smoothstep(0.1, 0.4, slope) * 0.45);
+    vec2 ground = vWorld.xz / uTextureScale + uTextureOffset;
+    float patchN = vnoise(ground / 160.0) - 0.5;
+    col = mix(uGrassLow, uGrassHigh, smoothstep(0.1, 0.6, h + patchN * 0.3));
+    col = mix(col, uDry, uTextureMix.x + (1.0 - uTextureMix.x) * smoothstep(0.35, 0.95, h + patchN * 0.2) * 0.85);
+    col = mix(col, uRock, clamp(uTextureMix.y + smoothstep(.025, .16, slope) * uTextureMix.z, 0.0, .98));
     float fine = 1.0 - smoothstep(150.0, 900.0, d);
-    float tex = (vnoise(vWorld.xz / 5.0) - 0.5) * 0.35 * fine
-              + (vnoise(vWorld.xz / 21.0) - 0.5) * 0.3 * (1.0 - smoothstep(400.0, 2000.0, d))
-              + (vnoise(vWorld.xz / 75.0) - 0.5) * 0.25;
+    float tex = (vnoise(ground / 5.0) - 0.5) * 0.35 * fine
+              + (vnoise(ground / 21.0) - 0.5) * 0.3 * (1.0 - smoothstep(400.0, 2000.0, d))
+              + (vnoise(ground / 75.0) - 0.5) * 0.25;
     col *= 1.0 + tex;
   }
   col = mix(col, uHD > .5 ? pow(vec3(.78, .83, .83), vec3(2.2)) : vec3(.78, .83, .83), uSnow * smoothstep(.35, .92, n.y) * .72);
@@ -402,7 +403,7 @@ export class TerrainRenderer {
   }
 
   /** @param {import('../engine/terrainModel.js').TerrainModel} model */
-  setTerrain(model) {
+  setTerrain(model, { seed = model.seed } = {}) {
     const gl = this.gl;
     if (this.natureMeshes) for (const mesh of Object.values(this.natureMeshes)) gl.deleteBuffer(mesh.buffer);
     this.natureMeshes = null;
@@ -412,6 +413,8 @@ export class TerrainRenderer {
     this.heightTexture = null;
     for (const m of this.meshes) { gl.deleteBuffer(m.vbo); gl.deleteBuffer(m.ibo); }
     this.model = model;
+    this.textureSeed = seed;
+    this.textureMode = null;
     const L = model.size, n = model.n;
     const main = [];
     for (let j = 0; j < n; j++) main.push(j * model.cell);
@@ -591,6 +594,11 @@ export class TerrainRenderer {
    */
   render(camera, { weather = {}, environment = {}, time = 0, environmentTime = time, motion = {}, personMotion = {}, sunHeading = camera.heading, solar = null, watch = null } = {}) {
     if (!this.model) return;
+    const textureMode = normaliseTextureMode(environment.texture);
+    if (textureMode !== this.textureMode) {
+      this.textureMode = textureMode;
+      this.terrainTexture = terrainTexture(this.textureSeed, textureMode);
+    }
     this.lastFrame = { camera, options: { weather, environment, time, environmentTime, motion, personMotion, sunHeading, solar, watch } };
     this.prepareEnvironment(environment, camera);
     this.personMotion = personMotion;
@@ -665,6 +673,12 @@ export class TerrainRenderer {
     gl.uniform2fv(gl.getUniformLocation(p, 'uCloudWind'), weather.cloudWind || wind);
     gl.uniform1f(gl.getUniformLocation(p, 'uWet'), wet);
     gl.uniform1f(gl.getUniformLocation(p, 'uHD'), environment.hd && this.surfaceTextures?.loaded ? 1 : 0);
+    const texture = this.terrainTexture;
+    for (const [uniform, key] of [['uGrassLow', 'low'], ['uGrassHigh', 'high'], ['uDry', 'dry'], ['uRock', 'rock']])
+      gl.uniform3fv(gl.getUniformLocation(p, uniform), texture[key]);
+    gl.uniform4fv(gl.getUniformLocation(p, 'uTextureMix'), texture.mix);
+    gl.uniform2fv(gl.getUniformLocation(p, 'uTextureOffset'), texture.offset);
+    gl.uniform1f(gl.getUniformLocation(p, 'uTextureScale'), texture.scale);
     gl.uniform1f(gl.getUniformLocation(p, 'uMapSize'), m.size);
     gl.uniform1f(gl.getUniformLocation(p, 'uSnow'), snow);
     gl.uniform1f(gl.getUniformLocation(p, 'uDusk'), dusk);

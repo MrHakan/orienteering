@@ -16,6 +16,7 @@ import { TrailPlayback } from './trailPlayback.js';
 import { usesSunWatch, supportsSunWatch, sunWatchFrame, SUN_WATCH_DURATION } from '../engine/sunWatch.js';
 import { TerrainRenderer } from '../render/webglTerrain.js';
 import { CONDITIONS, WINDS, normaliseEnvironment, weatherParams, environmentAnimated } from '../render/environment.js';
+import { TEXTURE_MODES, terrainTexture } from '../render/terrainTextures.js';
 import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
 import { relativeBearing } from '../render/relativeBearing.js';
@@ -142,19 +143,30 @@ function scheduleFriendWave() {
 function setEnvironmentControls(prefix, value) {
   const env = normaliseEnvironment(value);
   $(`${prefix}-weather`).value = env.condition; $(`${prefix}-wind`).value = env.wind;
+  $(`${prefix}-texture`).value = env.texture;
   for (const key of ['hd', 'foliage', 'nature']) $(`${prefix}-${key}`).checked = env[key];
+  updateTextureNote(prefix);
+}
+function updateTextureNote(prefix) {
+  const mode = $(`${prefix}-texture`).value;
+  $(`${prefix}-texture-note`).textContent = state.quiz
+    ? `${mode === 'auto' ? 'Seed style' : 'Texture style'}: ${terrainTexture(state.quiz.seed, mode).label}.`
+    : 'Auto chooses a texture style for each seed.';
 }
 function readEnvironmentControls(prefix) {
   return normaliseEnvironment({ condition: $(`${prefix}-weather`).value, wind: $(`${prefix}-wind`).value,
+    texture: $(`${prefix}-texture`).value,
     hd: $(`${prefix}-hd`).checked, foliage: $(`${prefix}-foliage`).checked, nature: $(`${prefix}-nature`).checked });
 }
 for (const prefix of ['scene', 'export']) {
   $(`${prefix}-weather`).innerHTML = CONDITIONS.map(c => `<option value="${c.id}">${c.label}</option>`).join('');
   $(`${prefix}-wind`).innerHTML = WINDS.map(w => `<option value="${w.id}">${w.label}</option>`).join('');
+  $(`${prefix}-texture`).innerHTML = TEXTURE_MODES.map(t => `<option value="${t.id}">${t.label}</option>`).join('');
   setEnvironmentControls(prefix, state.environment);
 }
-for (const key of ['weather', 'wind', 'hd', 'foliage', 'nature']) $(`scene-${key}`).addEventListener('change', () => {
+for (const key of ['weather', 'wind', 'texture', 'hd', 'foliage', 'nature']) $(`scene-${key}`).addEventListener('change', () => {
   state.environment = readEnvironmentControls('scene'); store.set('otq.environment', state.environment);
+  updateTextureNote('scene');
   stopFriendWave();
   if (state.quiz && !state.loading) renderScene(currentCamera());
   scheduleFriendWave();
@@ -442,10 +454,11 @@ function show(quiz) {
   $('map').setAttribute('aria-label', quiz.mode === 'trail' && !grid ? 'Contour map showing three candidate trails: A red, B green, C cyan. Tap a trail or choose its letter.' : grid ? `${quiz.grid.size} by ${quiz.grid.size} contour grid. Rows A to ${String.fromCharCode(64 + quiz.grid.size)} from north to south; columns 1 to ${quiz.grid.size} from west to east. Enter a cell code below to answer.` : 'Topographic contour map with candidate locations');
 
   if (renderer) {
-    renderer.setTerrain(state.model);
+    renderer.setTerrain(state.model, { seed: quiz.seed });
     renderer.setPerson(quiz.friend || null);
     renderScene(quiz.camera);
   }
+  updateTextureNote('scene');
   map.setData({
     model: state.model,
     interval: t.contourInterval,
@@ -1230,6 +1243,7 @@ $('export-close').addEventListener('click', closeExport);
 $('export-dialog').addEventListener('cancel', (e) => { e.preventDefault(); closeExport(); });
 $('export-form').addEventListener('change', () => {
   const opts = exportOptions();
+  updateTextureNote('export');
   store.set('otq.export', persistableExportOptions(opts));
   const { easter, ...composerOptions } = opts;
   void easter;

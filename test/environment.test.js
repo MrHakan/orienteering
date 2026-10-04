@@ -5,15 +5,48 @@ import { buildNatureMeshes, buildGroundCover, NATURE_STRIDE } from '../src/rende
 import { TerrainModel } from '../src/engine/terrainModel.js';
 import { surfaceElevation } from '../src/engine/terrainSurface.js';
 import { terrainHeightPixels } from '../src/render/terrainDetail.js';
+import { TERRAIN_TEXTURES, terrainTexture, normaliseTextureMode } from '../src/render/terrainTextures.js';
 
 test('environment preferences recover safely from stale or malformed storage', () => {
   for (const input of [null, false, '', { condition: 'lava', wind: 'hurricane', hd: 'true' }]) {
-    assert.deepEqual(normaliseEnvironment(input), { condition: 'clear', wind: 'calm', hd: false, foliage: false, nature: false });
+    assert.deepEqual(normaliseEnvironment(input), { condition: 'clear', wind: 'calm', texture: 'auto', hd: false, foliage: false, nature: false });
   }
   assert.equal(environmentFromWeather(['rain', 'wind']).condition, 'rain');
   assert.equal(environmentFromWeather(['rain', 'wind']).wind, 'strong');
   assert.equal(weatherParams(['rain'], 90).rain, true);
   assert.equal(weatherParams(['rain', 'fog'], 90).fog, 1);
+});
+
+test('automatic textures cover every style and replay the same raw seed deterministically', () => {
+  const styles = new Set();
+  for (let i = 0; i < 64; i++) {
+    const seed = `texture-${i}`, texture = terrainTexture(seed);
+    assert.deepEqual(texture, terrainTexture(seed, 'auto'));
+    assert.deepEqual(texture, terrainTexture(seed, 'obsolete-mode'));
+    assert.ok(TERRAIN_TEXTURES.some(p => p.id === texture.id));
+    assert.ok(texture.scale > .5 && texture.scale < 1.6);
+    assert.ok(texture.offset.every(Number.isFinite));
+    for (const key of ['low', 'high', 'dry', 'rock']) assert.ok(texture[key].every(c => c > 0 && c < 1));
+    styles.add(texture.id);
+  }
+  assert.equal(styles.size, TERRAIN_TEXTURES.length);
+  assert.notDeepEqual(terrainTexture('texture-0').offset, terrainTexture('texture-1').offset);
+});
+
+test('manual texture choices persist safely and keep seed-specific world patterns', () => {
+  const paletteKeys = new Set();
+  for (const profile of TERRAIN_TEXTURES) {
+    assert.equal(normaliseTextureMode(profile.id), profile.id);
+    assert.equal(normaliseEnvironment({ texture: profile.id }).texture, profile.id);
+    const a = terrainTexture('stable-seed', profile.id), b = terrainTexture('next-seed', profile.id);
+    assert.equal(a.id, profile.id); assert.equal(b.id, profile.id);
+    assert.notDeepEqual(a.offset, b.offset);
+    assert.deepEqual(a, terrainTexture('stable-seed', profile.id));
+    assert.deepEqual(a.offset, terrainTexture('stable-seed').offset);
+    paletteKeys.add(JSON.stringify([a.low, a.rock, a.mix]));
+  }
+  assert.equal(paletteKeys.size, TERRAIN_TEXTURES.length);
+  for (const value of [null, undefined, '', 'old', 5]) assert.equal(normaliseTextureMode(value), 'auto');
 });
 
 test('weather presets distinguish precipitation, ground treatment, mist and golden-hour light', () => {

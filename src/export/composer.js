@@ -57,7 +57,7 @@ export class ExportComposer {
     this.ctx = this.canvas.getContext('2d');
     this.glCanvas = document.createElement('canvas');
     this.renderer = new TerrainRenderer(this.glCanvas);
-    this.renderer.setTerrain(model);
+    this.renderer.setTerrain(model, { seed: quiz.seed });
     this.renderer.setPerson(quiz.friend || null);
     this.setOptions(options);
     if (usesSunWatch(quiz)) this.renderer.prepareWatch().catch(error => { this.watchError = error; });
