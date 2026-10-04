@@ -3,6 +3,7 @@
 // letter) drawn from the quiz seed, so "scramble #n" is reproducible.
 
 import { Random } from './rng.js';
+import { relabelExplanation } from './answerExplanation.js';
 
 /** Returns a copy of `quiz` with its options relabelled by `steps` scrambles. */
 export function scrambleLabels(quiz, steps) {
@@ -20,6 +21,8 @@ export function scrambleLabels(quiz, steps) {
     if (!next) next = current.map((o) => labels[(labels.indexOf(o.label) + 1) % labels.length]);
     current = current.map((o, i) => ({ ...o, label: next[i] }));
   }
+  const labelsByOriginal = new Map(quiz.options.map((o, i) => [o.label, current[i].label]));
   const options = current.sort((a, b) => a.label.localeCompare(b.label));
-  return { ...quiz, options, correctLabel: options.find((o) => o.correct).label, scramble: steps };
+  return { ...quiz, options, correctLabel: options.find((o) => o.correct).label, scramble: steps,
+    ...(quiz.explanation ? { explanation: relabelExplanation(quiz.explanation, labelsByOriginal) } : {}) };
 }

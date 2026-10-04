@@ -9,6 +9,7 @@ import { distinguishingCue } from './quizCandidates.js';
 import { buildTerrain, terrainSummary, landmarkSummary, framingPitch, now } from './quiz.js';
 import { saturate } from './grid.js';
 import { createSunWatch } from './sunWatch.js';
+import { withAnswerExplanation } from './answerExplanation.js';
 
 export const GRID_SIZES = [4, 6, 8, 16];
 export const normaliseGridSize = (value) => GRID_SIZES.includes(Number(value)) ? Number(value) : 4;
@@ -131,7 +132,7 @@ export function generateGridQuiz({ seed, difficulty = 'medium', variant = 0, hea
         questionsCompared: valid.length, terrainAttempt: attempt, ms: Math.round(now() - t0) }, log,
     };
     if (watch) quiz.sunWatch = createSunWatch(quiz, model, { latitude: base.sunWatchLatitude });
-    return quiz;
+    return withAnswerExplanation(quiz, model);
   }
   throw new Error('No unambiguous grid question found. Try a new seed or a lower difficulty.');
 }

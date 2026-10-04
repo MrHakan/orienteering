@@ -65,6 +65,10 @@ jobs:
         env:
           CHECK_SITE: _site
         run: node scripts/check-sun-watch-browser.mjs browser-artifacts
+      - name: Test answer reasoning and automation JSON in Chromium
+        env:
+          CHECK_SITE: _site
+        run: node scripts/check-explanation-browser.mjs browser-artifacts
       - uses: actions/upload-artifact@v4
         if: always()
         with:

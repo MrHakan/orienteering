@@ -11,6 +11,7 @@ import { getTrailPreset, describeTrailRoute, compareTrailViews, trailMapExtent }
 import { terrainRunDuration, trailViewTimes, describeTrailTerrain, travelledCells } from './trailTerrain.js';
 import { surfaceElevation } from './terrainSurface.js';
 import { saturate, wrap360 } from './grid.js';
+import { withAnswerExplanation } from './answerExplanation.js';
 
 function cueVisible(pair, a, b, pitch, fov, times) {
   const index = times.indexOf(pair.cue.t), view = a.views[index];
@@ -90,7 +91,7 @@ export function generateTrailGridQuiz({ seed, difficulty = 'medium', variant = 0
           landform: model.analyzer.classify(cell.x, cell.y) };
       });
       const { views, finish: cell, ...actual } = route;
-      return {
+      return withAnswerExplanation({
         version: 1, mode: 'trail', seed, difficulty, variant, lowConfidence: false,
         terrain: terrainSummary(model, interval, terrainCheck),
         camera: { x: route.x, y: route.y, z: route.feet[0] + eyeHeight, heading, pitch, fov, eyeHeight, roll: 0 },
@@ -108,7 +109,7 @@ export function generateTrailGridQuiz({ seed, difficulty = 'medium', variant = 0
           minRequiredDistance: band.min, minCue: band.cue },
         stats: { viewpointsEvaluated: routes.length * times.length, cellsChecked: cells.length,
           routesChecked: routes.length, questionsCompared: valid.length, terrainAttempt: attempt, ms: Math.round(now() - t0) }, log,
-      };
+      }, model);
     }
   }
   throw new Error('No unambiguous bunny-hop grid question found. Try another seed or a lower difficulty.');

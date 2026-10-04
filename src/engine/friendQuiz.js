@@ -11,6 +11,7 @@ import { distinguishingCue } from './quizCandidates.js';
 import { DEG, saturate, angleDiff, wrap360 } from './grid.js';
 import { normaliseGridSize, gridCells, cellAtExtent } from './gridQuiz.js';
 import { normaliseFriendSkin } from './friendAppearance.js';
+import { withAnswerExplanation } from './answerExplanation.js';
 
 export const FRIEND_HEIGHT = 1.8;
 export const normaliseFriendChallenge = (value) => value === 'depth-trap' ? value : 'standard';
@@ -57,7 +58,7 @@ export function friendOptionCamera(quiz, option) {
 
 export function generateFriendQuiz(opts) {
   const quiz = opts.difficulty === 'easy' ? generateKnownFriendQuiz(opts) : generateTerrainFriendQuiz(opts);
-  return finishFriendQuiz(quiz, opts);
+  return withAnswerExplanation(finishFriendQuiz(quiz, opts));
 }
 
 export function finishFriendQuiz(quiz, opts) {

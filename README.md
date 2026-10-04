@@ -241,6 +241,38 @@ The view-difference limit ranges from 3.8° on Easy to 2.3° on Master. If eight
 
 A rotated map is only a display transform. The north arrow always shows true north and the coordinates never rotate. Every preset lives in `src/engine/difficulty.js`.
 
+## Answer explanations and automation
+
+After answering, **Why this answer?** explains the matching skyline and contour
+profile in English. **Why not the other answers?** gives a measured difference for
+each A/B/C choice. Grid mode shows the three closest-looking wrong cells plus your
+submitted cell if it is different, and lets you compare their views. Lost-compass
+comparisons use each wrong cell's closest-looking heading. Sun & watch explanations
+also check the direction inferred from solar time and the observed turn to the sun.
+Friend explanations compare the person from the observer's viewpoint; friend-grid
+comparisons use qualified person positions inside cells, rather than cell centres.
+Trail explanations identify a replay time and skyline difference, or an invalid run.
+
+Every generated quiz includes an `explanation` object, so CLI JSON and worker/API
+consumers can use the same reasoning without an external AI service. It contains
+`version`, `language`, `source`, `kind`, `correct` (summary and evidence),
+`closestLabels`, and `alternatives` (plausibility, reasons and comparison metrics).
+Each evidence entry has a stable `type`, English `text`, and numeric `data`; signed
+differences mean **candidate minus the shown view**. Bearings are true north; map
+rotation does not change them. Scrambling remaps explanation labels with the points.
+
+**Download explanation JSON** on the answer screen exports the seed, mode,
+difficulty, variant, scramble number, submitted answer and full explanation,
+including all grid alternatives. For example:
+
+```sh
+node scripts/generate.mjs grid-check medium grid > quiz.json
+```
+
+Explanations are shown only after answering. They describe the generated terrain
+and sightlines; an inconclusive comparison or low-confidence question is marked
+explicitly instead of inventing a reason to reject an answer.
+
 ## Environment
 
 The **Environment** panel controls the live scene: clear skies, passing clouds,

@@ -3,6 +3,8 @@
 import { TerrainModel } from '../engine/terrainModel.js';
 import { SeedManager } from '../engine/rng.js';
 import { scrambleLabels } from '../engine/scramble.js';
+import { explanationComparisons } from '../engine/answerExplanation.js';
+import { appendAnswerExplanation } from './answerExplanation.js';
 import { DIFFICULTIES, TUNABLES, tunableValue, encodeTuning, decodeTuning } from '../engine/difficulty.js';
 import { getLookalikePreset, DIRECTIONS } from '../engine/lookalikeQuiz.js';
 import { normaliseGridSize, normaliseGridChallenge, parseCell, headingHidden, usesGrid } from '../engine/gridQuiz.js';
@@ -683,6 +685,12 @@ function answer(label) {
   $('scramble').disabled = true;
   $('prompt').hidden = true;
   renderFacts();
+  showAnswerResult(label, right);
+  appendAnswerExplanation($('result'), quiz, label, state.model);
+}
+
+function showAnswerResult(label, right) {
+  const quiz = state.quiz;
   if (quiz.mode === 'trail') { if (quiz.grid) showTrailGridResult(label, right); else showTrailResult(label, right); return; }
   if (quiz.mode === 'facing') { showFacingResult(label, right); return; }
   if (quiz.mode === 'grid') { showGridResult(label, right); return; }
@@ -779,7 +787,8 @@ function showFriendResult(label, right) {
 
 function showGridResult(label, right) {
   const q = state.quiz, res = $('result');
-  const codes = [...new Set([q.correctLabel, label, q.closestLabel])];
+  const comparisons = explanationComparisons(q, label);
+  const codes = [...new Set([q.correctLabel, label, ...comparisons.map(o => o.label), q.closestLabel].filter(Boolean))];
   const options = codes.map((code) => q.options.find((o) => o.label === code));
   const trueHeading = `${String(Math.round(q.camera.heading)).padStart(3, '0')}°`;
   res.hidden = false;

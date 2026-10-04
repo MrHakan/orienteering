@@ -11,6 +11,7 @@ import { getDifficulty, applyTuning } from './difficulty.js';
 import { formatHeading } from './heading.js';
 import { clamp } from './grid.js';
 import { supportsSunWatch } from './sunWatch.js';
+import { withAnswerExplanation } from './answerExplanation.js';
 
 export const LABELS = ['A', 'B', 'C', 'D', 'E'];
 
@@ -206,7 +207,7 @@ export function assemble(e, { seed, difficulty, variant = 0, preset, seeds, vt =
   const headingLabel = formatHeading(view.heading, preset.heading);
   const mapRotation = preset.mapRotation ? rng.fork('rotation').pick([0, 90, 180, 270]) : 0;
 
-  return {
+  return withAnswerExplanation({
     version: 1,
     mode,
     seed, difficulty, variant,
@@ -235,5 +236,5 @@ export function assemble(e, { seed, difficulty, variant = 0, preset, seeds, vt =
       ms: Math.round(now() - t0),
     },
     log,
-  };
+  }, model);
 }

@@ -11,6 +11,7 @@ import { descriptorDistance } from './skyline.js';
 import { distinguishingCue, VIEW_COLUMNS } from './quizCandidates.js';
 import { buildTerrain, now, landmarkSummary, terrainSummary, framingPitch } from './quiz.js';
 import { saturate } from './grid.js';
+import { withAnswerExplanation } from './answerExplanation.js';
 
 export const DIRECTIONS = [
   { label: 'N', heading: 0 }, { label: 'NE', heading: 45 }, { label: 'E', heading: 90 }, { label: 'SE', heading: 135 },
@@ -120,7 +121,7 @@ function assembleFacing(e, { seed, difficulty, variant, base, seeds, vt, log, t0
     stats: { viewpointsEvaluated: e.evaluated, terrainAttempt: e.attempt, viewTry: e.try, questionsCompared: compared, ms: Math.round(now() - t0) },
     log,
   };
-  return quiz;
+  return withAnswerExplanation(quiz, model);
 }
 
 // Re-exported for callers that only import this module.

@@ -9,6 +9,7 @@ import { compareLookalikeViews, rankLookalikeTriples, sweepDescriptor, triangleS
 import { descriptorDistance } from './skyline.js';
 import { distinguishingCue, VIEW_COLUMNS } from './quizCandidates.js';
 import { createSunWatch } from './sunWatch.js';
+import { withAnswerExplanation } from './answerExplanation.js';
 import { personSight, finishFriendQuiz, FRIEND_HEIGHT, normaliseFriendChallenge } from './friendQuiz.js';
 import { surfaceElevation } from './terrainSurface.js';
 import { angleDiff, DEG, saturate, wrap360 } from './grid.js';
@@ -160,7 +161,7 @@ export function generateSunWatchQuiz({ seed, difficulty = 'sun-watch', mode = 'w
       finishFriendQuiz(quiz, opts);
     }
     log.push({ attempt, stage: 'question', try: ci, ok: true, confidence: quiz.validation.confidence, issues: [] });
-    return quiz;
+    return withAnswerExplanation(quiz, model);
   }
   throw new Error('No fair sun/watch location matches found. Try another seed.');
 }

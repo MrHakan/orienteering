@@ -49,6 +49,9 @@ try {
   if (out) await page.locator('.card').screenshot({ path: join(out, 'grid4-question.png') });
   await page.locator('#grid-submit').click();
   assert.match(await page.locator('#result .verdict').textContent(), /^Correct/);
+  assert.equal(await page.locator('.answer-explanation').count(), 1);
+  assert.equal(await page.locator('.answer-alternative').count(), 3);
+  assert.match(await page.locator('#answer-explanation-title').textContent(), new RegExp(q.correctLabel));
   assert.equal(await page.locator('#grid-submit').isDisabled(), true);
   await page.locator('#new-positions').click();
   await ready(page);
@@ -77,7 +80,8 @@ try {
   await page.locator('#grid-cell').fill(wrong.toLowerCase());
   await page.locator('#grid-cell').press('Enter');
   assert.match(await page.locator('#result .verdict').textContent(), /^Not quite/);
-  assert.ok(await page.locator('#result [data-view]').count() <= 3);
+  assert.ok(await page.locator('#result [data-view]').count() <= 5);
+  assert.equal(await page.locator(`.answer-alternative[data-label="${wrong}"][data-chosen="true"]`).count(), 1);
   await page.locator('#result [data-view]').last().click();
   assert.equal(await page.locator('#viewing-badge').isVisible(), true);
 

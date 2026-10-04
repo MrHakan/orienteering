@@ -12,6 +12,7 @@ import { createTrailPlan, simulateTrail, planAt, normaliseMovement, landingPulse
 import { terrainRunDuration, trailViewTimes, describeTrailTerrain } from './trailTerrain.js';
 import { surfaceElevation } from './terrainSurface.js';
 import { saturate, wrap360 } from './grid.js';
+import { withAnswerExplanation } from './answerExplanation.js';
 
 export const TRAIL_COLORS = { A: '#ff6358', B: '#58d68b', C: '#39d5ed' };
 export const normaliseTrailAnswer = value => value === 'grid' ? 'grid' : 'trail';
@@ -177,7 +178,7 @@ export function generateTrailQuiz({ seed, difficulty = 'medium', variant = 0, he
       const correctLabel = options.find((p) => p.correct).label;
       const camera = { x: chosen.x, y: chosen.y, z: chosen.feet[0] + eyeHeight, heading, pitch: triple.pitch, fov, eyeHeight, roll: 0 };
       const spread = trailSpread(triple.points, model.size), { minSeparation } = spread;
-      return {
+      return withAnswerExplanation({
         version: 1, mode: 'trail', seed, difficulty, variant, lowConfidence: false,
         terrain: terrainSummary(model, interval, terrainCheck), camera,
         trail: { plan, movement: physics, answerMode: 'trail', duration: plan.duration, pairs: triple.pairs, times: fullTimes },
@@ -190,7 +191,7 @@ export function generateTrailQuiz({ seed, difficulty = 'medium', variant = 0, he
           minDistance: minD, minRequiredDistance: band.min, minSeparation, minCue: band.cue, requiredSeparation: model.size * .25, spread },
         stats: { viewpointsEvaluated: routes.length * coarseTimes.length, questionsCompared: accepted, terrainAttempt: attempt,
           ms: Math.round(now() - t0) }, log,
-      };
+      }, model);
     }
   }
   throw new Error('No fair three-trail question found. Try another seed or a lower difficulty.');
