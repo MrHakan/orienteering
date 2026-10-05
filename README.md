@@ -34,7 +34,7 @@ One-time setup: **Settings → Pages → Build and deployment → Source: GitHub
 
 Weather is purely visual and never changes the terrain. Position puzzles keep their fixed viewpoint, friend videos follow the zoom sequence, and Bunny-hop trails follows the same terrain-selected run as the page.
 
-Videos are encoded frame by frame with WebCodecs and muxed into MP4 by a small built-in muxer (`src/export/mp4.js`). The output is always exactly 60 fps and 15.0 s (900 frames), however fast the machine renders; H.264 uses level 4.2, which 1080×1920 at 60 fps requires. In Chrome, Edge and Safari the codec is **H.264**, which is what Instagram expects. Browsers without an H.264 encoder fall back to VP9 (or real-time MediaRecorder WebM), and the dialog warns that the file needs converting before upload. On phones, the **Share…** button hands the file to the system share sheet, which includes Instagram.
+Videos are encoded frame by frame with WebCodecs and muxed into MP4 by a small built-in muxer (`src/export/mp4.js`). The output is always exactly 60 fps and 15.0 s (900 frames), with a synthesised soundtrack,, however fast the machine renders; H.264 uses level 4.2, which 1080×1920 at 60 fps requires. In Chrome, Edge and Safari the codec is **H.264**, which is what Instagram expects. Browsers without an H.264 encoder fall back to VP9 (or real-time MediaRecorder WebM), and the dialog warns that the file needs converting before upload. On phones, the **Share…** button hands the file to the system share sheet, which includes Instagram.
 
 ## Seasonal Easter eggs
 
@@ -87,6 +87,12 @@ Question: which bullet-drop mark puts the round on the enemy's **head**? Options
 - **How to solve it**: find yourself and the target on the contour map from the heading and the terrain, then measure the map (horizontal) distance; or range the enemy's 0.50 m shoulders with the mil stadia (metres = 500 ÷ mils — that is the straight-line range, so correct it for the slope).
 - **Optional crosswind call** (Wind → Crosswind call, `wind=1` in links): a steady wind is shown as speed and from-direction (the grass and rain drift with it), with the rifle's wind card — windage hold in mil per 1 m/s of full crosswind for 300–1000 m. The drift is Didion's relation (crosswind × (time of flight − range ÷ muzzle velocity)) on the simulated trajectory; the wind is drawn so the exact hold falls on a 0.5 mil stadia tick. Options pair scope marks with windage holds — including holding with the wind instead of into it — and exactly one pair hits the head. Plain quizzes are unchanged when the option is off.
 - **Scope**: the circle spans ±12 mil; horizontal stadia are numbered 2/4/6/8 mil, vertical marks 2–10 (×100 m) with wind wings. The live view and exports share one sampler (`sniperFrame`), so the 15 s Reels video is exactly the 5 s overview + 10 s scope sequence. After answering, the map shows YOU, the ENEMY and the line of fire with its length, and the explanation lists each mark's impact.
+
+## Sound and vibration
+
+All sound is synthesised with WebAudio (`src/audio/`) — no audio files. Wind and rain beds follow the scene's weather (and the sniper's crosswind), storms add thunder, the sniper scope clicks as the rifle comes up and the shot echoes down the valley; answers get a chime or a low buzz and a short vibration on phones. **Sound & vibration** in the Map panel mutes everything; audio starts on the first tap or key (browsers block autoplay).
+
+Video exports carry the same soundtrack, rendered offline (48 kHz stereo) and encoded with WebCodecs: **AAC** where the browser can (what Instagram expects next to H.264), otherwise Opus, muxed as a second MP4 track. The real-time recorder fallback records it alongside. The export dialog's **Sound** switch turns it off.
 
 ## Daily, challenges and runs
 

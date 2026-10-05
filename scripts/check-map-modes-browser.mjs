@@ -62,15 +62,18 @@ try {
       const blob = await c.toImage({ time: 6 });
       const png = await new Promise(r => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(blob); });
       c.animated = true;
-      const clip = await encodeCanvasVideo(c.canvas, t => c.drawFrameReady(t * 10), { duration: .3, fps: 10 });
+      const audio = await c.renderSoundtrack();
+      const clip = await encodeCanvasVideo(c.canvas, t => c.drawFrameReady(t * 10), { duration: .3, fps: 10, audio });
       c.dispose();
-      return { png, video: clip.blob.size };
+      return { png, video: clip.blob.size, sound: clip.audio, encoder: typeof AudioEncoder !== 'undefined', seconds: audio?.duration };
     }, { ...q, terrain: { ...q.terrain, heights: Array.from(q.terrain.heights) } });
     assert.ok(exported.video > 1000);
+    assert.equal(exported.seconds, 15, 'a full 15 s soundtrack');
+    if (exported.encoder) assert.ok(['mp4a.40.2', 'opus'].includes(exported.sound), 'the clip carries a sound track');
     if (out) await writeFile(join(out, `map-mode-export-${mode}.png`), Buffer.from(exported.png.split(',')[1], 'base64'));
   }
   assert.deepEqual(errors, []);
-  console.log('Map-reading mode browser checks passed: resection, route choice, intervisibility, profile charts, drainage and fog — links, clip player, reveal, explanations and PNG/video exports.');
+  console.log('Map-reading mode browser checks passed: resection, route choice, intervisibility, profile charts, drainage and fog — links, clip player, reveal, explanations and PNG/video exports with sound.');
 } finally {
   await browser.close();
   server.close();

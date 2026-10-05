@@ -88,3 +88,22 @@ test('an asynchronous encoder error exits the capacity wait and rejects export',
   assert.equal(state.closed, true);
   assert.ok(state.peak <= 8);
 });
+
+test('the muxer writes an AAC or Opus audio track beside the video', async () => {
+  const { muxMp4 } = await import('../src/export/mp4.js');
+  const video = Array.from({ length: 30 }, (_, i) => ({ data: new Uint8Array([0, 0, 0, 1, i]), key: i === 0 }));
+  for (const codec of ['mp4a.40.2', 'opus']) {
+    const audio = { codec, sampleRate: 48000, channels: 2, samples: Array.from({ length: 47 }, () => ({ data: new Uint8Array(12), duration: codec === 'opus' ? 960 : 1024 })) };
+    const bytes = new Uint8Array(await muxMp4({ codec: 'vp09.00.41.08', width: 16, height: 16, fps: 30, samples: video, audio }).arrayBuffer());
+    const text = new TextDecoder('latin1').decode(bytes);
+    assert.ok(text.includes('soun') && text.includes('smhd'), 'audio handler');
+    assert.ok(text.includes(codec === 'opus' ? 'dOps' : 'esds'), codec);
+    // Top-level boxes tile the file exactly and mdat holds video + audio payloads.
+    let off = 0; const boxes = {};
+    while (off < bytes.length) { const size = new DataView(bytes.buffer, off).getUint32(0); boxes[text.slice(off + 4, off + 8)] = size; off += size; }
+    assert.equal(off, bytes.length);
+    assert.equal(boxes.mdat, 8 + 30 * 5 + 47 * 12);
+  }
+  const silent = new TextDecoder('latin1').decode(new Uint8Array(await muxMp4({ codec: 'vp09.00.41.08', width: 16, height: 16, fps: 30, samples: video }).arrayBuffer()));
+  assert.ok(!silent.includes('soun'));
+});

@@ -9,6 +9,7 @@ import { drawCompassTape } from '../render/compassTape.js';
 import { relativeBearing, drawRelativeBearing } from '../render/relativeBearing.js';
 import { skylineScreenPoints } from '../render/skylineOverlay.js';
 import { createEasterEgg } from '../easter/index.js';
+import { renderSoundtrack, clipCues } from '../audio/soundscape.js';
 import { normaliseEnvironment, environmentFromWeather, weatherParams } from '../render/environment.js';
 import { headingHidden } from '../engine/gridQuiz.js';
 import { friendSceneFrame } from './friendZoom.js';
@@ -304,6 +305,14 @@ export class ExportComposer {
 
   dispose() {
     this.renderer.dispose();
+  }
+
+  /** The clip's soundtrack: weather ambience plus mode cues (sniper scope and shot, reveal chime). */
+  renderSoundtrack() {
+    const q = this.quiz, wind = q.sniper?.wind;
+    const weather = wind ? { ...this.weather, wind: [wind.speed * Math.sin((wind.from + 180) * Math.PI / 180), wind.speed * Math.cos((wind.from + 180) * Math.PI / 180)] } : this.weather;
+    return renderSoundtrack({ duration: this.options.duration, weather, seed: `${q.seed}|${q.mode}`,
+      cues: clipCues(q, this.options.duration, { reveal: this.options.reveal }) });
   }
 
   async drawFrameReady(time = 0, options = {}) {

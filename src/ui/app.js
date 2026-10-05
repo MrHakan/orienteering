@@ -18,6 +18,7 @@ import { TrailPlayback } from './trailPlayback.js';
 import { usesSunWatch, supportsSunWatch, sunWatchFrame, SUN_WATCH_DURATION } from '../engine/sunWatch.js';
 import { sniperFrame, sniperWeather, SNIPER_DURATION, SNIPER_TIMING } from '../engine/sniper.js';
 import { drawSniperOverlay } from '../render/sniperOverlay.js';
+import { LiveAudio } from '../audio/liveAudio.js';
 import { dateKey, isDateKey, dailyPlan, dailyStreak, dailyShareText, MODE_NAMES, encodeChallenge, decodeChallenge, compareChallenge,
   RUN_LENGTH, runPlan, runPoints, runShareText } from './play.js';
 import { MAP_MODES, isMapMode } from '../engine/mapModes.js';
@@ -98,8 +99,14 @@ const trailPlayer = new TrailPlayback({
 });
 /** Fixed 15-second sequences (sun & watch, sniper) share one player and timeline. */
 const usesClip = (q) => usesSunWatch(q) || q?.mode === 'sniper' || isMapMode(q);
+const audio = new LiveAudio({ enabled: store.get('otq.sound', true) !== false });
 const sunPlayer = new TrailPlayback({ duration: SUN_WATCH_DURATION,
-  draw: (t) => { if (usesClip(state.quiz) && !state.loading) { state.sunTime = t; renderScene(currentCamera()); } },
+  draw: (t) => {
+    if (!usesClip(state.quiz) || state.loading) return;
+    // Sniper: the scope click as the rifle comes up.
+    if (state.quiz.mode === 'sniper' && state.sunTime < SNIPER_TIMING.overview && t >= SNIPER_TIMING.overview && t - state.sunTime < 1) audio.cue('scope');
+    state.sunTime = t; renderScene(currentCamera());
+  },
   onState: ({ time, playing, duration }) => {
     state.sunTime = time;
     $('direction-play').textContent = playing ? 'Pause' : time >= duration ? 'Replay' : 'Play';
@@ -185,6 +192,7 @@ for (const prefix of ['scene', 'export']) {
 }
 for (const key of ['weather', 'wind', 'texture', 'hd', 'foliage', 'nature', 'foliage-density', 'nature-density']) $(`scene-${key}`).addEventListener('change', () => {
   state.environment = readEnvironmentControls('scene'); store.set('otq.environment', state.environment);
+  if (state.quiz) audio.setWeather(state.quiz.mode === 'sniper' ? sniperWeather(state.quiz, weatherParams(state.environment, state.quiz.camera.heading)) : weatherParams(state.environment, state.quiz.camera.heading));
   updateTextureNote('scene');
   updateDensityControls('scene');
   stopFriendWave();
@@ -516,6 +524,7 @@ function show(quiz) {
   setAnswersEnabled(true);
   renderPlayBanner();
   state.shownAt = performance.now();
+  audio.setWeather(quiz.mode === 'sniper' ? sniperWeather(quiz, weatherParams(state.environment, quiz.camera.heading)) : weatherParams(state.environment, quiz.camera.heading));
   const replay = state.play?.kind === 'daily' && store.get('otq.daily', {})[state.play.plan.date];
   if (replay) setTimeout(() => answer(replay.label, { replay: true }), 0); // one attempt a day: show today's result
   if (!usesSunWatch(quiz) && quiz.mode === 'friend' && quiz.friend.skin === 'conquest') startFriendArrival();
@@ -751,6 +760,7 @@ function answer(label, { replay = false } = {}) {
   showAnswerResult(label, right);
   appendAnswerExplanation($('result'), quiz, label, state.model);
   renderPlayResult(label, right, seconds, replay);
+  if (!replay) audio.answer(right, { shot: quiz.mode === 'sniper' });
 }
 
 // ---------------------------------------------------------------- daily / challenge / run
@@ -1203,6 +1213,8 @@ $('copy-link').addEventListener('click', async () => {
   setTimeout(() => { btn.textContent = 'Copy link to this quiz'; }, 1600);
 });
 
+$('opt-sound').checked = audio.enabled;
+$('opt-sound').addEventListener('change', () => { audio.setEnabled($('opt-sound').checked); store.set('otq.sound', $('opt-sound').checked); });
 const toggles = { 'opt-northup': 'northUp', 'opt-tape': 'tape', 'opt-hillshade': 'hillshade', 'opt-landforms': 'landforms', 'opt-drainage': 'drainage' };
 for (const [id, key] of Object.entries(toggles)) {
   const el = $(id);
@@ -1288,6 +1300,7 @@ function exportOptions() {
     caption: $('export-caption').checked,
     tape: $('export-tape').checked,
     reveal: $('export-reveal').checked,
+    sound: $('export-sound').checked,
     northUp: state.settings.northUp,
     appearance: { ...state.appearance },
     duration: exportDuration(state.quiz),
@@ -1329,6 +1342,7 @@ function restoreExportOptions() {
   $('export-caption').checked = saved.caption !== false;
   $('export-tape').checked = saved.tape !== false;
   $('export-reveal').checked = saved.reveal !== false;
+  $('export-sound').checked = saved.sound !== false;
   $('export-easter').value = saved.easter === 'off' ? 'off' : 'auto';
 }
 
@@ -1449,12 +1463,14 @@ async function exportVideo() {
   try {
     c.animated = true;
     const d = c.options.duration;
-    const { blob, extension, h264 } = await encodeCanvasVideo(c.canvas, (t) => c.drawFrameReady(t, { reveal: c.options.reveal && t >= d - 3 }), {
-      duration: d, fps: EXPORT_FPS, onProgress: (p) => { progress.value = p; },
+    const audio = c.options.sound ? await c.renderSoundtrack().catch(() => null) : null;
+    const { blob, extension, h264, audio: audioCodec } = await encodeCanvasVideo(c.canvas, (t) => c.drawFrameReady(t, { reveal: c.options.reveal && t >= d - 3 }), {
+      duration: d, fps: EXPORT_FPS, onProgress: (p) => { progress.value = p; }, audio,
     });
     const name = exportName('', extension);
     download(blob, name);
-    setExportStatus(h264 ? `Saved ${name} (H.264, ${(blob.size / 1e6).toFixed(1)} MB)` : `Saved ${name}. Not H.264, so convert it to MP4/H.264 before uploading to Instagram.`);
+    const sound = !audio ? '' : audioCodec === 'mp4a.40.2' ? ', AAC sound' : audioCodec === 'opus' ? ', Opus sound' : audioCodec === undefined ? '' : ', silent (no audio encoder)';
+    setExportStatus(h264 ? `Saved ${name} (H.264${sound}, ${(blob.size / 1e6).toFixed(1)} MB)` : `Saved ${name}${sound ? ` (${sound.slice(2)})` : ''}. Not H.264, so convert it to MP4/H.264 before uploading to Instagram.`);
   } catch (err) {
     setExportStatus(`Recording failed: ${err.message}`);
   } finally {
