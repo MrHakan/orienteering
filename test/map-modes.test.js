@@ -5,6 +5,7 @@ import { TerrainModel } from '../src/engine/terrainModel.js';
 import { MAP_MODES, isMapMode, profileAlong, droneCamera, bearingTo } from '../src/engine/mapModes.js';
 import { toblerSpeed, routeStats } from '../src/engine/routeQuiz.js';
 import { sightline } from '../src/engine/visibilityQuiz.js';
+import { cellAt } from '../src/engine/gridQuiz.js';
 import { surfaceElevation } from '../src/engine/terrainSurface.js';
 
 const modelOf = (q) => new TerrainModel({ ...q.terrain, seed: q.terrain.modelSeed });
@@ -58,6 +59,22 @@ test('resection with hidden peaks: answers spread over the map, each a look-alik
       assert.ok(q.explanation.alternatives.find((a) => a.label === o.label).reasons.length >= 1);
     }
     assert.ok(q.options.some((o) => o.trap), 'one answer sits on a true bearing line');
+  }
+});
+
+test('resection by grid: the bearings cross in exactly one cell', async () => {
+  for (const [difficulty, size] of [['easy', 4], ['medium', 8], ['master', 16]]) {
+    const q = await generate({ seed: 'res-g', difficulty, mode: 'resection', resectionAnswer: 'grid', gridSize: size }); one(q); shape(q);
+    const L = modelOf(q).size, slack = q.resection.rounding / 2 + 0.6;
+    assert.equal(q.grid.size, size); assert.equal(q.options.length, size * size);
+    assert.equal(cellAt(q.grid.target.x, q.grid.target.y, L, size), q.correctLabel);
+    assert.equal(q.resection.points.length, 4, 'the point traps stay for the explanation');
+    // Every position that fits all bearings within the reading slack lies in the answer cell.
+    for (let y = 0; y <= L; y += 20) for (let x = 0; x <= L; x += 20) {
+      if (q.resection.peaks.every((p) => Math.abs(((bearingTo({ x, y }, p) - p.shown + 540) % 360) - 180) <= slack)) assert.equal(cellAt(x, y, L, size), q.correctLabel, `${x},${y}`);
+    }
+    assert.ok(q.explanation.alternatives.some((a) => a.scope === 'trap-point'), 'trap cells are explained');
+    assert.equal(q.explanation.alternatives.length, size * size - 1);
   }
 });
 

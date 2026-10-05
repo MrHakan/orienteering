@@ -425,7 +425,7 @@ export class MapRenderer {
 
   drawGridTarget() {
     const target = this.data.grid.target;
-    if (!this.reveal || !target) return;
+    if (!this.reveal || !target || this.data.grid.origin === 'observer') return; // resection grids reveal YOU instead
     const { ctx } = this, [x, y] = this.toCanvas(target.x, target.y);
     ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2);
     ctx.strokeStyle = COLORS.bg; ctx.lineWidth = 3; ctx.stroke();

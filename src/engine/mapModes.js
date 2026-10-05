@@ -89,5 +89,8 @@ export function profileAlong(model, a, b, samples = 64) {
   });
 }
 
+/** Resection answer method: four points (A–D) or the grid cell you stand in. */
+export const normaliseResectionAnswer = (value) => value === 'grid' ? 'grid' : 'point';
+
 export const bearingTo = (a, b) => wrap360(Math.atan2(b.x - a.x, b.y - a.y) / DEG);
 export const bearingText = (v) => `${String(Math.round(wrap360(v)) % 360).padStart(3, '0')}°`;

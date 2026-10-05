@@ -49,6 +49,26 @@ try {
     assert.ok((await page.locator('.answer-explanation').innerText()).length > 60, `${mode}: explanation`);
     assert.match(new URL(page.url()).hash, new RegExp(`m=${mode}`));
   }
+  // Resection by grid: the cell form replaces A–D; the link carries ra=grid&g=6.
+  {
+    const q = await generate({ seed: 'mm-res-grid', difficulty: 'medium', mode: 'resection', resectionAnswer: 'grid', gridSize: 6 });
+    await page.goto(`${url}/#seed=mm-res-grid&d=medium&m=resection&ra=grid&g=6`, { waitUntil: 'domcontentloaded' });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => document.getElementById('loading').classList.contains('hidden') && !document.getElementById('grid-answer').hidden, null, { timeout: 120000 });
+    assert.equal(await page.locator('#resection-answer').inputValue(), 'grid');
+    assert.equal(await page.locator('#resection-answer-field').isHidden(), false);
+    assert.equal(await page.locator('#grid-size-field').isHidden(), false);
+    assert.match(await page.locator('#prompt').innerText(), /which cell \(A1–F6/);
+    if (out) await page.locator('.layout').screenshot({ path: join(out, 'map-mode-resection-grid.png') });
+    const wrong = q.explanation.closestLabels[0];
+    await page.locator('#grid-cell').fill(wrong);
+    await page.locator('#grid-submit').click();
+    await page.waitForSelector('#mode-replay');
+    assert.match(await page.locator('#result').innerText(), new RegExp(`Not quite — the answer is ${q.correctLabel}`));
+    assert.match(await page.locator('.answer-explanation').innerText(), new RegExp(`${wrong} · your answer`));
+    assert.match(new URL(page.url()).hash, /m=resection&ra=grid&g=6/);
+    if (out) await page.locator('.layout').screenshot({ path: join(out, 'map-mode-resection-grid-answer.png') });
+  }
   // Exports through the shipped composer: question PNG and a short clip for two modes.
   for (const mode of ['resection', 'profile']) {
     const q = await generate({ seed: `mm-${mode}`, difficulty: 'medium', mode });
@@ -73,7 +93,7 @@ try {
     if (out) await writeFile(join(out, `map-mode-export-${mode}.png`), Buffer.from(exported.png.split(',')[1], 'base64'));
   }
   assert.deepEqual(errors, []);
-  console.log('Map-reading mode browser checks passed: resection, route choice, intervisibility, profile charts, drainage and fog — links, clip player, reveal, explanations and PNG/video exports with sound.');
+  console.log('Map-reading mode browser checks passed: resection (points and grid), route choice, intervisibility, profile charts, drainage and fog — links, clip player, reveal, explanations and PNG/video exports with sound.');
 } finally {
   await browser.close();
   server.close();

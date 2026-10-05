@@ -9,7 +9,8 @@
 import { now } from './quiz.js';
 import { surfaceElevation } from './terrainSurface.js';
 import { DEG, angleDiff, wrap360 } from './grid.js';
-import { terrains, scaffold, bearingTo, bearingText, panCamera, CLIP_DURATION } from './mapModes.js';
+import { terrains, scaffold, bearingTo, bearingText, panCamera, CLIP_DURATION, normaliseResectionAnswer } from './mapModes.js';
+import { normaliseGridSize, gridCells, cellAt } from './gridQuiz.js';
 
 // hidden: peaks unmarked, answers spread; lookalikes: answers whose every bearing meets a hill
 // (ruled out only by the view, needing `cues` differences).
@@ -38,6 +39,7 @@ function sees(model, a, b) {
 
 export function generateResectionQuiz(opts) {
   const difficulty = BANDS[opts.difficulty] ? opts.difficulty : 'medium', band = BANDS[difficulty], t0 = now();
+  const gridSize = normaliseResectionAnswer(opts.resectionAnswer) === 'grid' ? normaliseGridSize(opts.gridSize) : 0;
   for (const built of terrains({ ...opts, difficulty, ...(band.hidden && !opts.size ? LARGE_MAP : {}) }, 'resection')) {
     const { model, rng } = built, L = model.size;
     const peaks = model.analyzer.summits
@@ -60,6 +62,7 @@ export function generateResectionQuiz(opts) {
       }
       if (chosen.length < band.peaks) continue;
       const shown = chosen.map((p) => Math.round(p.bearing / band.round) * band.round % 360);
+      if (gridSize && !fixInOneCell(o, chosen, shown, band, L, gridSize)) continue;
       const error = (q) => chosen.map((p, i) => angleDiff(bearingTo(q, p), shown[i]));
       const distractors = band.hidden ? lookalikeDistractors({ model, rng, o, eye, chosen, shown, band, error }) : nearMisses({ model, rng, o, chosen, band, error });
       if (!distractors) continue;
@@ -88,10 +91,65 @@ export function generateResectionQuiz(opts) {
         revealYou: true, centre: { x: o.x, y: o.y },
       };
       quiz.explanation = resectionExplanation(quiz);
-      return quiz;
+      return gridSize ? toGridAnswer(quiz, o, L, gridSize) : quiz;
     }
   }
   throw new Error('No clear resection found for this seed. Try another seed.');
+}
+
+/** Every position that fits all bearings (within the reading accuracy) lies in the observer's cell. */
+function fixInOneCell(o, chosen, shown, band, L, size) {
+  const own = cellAt(o.x, o.y, L, size), slack = band.round / 2 + 0.6, reach = 500, step = 10;
+  for (let dy = -reach; dy <= reach; dy += step) for (let dx = -reach; dx <= reach; dx += step) {
+    const q = { x: o.x + dx, y: o.y + dy };
+    if (cellAt(q.x, q.y, L, size) === own) continue;
+    if (chosen.every((p, i) => angleDiff(bearingTo(q, p), shown[i]) <= slack)) return false;
+  }
+  return true;
+}
+
+/**
+ * Grid answer: the cell you stand in. The point answers stay as
+ * `resection.points`; their cells explain the look-alike traps.
+ */
+function toGridAnswer(quiz, o, L, size) {
+  const correctLabel = cellAt(o.x, o.y, L, size), points = quiz.options;
+  const options = gridCells(L, size).map((c) => ({ ...c, correct: c.label === correctLabel }));
+  const out = { ...quiz, options, correctLabel, resection: { ...quiz.resection, answer: 'grid', points },
+    grid: { size, origin: 'observer', cellMetres: L / size, target: { x: Math.round(o.x), y: Math.round(o.y) } } };
+  out.explanation = gridExplanation(out, quiz.explanation);
+  return out;
+}
+
+function gridExplanation(quiz, pointExplanation) {
+  const { peaks, points, rounding } = quiz.resection, { size } = quiz.grid, L = quiz.terrain.size, cell = quiz.correctLabel;
+  const traps = new Map();
+  for (const o of points.filter((p) => !p.correct)) {
+    const label = cellAt(o.x, o.y, L, size);
+    if (label === cell || traps.has(label)) continue;
+    const named = { ...o, label: `the ${o.trap ? 'single-bearing trap' : o.lines ? 'look-alike point' : 'near-miss point'} in ${label}` };
+    const rename = (text) => text.replace(new RegExp(`\\b${o.label}\\b`, 'g'), named.label);
+    const point = pointExplanation.alternatives.find((a) => a.label === o.label);
+    const base = o.lines ? lookalikeAlternative(named, peaks, rounding)
+      : { ...point, plausibility: rename(point.plausibility), reasons: point.reasons.map((r) => ({ ...r, text: rename(r.text) })) };
+    traps.set(label, { ...base, label, scope: 'trap-point', comparisonPoint: { x: Math.round(o.x), y: Math.round(o.y) },
+      plausibility: `A trap lies in ${label}. ${(base.plausibility || '').replace(/^./, (c) => c.toUpperCase())}`.trim() });
+  }
+  const alternatives = quiz.options.filter((c) => !c.correct).map((c) => {
+    if (traps.has(c.label)) return traps.get(c.label);
+    const errors = peaks.map((p) => angleDiff(bearingTo(c, p), p.shown)), worst = errors.indexOf(Math.max(...errors)), p = peaks[worst];
+    return { label: c.label, difference: +errors[worst].toFixed(1), status: 'distinguished', scope: 'cell-centre', plausibility: '',
+      reasons: [{ type: 'bearing-mismatch', text: `The back-bearings do not cross in ${c.label}: from its centre, ${p.label} would lie ${errors[worst].toFixed(1)}° off the ${bearingText(p.shown)} you measured.`,
+        data: { peak: p.label, errorDegrees: +errors[worst].toFixed(1) } }] };
+  });
+  const ranked = [...alternatives].sort((a, b) => (a.scope === 'trap-point' ? -1 : 0) - (b.scope === 'trap-point' ? -1 : 0) || a.difference - b.difference);
+  return { ...pointExplanation, kind: 'resection-cell',
+    correct: { label: cell, summary: `Only ${cell} holds the point where every back-bearing crosses.`,
+      evidence: [...pointExplanation.correct.evidence.filter((e) => e.type !== 'bearing-check')
+        .map((e) => e.type === 'back-bearings' ? { ...e, text: e.text.replace(/The lines cross at \w+\.$/, `The lines cross where you stand, in ${cell}.`) } : e),
+        { type: 'observer-cell', text: `The back-bearings cross inside ${cell} (${Math.round(quiz.grid.cellMetres)} m cells). Allowing ±${(rounding / 2 + 0.6).toFixed(1)}° of reading error on every bearing, all positions that fit stay in ${cell}.`,
+          data: { label: cell, target: quiz.grid.target, divisions: size } }] },
+    closestLabels: ranked.slice(0, 3).map((a) => a.label), alternatives };
 }
 
 /** What a bearing line from a point runs to: its nearest hill and the angle off it. */

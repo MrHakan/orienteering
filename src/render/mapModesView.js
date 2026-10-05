@@ -4,6 +4,7 @@
 
 import { MAP_MODES, droneCamera, walkCamera, bearingText } from '../engine/mapModes.js';
 import { resectionFrame } from '../engine/resectionQuiz.js';
+import { cellAt } from '../engine/gridQuiz.js';
 
 const DEG = Math.PI / 180;
 const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
@@ -22,12 +23,14 @@ export function modeSubtitle(q) {
   }
 }
 
+const cellRange = (q) => `A1–${String.fromCharCode(64 + q.grid.size)}${q.grid.size}`;
+
 export function modePrompt(q) {
-  const list = q.options.map((o) => o.label).join(', ');
+  const list = q.grid ? `which cell (${cellRange(q)}, row + column, e.g. B3)` : q.options.map((o) => o.label).join(', ');
   switch (q.mode) {
     case 'resection': return q.resection.peaksMarked
       ? `Your position is unknown. Compass bearings to the marked peaks: ${modeSubtitle(q)}. Where are you: ${list}? Draw each back-bearing (±180°) from its peak; the lines cross where you stand.`
-      : `Your position is unknown. Compass bearings to the labelled hills in the view: ${modeSubtitle(q)}. The peaks are not marked on the map — find each hill among the contours first, then draw its back-bearing (±180°). Similar hills elsewhere fit the wrong points, so check every bearing and how far and how high each hill looks. Where are you: ${list}?`;
+      : `Your position is unknown. Compass bearings to the labelled hills in the view: ${modeSubtitle(q)}. The peaks are not marked on the map — find each hill among the contours first, then draw its back-bearing (±180°). Similar hills elsewhere fit the wrong ${q.grid ? 'cells' : 'points'}, so check every bearing and how far and how high each hill looks. Where are you: ${list}?`;
     case 'route': return `Which route from the start ▲ to the finish ◎ is fastest on foot, off-trail: ${list}? Climbing costs time, and so does a long detour. Tap a route or its letter.`;
     case 'visibility': return `You stand at YOU, eyes 1.7 m above the ground. Exactly one of the 2 m flags ${list} is in sight; the others hide behind terrain. Which one can you see? Read the contours between YOU and each flag.`;
     case 'profile': return `Which elevation profile matches the straight line from ▲ to ◎ on the map: ${list}? Profiles run left to right from ▲ to ◎; heights share one vertical scale.`;
@@ -38,7 +41,7 @@ export function modePrompt(q) {
 }
 
 export const modeCaption = (q) => ({
-  resection: `Bearings ${q.resection?.peaks.map((p) => bearingText(p.shown)).join(' / ')}: where are you?`,
+  resection: `Bearings ${q.resection?.peaks.map((p) => bearingText(p.shown)).join(' / ')}: ${q.grid ? `which cell, ${cellRange(q)}?` : 'where are you?'}`,
   route: 'Which route is fastest: A, B or C?',
   visibility: 'Which flag can you see from YOU?',
   profile: 'Which profile matches the line?',
@@ -119,7 +122,7 @@ export function drawModeOverlay(ctx, q, frame, { x = 0, y = 0, width: w, height:
 /** Extra rows for the facts panel. */
 export function modeFacts(q, answered) {
   switch (q.mode) {
-    case 'resection': return [['Bearings', modeSubtitle(q)], ['Read to', `${q.resection.rounding}°`], ['Peaks', q.resection.peaksMarked || answered ? 'marked on the map' : 'find them on the map'], ['Viewpoint', answered ? 'revealed on the map' : 'unmarked · find it from the bearings']];
+    case 'resection': return [['Bearings', modeSubtitle(q)], ['Read to', `${q.resection.rounding}°`], ['Find by', q.grid ? `${q.grid.size} × ${q.grid.size} grid · ${Math.round(q.grid.cellMetres)} m per side` : 'Point · A / B / C / D'], ['Peaks', q.resection.peaksMarked || answered ? 'marked on the map' : 'find them on the map'], ['Viewpoint', answered ? 'revealed on the map' : 'unmarked · find it from the bearings']];
     case 'route': return [['Speed model', 'Tobler hiking function, off-trail'], ['Leg', `${Math.round(q.route.straight)} m straight line`]];
     case 'visibility': return [['Eye / flags', '1.7 m / 2 m above the ground'], ['Flags', `${q.options.length} · exactly one visible`]];
     case 'profile': return [['Line', `${Math.round(q.profileLine.length)} m`], ['Profiles', `${q.options.length} · same vertical scale`]];
@@ -134,7 +137,15 @@ export function modeResultHTML(q, label, right) {
   const verdict = `<div class="verdict ${right ? 'good' : 'bad'}">${right ? 'Correct' : 'Not quite'} — the answer is ${q.correctLabel}.</div>`;
   const row = (o, cells) => `<tr><td><strong>${o.label}</strong>${o.correct ? ' ✓' : o.label === label ? ' (your pick)' : ''}</td>${cells.map((c) => `<td>${c}</td>`).join('')}</tr>`;
   let table = '';
-  if (q.mode === 'resection' && q.options[0].lines) {
+  if (q.mode === 'resection' && q.grid) {
+    // Grid: the crossing cell, your pick and the cells holding the look-alike traps.
+    const alt = (l) => q.explanation?.alternatives.find((a) => a.label === l);
+    const labels = [...new Set([q.correctLabel, label, ...q.explanation.alternatives.filter((a) => a.scope === 'trap-point').map((a) => a.label)])];
+    const note = (l) => l === q.correctLabel ? 'the back-bearings cross here' : alt(l)?.scope === 'trap-point'
+      ? (q.resection.points.find((o) => !o.correct && o.trap && cellAt(o.x, o.y, q.terrain.size, q.grid.size) === l) ? 'trap: on a true bearing line' : 'trap: bearings meet look-alike hills')
+      : `${alt(l)?.difference?.toFixed(1)}° off at its centre`;
+    table = `<table><tr><th>Cell</th><th>What is there</th></tr>${labels.map((l) => row({ label: l, correct: l === q.correctLabel }, [note(l)])).join('')}</table>`;
+  } else if (q.mode === 'resection' && q.options[0].lines) {
     // Hidden peaks: what each bearing line from the point runs to, and what rules the point out.
     const peaks = q.resection.peaks, onHill = q.resection.rounding / 2 + 1;
     const meets = (l) => l.error > onHill ? `no hill (${l.error.toFixed(1)}° off)` : l.hill.peak >= 0 ? peaks[l.hill.peak].label : `${l.hill.height} m ${l.hill.kind === 'knoll' ? 'knoll' : 'hill'}`;

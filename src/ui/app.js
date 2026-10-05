@@ -22,7 +22,7 @@ import { LiveAudio } from '../audio/liveAudio.js';
 import { parseAsc, parseHgt, parseHeightmap, gridToTerrain, packTerrain, unpackTerrain } from '../engine/demImport.js';
 import { dateKey, isDateKey, dailyPlan, dailyStreak, dailyShareText, MODE_NAMES, encodeChallenge, decodeChallenge, compareChallenge,
   RUN_LENGTH, runPlan, runPoints, runShareText } from './play.js';
-import { MAP_MODES, isMapMode } from '../engine/mapModes.js';
+import { MAP_MODES, isMapMode, normaliseResectionAnswer } from '../engine/mapModes.js';
 import { modeTitle, modeSubtitle, modePrompt, modeFrame, drawModeOverlay, modeFacts, modeResultHTML } from '../render/mapModesView.js';
 import { TerrainRenderer } from '../render/webglTerrain.js';
 import { CONDITIONS, WINDS, DENSITIES, normaliseEnvironment, weatherParams, environmentAnimated } from '../render/environment.js';
@@ -281,14 +281,14 @@ function getWorker() {
   return worker;
 }
 
-function requestQuiz({ seed, world, sniperWind, customTerrain, difficulty, variant = 0, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning }) {
+function requestQuiz({ seed, world, sniperWind, customTerrain, difficulty, variant = 0, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, resectionAnswer, tuning }) {
   const id = ++state.requestId;
   return new Promise((resolve, reject) => {
     const w = getWorker();
     if (!w) {
       // Fallback: generate on the main thread.
       import('../engine/quiz.js').then(({ generate }) => {
-        setTimeout(() => generate({ seed, world, sniperWind, customTerrain, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning }).then(resolve, reject), 30);
+        setTimeout(() => generate({ seed, world, sniperWind, customTerrain, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, resectionAnswer, tuning }).then(resolve, reject), 30);
       }, reject);
       return;
     }
@@ -300,7 +300,7 @@ function requestQuiz({ seed, world, sniperWind, customTerrain, difficulty, varia
       else reject(new Error(e.data.message));
     };
     w.addEventListener('message', onMessage);
-    w.postMessage({ id, seed, world, sniperWind, customTerrain, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning });
+    w.postMessage({ id, seed, world, sniperWind, customTerrain, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, resectionAnswer, tuning });
   });
 }
 
@@ -326,6 +326,7 @@ async function load(req) {
     friendSkin: normaliseFriendSkin(req.friendSkin ?? $('friend-skin').value),
     movement: normaliseMovement(req.movement ?? $('movement').value),
     trailAnswer: normaliseTrailAnswer(req.trailAnswer ?? $('trail-answer').value),
+    resectionAnswer: normaliseResectionAnswer(req.resectionAnswer ?? $('resection-answer').value),
     appearance: normaliseAppearance(req.appearance || state.appearance),
     tuning: req.tuning || activeTuning(),
   };
@@ -351,6 +352,7 @@ async function load(req) {
   $('friend-skin').value = r.friendSkin;
   $('movement').value = r.movement;
   $('trail-answer').value = r.trailAnswer;
+  $('resection-answer').value = r.resectionAnswer;
   state.appearance = r.appearance; syncAppearanceControls();
   syncControls();
   setLoading(true, r.mode === 'lookalike' ? 'Searching for matching A/B/C views…' : r.difficulty === 'master' ? 'Searching for a devious question…' : 'Generating terrain…');
@@ -407,7 +409,7 @@ function updateHash() {
     if (q.friend.challenge !== 'standard') parts.push(`fc=${q.friend.challenge}`);
     if (q.headingChoice !== 'auto') parts.push(`h=${q.headingChoice}`);
   }
-  else if (isMapMode(q)) parts.push(`m=${q.mode}`);
+  else if (isMapMode(q)) { parts.push(`m=${q.mode}`); if (q.grid) parts.push('ra=grid', `g=${q.grid.size}`); }
   else if (q.mode === 'sniper') { parts.push('m=sniper'); if (q.sniper.wind) parts.push('wind=1'); }
   else if (q.mode === 'lookalike') {
     parts.push('m=lookalike');
@@ -427,6 +429,7 @@ function syncControls() {
   const grid = $('mode').value === 'grid';
   const friendGrid = $('mode').value === 'friend' && $('friend-answer').value === 'grid';
   const trailGrid = $('mode').value === 'trail' && $('trail-answer').value === 'grid';
+  const resectionGrid = $('mode').value === 'resection' && $('resection-answer').value === 'grid';
   $('difficulty').querySelector('[value="sun-watch"]').disabled = !supportsSunWatch($('mode').value);
   if ($('difficulty').value === 'sun-watch' && !supportsSunWatch($('mode').value)) $('difficulty').value = 'medium';
   const watch = $('difficulty').value === 'sun-watch';
@@ -434,7 +437,8 @@ function syncControls() {
   $('friend-challenge-field').hidden = $('mode').value !== 'friend';
   $('movement-field').hidden = $('mode').value !== 'trail';
   $('trail-answer-field').hidden = $('mode').value !== 'trail';
-  $('grid-size-field').hidden = !(grid || friendGrid || trailGrid);
+  $('resection-answer-field').hidden = $('mode').value !== 'resection';
+  $('grid-size-field').hidden = !(grid || friendGrid || trailGrid || resectionGrid);
   $('grid-challenge-field').hidden = !grid;
   $('heading-field').hidden = watch || facing || lookalike || ['trail', 'sniper', ...Object.keys(MAP_MODES)].includes($('mode').value) || (grid && $('grid-challenge').value === 'lost-compass');
   $('direction-field').hidden = watch || !lookalike;
@@ -1191,7 +1195,8 @@ function newPositions() {
     && $('friend-answer').value === q.friend.answerMode && (!q.grid || Number($('grid-size').value) === q.grid.size));
   const trailSame = q.mode !== 'trail' || ($('movement').value === q.trail.movement
     && $('trail-answer').value === q.trail.answerMode && (!q.grid || Number($('grid-size').value) === q.grid.size));
-  load({ seed: q.seed, variant: same && gridSame && friendSame && trailSame ? (q.variant || 0) + 1 : 0 });
+  const resectionSame = q.mode !== 'resection' || ($('resection-answer').value === (q.grid ? 'grid' : 'point') && (!q.grid || Number($('grid-size').value) === q.grid.size));
+  load({ seed: q.seed, variant: same && gridSame && friendSame && trailSame && resectionSame ? (q.variant || 0) + 1 : 0 });
 }
 
 $('controls').addEventListener('submit', (e) => {
@@ -1202,7 +1207,7 @@ $('new-quiz').addEventListener('click', newQuiz);
 $('new-positions').addEventListener('click', newPositions);
 $('scramble').addEventListener('click', scrambleOptions);
 // Changing mode, difficulty or heading style keeps the seed, so the terrain carries over.
-for (const id of ['world', 'sniper-wind', 'difficulty', 'mode', 'heading-mode', 'lookalike-direction', 'grid-size', 'grid-challenge', 'friend-challenge', 'friend-answer', 'movement', 'trail-answer']) {
+for (const id of ['world', 'sniper-wind', 'difficulty', 'mode', 'heading-mode', 'lookalike-direction', 'grid-size', 'grid-challenge', 'friend-challenge', 'friend-answer', 'movement', 'trail-answer', 'resection-answer']) {
   $(id).addEventListener('change', () => { syncControls(); load({ seed: $('seed').value.trim() }); });
 }
 $('copy-link').addEventListener('click', async () => {
@@ -1524,6 +1529,7 @@ function parseHash() {
     mode: ['facing', 'lookalike', 'grid', 'friend', 'trail', 'sniper', ...Object.keys(MAP_MODES)].includes(p.get('m')) ? p.get('m') : 'where-am-i',
     gridSize: normaliseGridSize(p.get('g')),
     trailAnswer: normaliseTrailAnswer(p.get('ta')),
+    resectionAnswer: normaliseResectionAnswer(p.get('ra')),
     gridChallenge: normaliseGridChallenge(p.get('gc')),
     friendChallenge: normaliseFriendChallenge(p.get('fc')),
     friendAnswer: normaliseFriendAnswer(p.get('fa')),
@@ -1550,6 +1556,7 @@ window.addEventListener('hashchange', () => {
     || (h.mode === 'friend' && (h.friendSkin !== q?.friend?.skin || h.friendChallenge !== q?.friend?.challenge || h.friendAnswer !== q?.friend?.answerMode
       || (h.friendAnswer === 'grid' && h.gridSize !== q?.grid?.size)))
     || (h.mode === 'grid' && (h.gridSize !== q?.grid?.size || h.gridChallenge !== q?.grid?.challenge))
+    || (h.mode === 'resection' && (h.resectionAnswer !== (q?.grid ? 'grid' : 'point') || (h.resectionAnswer === 'grid' && h.gridSize !== q?.grid?.size)))
     || encodeTuning(h.tuning || {}) !== encodeTuning(q?.tuning || {}))) { adoptLinkTuning(h.tuning); load({ ...h, difficulty: h.difficulty || 'medium' }); }
 });
 
@@ -1641,6 +1648,8 @@ for (const id of ['difficulty', 'mode']) $(id).addEventListener('change', render
 renderScore();
 $('trail-answer').value = normaliseTrailAnswer(store.get('otq.trailAnswer', 'trail'));
 $('trail-answer').addEventListener('change', () => store.set('otq.trailAnswer', $('trail-answer').value));
+$('resection-answer').value = normaliseResectionAnswer(store.get('otq.resectionAnswer', 'point'));
+$('resection-answer').addEventListener('change', () => store.set('otq.resectionAnswer', $('resection-answer').value));
 const savedGrid = store.get('otq.grid', {});
 $('grid-size').value = normaliseGridSize(savedGrid.size);
 $('grid-challenge').value = normaliseGridChallenge(savedGrid.challenge);
