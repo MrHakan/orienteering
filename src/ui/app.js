@@ -506,6 +506,7 @@ function show(quiz) {
     renderScene(quiz.camera);
   }
   updateTextureNote('scene');
+  document.querySelector('.map-wrap').classList.toggle('wide', state.model.size > 2000); // 3 km maps get the full column
   map.setData({
     model: state.model,
     interval: t.contourInterval,

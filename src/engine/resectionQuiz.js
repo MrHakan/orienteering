@@ -21,6 +21,8 @@ const BANDS = {
   master: { peaks: 2, minError: 6, maxError: 20, round: 5, hidden: true, lookalikes: 2, cues: 1 },
 };
 const EYE = 1.7, PEAK_LIFT = 2, SPREAD = 0.25; // hidden peaks: answers at least a quarter of the map apart
+// Hidden peaks need more hills to confuse and room to spread the answers: a 3 km map at the usual detail.
+const LARGE_MAP = { size: 3000, n: 385 };
 const formGroup = (form) => ['valley', 'reentrant'].includes(form) ? 'hollow' : ['ridge', 'spur'].includes(form) ? 'crest'
   : ['summit', 'knoll'].includes(form) ? 'top' : form;
 
@@ -36,10 +38,10 @@ function sees(model, a, b) {
 
 export function generateResectionQuiz(opts) {
   const difficulty = BANDS[opts.difficulty] ? opts.difficulty : 'medium', band = BANDS[difficulty], t0 = now();
-  for (const built of terrains({ ...opts, difficulty }, 'resection')) {
+  for (const built of terrains({ ...opts, difficulty, ...(band.hidden && !opts.size ? LARGE_MAP : {}) }, 'resection')) {
     const { model, rng } = built, L = model.size;
     const peaks = model.analyzer.summits
-      .filter((s) => model.inside(s.x, s.y, 60) && (s.kind === 'summit' || s.prominence >= 10))
+      .filter((s) => model.inside(s.x, s.y, 60) && (s.kind === 'summit' || s.prominence >= (band.hidden ? 7 : 10))) // larger maps: clear knolls too
       .map((s) => ({ x: s.x, y: s.y, z: surfaceElevation(model, s.x, s.y) + PEAK_LIFT, prominence: s.prominence || 0, kind: s.kind }))
       .sort((a, b) => b.prominence - a.prominence).slice(0, 14);
     if (peaks.length < band.peaks) continue;
@@ -122,7 +124,7 @@ function nearMisses({ model, rng, o, chosen, band, error }) {
  * above instead of below eye level).
  */
 function lookalikeDistractors({ model, rng, o, eye, chosen, shown, band, error }) {
-  const spread = SPREAD * model.size, onHill = band.round / 2 + 1, offHill = band.minError + band.round / 2;
+  const spread = SPREAD * model.size, reach = Math.max(2000, 0.85 * model.size), onHill = band.round / 2 + 1, offHill = band.minError + band.round / 2;
   const hills = model.analyzer.summits.filter((s) => model.inside(s.x, s.y, 40))
     .map((s) => ({ x: s.x, y: s.y, z: surfaceElevation(model, s.x, s.y) + PEAK_LIFT, prominence: s.prominence || 0, kind: s.kind }));
   const peakOf = (h) => chosen.findIndex((p) => Math.hypot(p.x - h.x, p.y - h.y) < 1);
@@ -130,7 +132,7 @@ function lookalikeDistractors({ model, rng, o, eye, chosen, shown, band, error }
     let best = { error: 180, hill: null };
     for (const h of hills) {
       const d = Math.hypot(h.x - q.x, h.y - q.y);
-      if (d < 100 || d > 2000) continue; // generous: any hill a reader might take for it
+      if (d < 100 || d > reach) continue; // generous: any hill a reader might take for it
       const e = angleDiff(bearingTo(q, h), bearing);
       if (e < best.error) best = { error: e, hill: h };
     }

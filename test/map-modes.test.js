@@ -31,6 +31,7 @@ test('resection: only the true position matches every bearing', async () => {
     const q = await generate({ seed: 'res-t', difficulty, mode: 'resection' }); one(q); shape(q);
     const { peaks, rounding } = q.resection, correct = q.options.find((o) => o.correct);
     assert.equal(peaks.length, difficulty === 'easy' ? 3 : 2);
+    assert.equal(q.terrain.size, difficulty === 'easy' ? 2000 : 3000);
     for (const p of peaks) {
       const err = Math.abs(((bearingTo(correct, p) - p.shown + 540) % 360) - 180);
       assert.ok(err <= rounding / 2 + 0.6, `true point within rounding (${err})`);
@@ -45,6 +46,7 @@ test('resection with hidden peaks: answers spread over the map, each a look-alik
     const q = await generate({ seed: 'res-h', difficulty, mode: 'resection' }); one(q); shape(q);
     const { peaks, rounding, peaksMarked } = q.resection, onHill = rounding / 2 + 1, size = modelOf(q).size;
     assert.equal(peaksMarked, false);
+    assert.equal(size, 3000, 'a 3 km map: more hills to confuse, room to spread');
     assert.equal(q.map.extras.length, 0, 'no peaks on the map before answering');
     assert.ok(q.map.revealExtras.some((e) => e.shape === 'peak'), 'peaks appear after answering');
     for (const a of q.options) for (const b of q.options) if (a !== b) assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= 0.25 * size - 1e-6, `${a.label}–${b.label} spread over the map`);
