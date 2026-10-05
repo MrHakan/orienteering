@@ -75,15 +75,16 @@ export function generateResectionQuiz(opts) {
         elevation: +(Math.atan2(p.z - eye.z, Math.hypot(p.x - o.x, p.y - o.y)) / DEG).toFixed(3) }));
       const camera = { x: o.x, y: o.y, z: eye.z, eyeHeight: EYE, heading: peaksOut[0].bearing, fov: 50, pitch: peaksOut[0].elevation, roll: 0 };
       const quiz = scaffold({ ...built, mode: 'resection', seed: opts.seed, difficulty, variant: opts.variant || 0, camera, t0, extra: {
-        resection: { peaks: peaksOut, rounding: band.round },
+        // Only Easy marks the peaks; harder levels make you find each labelled hill on the contour map.
+        resection: { peaks: peaksOut, rounding: band.round, peaksMarked: difficulty === 'easy' },
         options, correctLabel: correct.label,
         hardness: Math.min(1, (band.peaks === 2 ? 0.5 : 0.25) + (band.round > 1 ? 0.3 : 0) + (10 - band.minError) / 20),
         validation: { ok: true, issues: [], confidence: 0.85, uniqueness: Math.min(1, Math.min(...options.filter((q) => !q.correct).map((q) => Math.max(...q.errors))) / 20) },
       } });
       const extend = (p, through) => { const d = Math.hypot(through.x - p.x, through.y - p.y), k = (d + 260) / d; return { x: p.x + (through.x - p.x) * k, y: p.y + (through.y - p.y) * k }; };
       quiz.map = {
-        extras: peaksOut.map((p) => ({ type: 'point', shape: 'peak', x: p.x, y: p.y, label: p.label, color: '#ffd666' })),
-        revealExtras: peaksOut.map((p) => ({ type: 'line', points: [p, extend(p, o)], color: 'rgba(255, 214, 102, .85)', width: 1.6, dash: [6, 4], label: bearingText(p.shown + 180), labelAt: 0.75 })),
+        extras: difficulty === 'easy' ? peaksOut.map((p) => ({ type: 'point', shape: 'peak', x: p.x, y: p.y, label: p.label, color: '#ffd666' })) : [],
+        revealExtras: [...(difficulty === 'easy' ? [] : peaksOut.map((p) => ({ type: 'point', shape: 'peak', x: p.x, y: p.y, label: p.label, color: '#ffd666' })))].concat(peaksOut.map((p) => ({ type: 'line', points: [p, extend(p, o)], color: 'rgba(255, 214, 102, .85)', width: 1.6, dash: [6, 4], label: bearingText(p.shown + 180), labelAt: 0.75 }))),
         revealYou: true, centre: { x: o.x, y: o.y },
       };
       quiz.explanation = resectionExplanation(quiz);
@@ -101,7 +102,8 @@ export function resectionFrame(quiz, t) {
 
 export function resectionExplanation(quiz) {
   const peaks = quiz.resection.peaks, correct = quiz.options.find((o) => o.correct);
-  const evidence = [{ type: 'back-bearings', text: `Reverse each bearing (±180°) and draw it from the peak: ${peaks.map((p) => `${p.label} ${bearingText(p.shown)} → back-bearing ${bearingText(p.shown + 180)}`).join('; ')}. `
+  const evidence = [...(quiz.resection.peaksMarked ? [] : [{ type: 'peak-identification', text: `Each labelled hill in the view is a summit on the map: ${peaks.map((p) => `${p.label} at ${Math.round(p.z - 2)} m`).join(', ')}. Match its shape and height against the closed contours before taking the back-bearing.`,
+    data: { peaks: peaks.map(({ label, x, y, z }) => ({ label, x: Math.round(x), y: Math.round(y), heightMetres: Math.round(z - 2) })) } }]), { type: 'back-bearings', text: `Reverse each bearing (±180°) and draw it from the peak: ${peaks.map((p) => `${p.label} ${bearingText(p.shown)} → back-bearing ${bearingText(p.shown + 180)}`).join('; ')}. `
     + `The lines cross at ${correct.label}.`, data: { peaks: peaks.map(({ label, shown }) => ({ label, bearing: shown, backBearing: wrap360(shown + 180) })) } },
   { type: 'bearing-check', text: `From ${correct.label} every peak lies within ${Math.max(...correct.errors).toFixed(1)}° of its measured bearing.`,
     data: { errors: correct.errors } }];

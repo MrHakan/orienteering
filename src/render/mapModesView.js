@@ -25,7 +25,9 @@ export function modeSubtitle(q) {
 export function modePrompt(q) {
   const list = q.options.map((o) => o.label).join(', ');
   switch (q.mode) {
-    case 'resection': return `Your position is unknown. Compass bearings to the marked peaks: ${modeSubtitle(q)}. Where are you: ${list}? Draw each back-bearing (±180°) from its peak; the lines cross where you stand.`;
+    case 'resection': return q.resection.peaksMarked
+      ? `Your position is unknown. Compass bearings to the marked peaks: ${modeSubtitle(q)}. Where are you: ${list}? Draw each back-bearing (±180°) from its peak; the lines cross where you stand.`
+      : `Your position is unknown. Compass bearings to the labelled hills in the view: ${modeSubtitle(q)}. The peaks are not marked on the map — find each hill among the contours first, then draw its back-bearing (±180°). Where are you: ${list}?`;
     case 'route': return `Which route from the start ▲ to the finish ◎ is fastest on foot, off-trail: ${list}? Climbing costs time, and so does a long detour. Tap a route or its letter.`;
     case 'visibility': return `You stand at YOU, eyes 1.7 m above the ground. Exactly one of the 2 m flags ${list} is in sight; the others hide behind terrain. Which one can you see? Read the contours between YOU and each flag.`;
     case 'profile': return `Which elevation profile matches the straight line from ▲ to ◎ on the map: ${list}? Profiles run left to right from ▲ to ◎; heights share one vertical scale.`;
@@ -117,7 +119,7 @@ export function drawModeOverlay(ctx, q, frame, { x = 0, y = 0, width: w, height:
 /** Extra rows for the facts panel. */
 export function modeFacts(q, answered) {
   switch (q.mode) {
-    case 'resection': return [['Bearings', modeSubtitle(q)], ['Read to', `${q.resection.rounding}°`], ['Viewpoint', answered ? 'revealed on the map' : 'unmarked · find it from the bearings']];
+    case 'resection': return [['Bearings', modeSubtitle(q)], ['Read to', `${q.resection.rounding}°`], ['Peaks', q.resection.peaksMarked || answered ? 'marked on the map' : 'find them on the map'], ['Viewpoint', answered ? 'revealed on the map' : 'unmarked · find it from the bearings']];
     case 'route': return [['Speed model', 'Tobler hiking function, off-trail'], ['Leg', `${Math.round(q.route.straight)} m straight line`]];
     case 'visibility': return [['Eye / flags', '1.7 m / 2 m above the ground'], ['Flags', `${q.options.length} · exactly one visible`]];
     case 'profile': return [['Line', `${Math.round(q.profileLine.length)} m`], ['Profiles', `${q.options.length} · same vertical scale`]];
