@@ -16,7 +16,7 @@ import { TRAIL_COLORS, normaliseTrailAnswer } from '../engine/trailQuiz.js';
 import { KNIVES, normaliseAppearance } from '../render/knifeClips.js';
 import { TrailPlayback } from './trailPlayback.js';
 import { usesSunWatch, supportsSunWatch, sunWatchFrame, SUN_WATCH_DURATION } from '../engine/sunWatch.js';
-import { sniperFrame, SNIPER_DURATION, SNIPER_TIMING } from '../engine/sniper.js';
+import { sniperFrame, sniperWeather, SNIPER_DURATION, SNIPER_TIMING } from '../engine/sniper.js';
 import { drawSniperOverlay } from '../render/sniperOverlay.js';
 import { TerrainRenderer } from '../render/webglTerrain.js';
 import { CONDITIONS, WINDS, DENSITIES, normaliseEnvironment, weatherParams, environmentAnimated } from '../render/environment.js';
@@ -268,14 +268,14 @@ function getWorker() {
   return worker;
 }
 
-function requestQuiz({ seed, world, difficulty, variant = 0, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning }) {
+function requestQuiz({ seed, world, sniperWind, difficulty, variant = 0, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning }) {
   const id = ++state.requestId;
   return new Promise((resolve, reject) => {
     const w = getWorker();
     if (!w) {
       // Fallback: generate on the main thread.
       import('../engine/quiz.js').then(({ generate }) => {
-        setTimeout(() => generate({ seed, world, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning }).then(resolve, reject), 30);
+        setTimeout(() => generate({ seed, world, sniperWind, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning }).then(resolve, reject), 30);
       }, reject);
       return;
     }
@@ -287,7 +287,7 @@ function requestQuiz({ seed, world, difficulty, variant = 0, mode, headingMode, 
       else reject(new Error(e.data.message));
     };
     w.addEventListener('message', onMessage);
-    w.postMessage({ id, seed, world, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning });
+    w.postMessage({ id, seed, world, sniperWind, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning });
   });
 }
 
@@ -299,6 +299,7 @@ async function load(req) {
   const r = {
     seed: req.seed || SeedManager.randomSeed(),
     world: normaliseWorld(req.world ?? $('world').value),
+    sniperWind: (req.sniperWind ?? $('sniper-wind').value === 'on') === true,
     difficulty: req.difficulty || $('difficulty').value,
     variant: req.variant || 0,
     scramble: req.scramble || 0,
@@ -325,6 +326,7 @@ async function load(req) {
   if (r.mode === 'grid' && r.gridChallenge === 'lost-compass') r.headingMode = 'auto';
   $('seed').value = r.seed;
   $('world').value = r.world;
+  $('sniper-wind').value = r.sniperWind ? 'on' : 'off';
   $('difficulty').value = r.difficulty;
   $('mode').value = r.mode;
   $('heading-mode').value = r.headingMode;
@@ -387,7 +389,7 @@ function updateHash() {
     if (q.friend.challenge !== 'standard') parts.push(`fc=${q.friend.challenge}`);
     if (q.headingChoice !== 'auto') parts.push(`h=${q.headingChoice}`);
   }
-  else if (q.mode === 'sniper') parts.push('m=sniper');
+  else if (q.mode === 'sniper') { parts.push('m=sniper'); if (q.sniper.wind) parts.push('wind=1'); }
   else if (q.mode === 'lookalike') {
     parts.push('m=lookalike');
     if (q.directionChoice !== 'auto') parts.push(`dir=${q.directionChoice}`);
@@ -418,6 +420,7 @@ function syncControls() {
   $('heading-field').hidden = watch || facing || lookalike || ['trail', 'sniper'].includes($('mode').value) || (grid && $('grid-challenge').value === 'lost-compass');
   $('direction-field').hidden = watch || !lookalike;
   const sniper = $('mode').value === 'sniper';
+  $('sniper-wind-field').hidden = !sniper;
   $('scramble').hidden = facing || grid || friendGrid || trailGrid || sniper;
   if (typeof dev !== 'undefined') renderDevPanel();
 }
@@ -457,8 +460,9 @@ function show(quiz) {
   $('facing-text').closest('.facing').hidden = usesSunWatch(quiz);
   document.querySelector('.card').classList.toggle('sun-watch', usesSunWatch(quiz));
   document.querySelector('.about').hidden = usesSunWatch(quiz);
-  $('prompt').textContent = quiz.mode === 'sniper'
-    ? `Which scope mark puts the round on the enemy sniper's head: ${quiz.options.map((o) => o.label).join(', ')}? Only your heading is known — find yourself and the target on the map, mind the height difference, or range his 0.50 m shoulders with the mil scale. Keys ${quiz.options.map((o) => String(o.metres / 100 % 10)).join('/')}.`
+  $('prompt').textContent = quiz.mode === 'sniper' ? quiz.sniper.wind
+    ? `Which scope mark and windage hold put the round on the enemy sniper's head? Wind ${quiz.sniper.wind.speed} m/s from ${String(quiz.sniper.wind.from).padStart(3, '0')}°: work out the crosswind against your line of fire, read the wind card (mil per 1 m/s at each range) and hold into the wind on the 0.5 mil stadia. Find yourself and the target on the map, and mind the height difference. Keys 1–${quiz.options.length}.`
+    : `Which scope mark puts the round on the enemy sniper's head: ${quiz.options.map((o) => o.label).join(', ')}? Only your heading is known — find yourself and the target on the map, mind the height difference, or range his 0.50 m shoulders with the mil scale. Keys ${quiz.options.map((o) => String(o.metres / 100 % 10)).join('/')}.`
     : usesSunWatch(quiz) ? grid ? `${friendGrid ? "Locate your friend's cell" : 'Find your cell'}: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size}.`
     : quiz.mode === 'friend' ? 'Where is your friend: A, B or C?' : 'You are at A, B or C. Which one?'
     : facing ? 'Which direction were you facing at the start?'
@@ -585,7 +589,7 @@ function renderScene(camera, playback = {}) {
     const frame = sniperFrame(state.quiz, state.sunTime, aspect);
     renderer.setPerson(state.quiz.sniper.target);
     renderer.setViewmodel(null);
-    renderer.render(frame.camera, { ...environmentOptions, time: state.sunTime, sunHeading: state.quiz.camera.heading,
+    renderer.render(frame.camera, { ...environmentOptions, weather: sniperWeather(state.quiz, environmentOptions.weather), time: state.sunTime, sunHeading: state.quiz.camera.heading,
       rifle: { raise: frame.raise, time: state.sunTime } });
     state.sniperFrame = frame; camera = frame.camera;
   } else if (state.quiz.mode === 'trail') {
@@ -749,11 +753,15 @@ function showAnswerResult(label, right) {
 function showSniperResult(label, right) {
   const q = state.quiz, s = q.sniper, res = $('result');
   res.hidden = false;
-  const miss = (o) => `${Math.abs(o.miss) < 0.005 ? '0' : `${(Math.abs(o.miss) * 100).toFixed(0)} cm ${o.miss > 0 ? 'high' : 'low'}`}`;
-  const rows = q.options.map((o) => `<tr><td><strong>${o.label}</strong>${o.correct ? ' ✓' : o.label === label ? ' (your pick)' : ''}</td><td>${o.mil.toFixed(1)} mil</td><td>${miss(o)}</td><td>${Math.abs(o.miss) <= 0.12 ? 'head shot' : o.miss < 0 && o.miss >= -1.5 ? 'body, not the head' : 'miss'}</td></tr>`).join('');
-  res.innerHTML = `<div class="verdict ${right ? 'good' : 'bad'}">${right ? 'Hit' : 'Miss'} — the ${q.correctLabel} mark was right.</div>
-    <p>Target: ${Math.round(s.horizontal)} m horizontally, ${Math.abs(s.rise).toFixed(1)} m ${s.rise >= 0 ? 'higher' : 'lower'} (${Math.abs(s.angle).toFixed(1)}° ${s.rise >= 0 ? 'uphill' : 'downhill'}) · straight-line ${Math.round(s.slant)} m. YOU and the target are now on the map.</p>
-    <table><tr><th>Mark</th><th>Hold</th><th>Impact vs. head</th><th>Result</th></tr>${rows}</table>
+  const cm = (v, plus, minus) => Math.abs(v) < 0.005 ? '0' : `${(Math.abs(v) * 100).toFixed(0)} cm ${v > 0 ? plus : minus}`;
+  const wind = s.wind;
+  const off = (o) => wind ? Math.hypot(o.miss, o.lateral) : Math.abs(o.miss);
+  const verdictOf = (o) => off(o) <= 0.12 ? 'head shot' : (!wind || Math.abs(o.lateral) < 0.25) && o.miss < 0 && o.miss >= -1.5 ? 'body, not the head' : 'miss';
+  const rows = q.options.map((o) => `<tr><td><strong>${o.label}</strong>${o.correct ? ' ✓' : o.label === label ? ' (your pick)' : ''}</td><td>${o.mil.toFixed(1)} mil${wind ? ` · ${o.windMil > 0 ? 'R' : 'L'} ${Math.abs(o.windMil).toFixed(1)}` : ''}</td>`
+    + `<td>${cm(o.miss, 'high', 'low')}${wind ? `, ${cm(o.lateral, 'right', 'left')}` : ''}</td><td>${verdictOf(o)}</td></tr>`).join('');
+  res.innerHTML = `<div class="verdict ${right ? 'good' : 'bad'}">${right ? 'Hit' : 'Miss'} — ${q.correctLabel} was right.</div>
+    <p>Target: ${Math.round(s.horizontal)} m horizontally, ${Math.abs(s.rise).toFixed(1)} m ${s.rise >= 0 ? 'higher' : 'lower'} (${Math.abs(s.angle).toFixed(1)}° ${s.rise >= 0 ? 'uphill' : 'downhill'}) · straight-line ${Math.round(s.slant)} m.${wind ? ` Crosswind ${Math.abs(wind.cross).toFixed(1)} m/s from the ${wind.cross > 0 ? 'right' : 'left'} → hold ${Math.abs(wind.holdMil).toFixed(1)} mil ${wind.holdMil > 0 ? 'right' : 'left'}.` : ''} YOU and the target are now on the map.</p>
+    <table><tr><th>Option</th><th>Hold</th><th>Impact vs. head</th><th>Result</th></tr>${rows}</table>
     <p class="note">Rifle zeroed at 100 m, ${s.rifle.muzzle} m/s. Each mark is the hold for that range on flat ground; up- or downhill, use the horizontal distance.</p>
     <button type="button" class="btn ghost" id="sniper-replay">Replay the shot view</button>
     <button type="button" class="btn primary" id="next">Next quiz (N)</button>`;
@@ -940,7 +948,9 @@ function renderFacts() {
     ...(q.mode === 'trail' && q.grid ? [['Cells', `${q.options.length} · ${Math.round(q.grid.cellMetres)} m per side · finish at centre`]] : []),
     ...(q.mode === 'grid' ? [['Cells', `${q.options.length} · ${Math.round(q.grid.cellMetres)} m per side · observer at centre`]] : []),
     ...(q.mode === 'sniper' ? [['Target', 'enemy sniper · prone · shoulders 0.50 m · aim for the head'], ['Scope', 'BDC marks 200–1000 m · mil stadia 2/4/6/8 · zero 100 m'],
-      ['Viewpoint', state.answered ? `YOU · ${Math.round(q.sniper.horizontal)} m to the target` : 'unmarked · only the heading is known']] : []),
+      ['Viewpoint', state.answered ? `YOU · ${Math.round(q.sniper.horizontal)} m to the target` : 'unmarked · only the heading is known'],
+      ...(q.sniper.wind ? [['Wind', `${q.sniper.wind.speed} m/s from ${String(q.sniper.wind.from).padStart(3, '0')}° · steady`],
+        ['Wind card', q.sniper.wind.card.map((c) => `${c.metres} m ${c.milPerMps.toFixed(2)}`).join(' · ') + ' mil per m/s']] : [])] : []),
     ...(q.mode === 'friend' ? [['Person', 'orange jacket · 1.80 m tall'], ['Find by', q.grid ? `${q.grid.size} × ${q.grid.size} grid · ${Math.round(q.grid.cellMetres)} m per side` : 'Point · A / B / C'], ['Viewpoint', q.friend.observerHidden && !state.answered ? 'unmarked · infer from terrain' : 'YOU · observer position'], ['Map area', `${Math.round(q.mapExtent.size)} m × ${Math.round(q.mapExtent.size)} m`]] : []),
     ['Field of view', `${q.camera.fov}° · eye ${q.camera.eyeHeight} m`],
     ['Relief', `${Math.round(q.terrain.min)}–${Math.round(q.terrain.max)} m`],
@@ -1017,7 +1027,7 @@ function newPositions() {
   if (!state.quiz) return;
   const q = state.quiz;
   const same = $('difficulty').value === q.difficulty && $('seed').value.trim() === q.seed
-    && $('world').value === (q.worldChoice || 'classic')
+    && $('world').value === (q.worldChoice || 'classic') && (q.mode !== 'sniper' || ($('sniper-wind').value === 'on') === !!q.sniper.wind)
     && $('mode').value === q.mode && $('heading-mode').value === (q.headingChoice || 'auto')
     && (q.mode !== 'lookalike' || $('lookalike-direction').value === q.directionChoice);
   const gridSame = q.mode !== 'grid' || (Number($('grid-size').value) === q.grid.size && $('grid-challenge').value === q.grid.challenge);
@@ -1036,7 +1046,7 @@ $('new-quiz').addEventListener('click', newQuiz);
 $('new-positions').addEventListener('click', newPositions);
 $('scramble').addEventListener('click', scrambleOptions);
 // Changing mode, difficulty or heading style keeps the seed, so the terrain carries over.
-for (const id of ['world', 'difficulty', 'mode', 'heading-mode', 'lookalike-direction', 'grid-size', 'grid-challenge', 'friend-challenge', 'friend-answer', 'movement', 'trail-answer']) {
+for (const id of ['world', 'sniper-wind', 'difficulty', 'mode', 'heading-mode', 'lookalike-direction', 'grid-size', 'grid-challenge', 'friend-challenge', 'friend-answer', 'movement', 'trail-answer']) {
   $(id).addEventListener('change', () => { syncControls(); load({ seed: $('seed').value.trim() }); });
 }
 $('copy-link').addEventListener('click', async () => {
@@ -1098,7 +1108,8 @@ document.addEventListener('keydown', (e) => {
     if (dir) { state.answered ? viewFrom(dir) : answer(dir); return; }
   }
   if (state.quiz?.mode === 'sniper' && /^[0-9]$/.test(k)) {
-    const label = `${(Number(k) || 10) * 100} m`; // 0 = 1000 m
+    // With wind, keys pick the n-th mark + windage pair; otherwise the mark (0 = 1000 m).
+    const label = state.quiz.sniper.wind ? state.quiz.options[Number(k) - 1]?.label : `${(Number(k) || 10) * 100} m`;
     if (!state.answered) answer(label);
     return;
   }
@@ -1347,7 +1358,7 @@ function parseHash() {
   const sc = Math.max(0, Math.floor(+p.get('s') || 0));
   const h = p.get('h');
   return {
-    seed: p.get('seed'), world: normaliseWorld(p.get('w')), difficulty: d && DIFFICULTIES[d] ? d : null, variant: v, scramble: sc,
+    seed: p.get('seed'), world: normaliseWorld(p.get('w')), sniperWind: p.get('wind') === '1', difficulty: d && DIFFICULTIES[d] ? d : null, variant: v, scramble: sc,
     mode: ['facing', 'lookalike', 'grid', 'friend', 'trail', 'sniper'].includes(p.get('m')) ? p.get('m') : 'where-am-i',
     gridSize: normaliseGridSize(p.get('g')),
     trailAnswer: normaliseTrailAnswer(p.get('ta')),
@@ -1366,7 +1377,7 @@ function parseHash() {
 window.addEventListener('hashchange', () => {
   const h = parseHash();
   const q = state.quiz;
-  if (h.seed && (h.seed !== q?.seed || h.world !== (q?.worldChoice || 'classic') || h.difficulty !== q?.difficulty || h.variant !== (q?.variant || 0) || h.scramble !== (q?.scramble || 0)
+  if (h.seed && (h.seed !== q?.seed || h.world !== (q?.worldChoice || 'classic') || (h.mode === 'sniper' && h.sniperWind !== !!q?.sniper?.wind) || h.difficulty !== q?.difficulty || h.variant !== (q?.variant || 0) || h.scramble !== (q?.scramble || 0)
     || h.mode !== q?.mode || h.headingMode !== (q?.headingChoice || 'auto')
     || (h.mode === 'lookalike' && h.direction !== q?.directionChoice)
     || (h.mode === 'trail' && (h.movement !== q?.trail?.movement || h.trailAnswer !== q?.trail?.answerMode
@@ -1478,6 +1489,7 @@ $('friend-answer').addEventListener('change', () => store.set('otq.friendAnswer'
 $('friend-skin').value = normaliseFriendSkin(store.get('otq.friendSkin', 'classic'));
 $('world').innerHTML = WORLD_CHOICES.map((id) => `<option value="${id}" title="${id === 'auto' ? 'A world type chosen from the seed' : WORLDS[id].description}">${id === 'auto' ? 'Auto — by seed' : worldLabel(id)}</option>`).join('');
 $('world').value = normaliseWorld(store.get('otq.world', 'classic'));
+$('sniper-wind').value = store.get('otq.sniperWind', 'off') === 'on' ? 'on' : 'off';
 const initial = parseHash();
 adoptLinkTuning(initial.tuning);
 renderDevPanel();
@@ -1485,4 +1497,5 @@ if (initial.seed) load({ ...initial, difficulty: initial.difficulty || store.get
 else load({ difficulty: store.get('otq.difficulty', 'medium'), mode: store.get('otq.mode', 'where-am-i') });
 $('difficulty').addEventListener('change', () => store.set('otq.difficulty', $('difficulty').value));
 $('world').addEventListener('change', () => store.set('otq.world', $('world').value));
+$('sniper-wind').addEventListener('change', () => store.set('otq.sniperWind', $('sniper-wind').value));
 $('mode').addEventListener('change', () => store.set('otq.mode', $('mode').value));

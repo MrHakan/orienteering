@@ -15,7 +15,7 @@ import { friendSceneFrame } from './friendZoom.js';
 import { friendObserver } from '../engine/friendQuiz.js';
 import { trailFrame } from '../engine/trailMotion.js';
 import { usesSunWatch, sunWatchFrame } from '../engine/sunWatch.js';
-import { sniperFrame } from '../engine/sniper.js';
+import { sniperFrame, sniperWeather } from '../engine/sniper.js';
 import { drawSniperOverlay } from '../render/sniperOverlay.js';
 
 export const FORMATS = {
@@ -29,7 +29,8 @@ export { weatherParams } from '../render/environment.js';
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 export function captionText(quiz) {
-  if (quiz.mode === 'sniper') return `Which hold hits his head: ${quiz.options.map((o) => o.label).join(', ')}?`;
+  if (quiz.mode === 'sniper') return quiz.sniper.wind ? `Wind ${quiz.sniper.wind.speed} m/s: which mark and windage hit his head?`
+    : `Which hold hits his head: ${quiz.options.map((o) => o.label).join(', ')}?`;
   if (quiz.mode === 'facing') return 'Which way: N, NE, E, SE, S, SW, W or NW?';
   if (quiz.mode === 'trail' && quiz.grid) return `Find your finish cell: A1–${String.fromCharCode(64 + quiz.grid.size)}${quiz.grid.size}.`;
   if (quiz.mode === 'trail') return 'Which trail: A red, B green or C cyan?';
@@ -200,7 +201,7 @@ export class ExportComposer {
       this.renderer.setFixedSize(Math.round(S.w * scale), Math.round(S.h * scale));
       this.previewResolution = preview;
     }
-    this.renderer.render(camera, { weather: this.weather, environment: this.environment, environmentTime: t, time: frame ? frame.motion.t : t,
+    this.renderer.render(camera, { weather: sniper ? sniperWeather(q, this.weather) : this.weather, environment: this.environment, environmentTime: t, time: frame ? frame.motion.t : t,
       personMotion: friendFrame.personMotion,
       solar: watchFrame?.solar, watch: watchFrame?.watch,
       motion: frame ? { ...frame.motion, clockRunning: this.animated } : {}, sunHeading: q.mode === 'trail' ? q.camera.heading : camera.heading,

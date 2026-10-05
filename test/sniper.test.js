@@ -116,3 +116,31 @@ test('the enemy lies prone along the slope and the first-person rifle is real ge
   assert.ok(m[14] < -0.4 && m[12] > 0, 'lower right, in front of the eye');
   assert.ok(rifleModelMatrix(1.6, 1, 0)[13] < m[13] - 0.5, 'lowered out of view as the scope comes up');
 });
+
+test('optional crosswind: one mark + windage pair hits, the wind card matches the drift', async () => {
+  const { WIND_CARD, windDrift, sniperWeather } = await import('../src/engine/sniper.js');
+  // Card: more drift per m/s with range; holds scale linearly with the crosswind.
+  WIND_CARD.forEach((c, i) => { if (i) assert.ok(c.milPerMps > WIND_CARD[i - 1].milPerMps); });
+  assert.ok(Math.abs(windDrift(600, 0, 4, 600) - 4 * windDrift(600, 0, 1, 600)) < 1e-9);
+  assert.ok(windDrift(600, 0, 1, 600) > 0, 'a wind from the right (+) pushes the round left of the aim, so it is held right');
+  const plain = generateSniperQuiz({ seed: 'windy', difficulty: 'medium' });
+  assert.equal(plain.sniper.wind, undefined, 'wind is opt-in; plain quizzes are unchanged');
+  for (const difficulty of ['easy', 'medium', 'master']) {
+    const q = generateSniperQuiz({ seed: 'windy', difficulty, sniperWind: true }), w = q.sniper.wind;
+    assert.ok(w && w.speed >= 1 && w.speed <= 9);
+    const relative = ((w.from - q.sniper.bearing + 540) % 360) - 180;
+    assert.ok(Math.abs(w.cross - w.speed * Math.sin(relative * Math.PI / 180)) < 0.01);
+    assert.equal(Math.sign(w.holdMil), Math.sign(w.cross), 'hold into the wind');
+    assert.ok(Number.isInteger(w.holdMil * 2), 'on a 0.5 mil tick');
+    const labels = q.options.map((o) => o.label);
+    assert.equal(new Set(labels).size, labels.length);
+    const off = (o) => Math.hypot(o.miss, o.lateral);
+    assert.equal(q.options.filter((o) => off(o) <= HEAD_RADIUS).length, 1);
+    assert.ok(q.options.find((o) => o.correct) === q.options.find((o) => off(o) <= HEAD_RADIUS));
+    assert.equal(q.correctLabel, `${q.sniper.correctMark} m · ${w.holdMil > 0 ? 'R' : 'L'} ${Math.abs(w.holdMil).toFixed(1)}`);
+    assert.ok(q.explanation.correct.evidence.some((e) => e.type === 'crosswind'));
+    // The scene's wind blows the same way (toward from + 180°).
+    const weather = sniperWeather(q, { wind: [0, 0] }), toward = (w.from + 180) * Math.PI / 180;
+    assert.ok(Math.abs(weather.wind[0] - w.speed * Math.sin(toward)) < 1e-9 && Math.abs(weather.wind[1] - w.speed * Math.cos(toward)) < 1e-9);
+  }
+});

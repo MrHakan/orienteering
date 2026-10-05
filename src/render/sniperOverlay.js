@@ -71,12 +71,56 @@ function drawReticle(ctx, cx, cy, ppm, radius, alpha) {
     const half = (even ? 0.5 + metres / 1000 * 1.6 : 0.35) * ppm;
     ctx.beginPath(); ctx.moveTo(cx - half, y); ctx.lineTo(cx + half, y); ctx.stroke();
     if (even && metres >= 400) for (const k of [-1, 1]) for (let i = 1; i <= Math.round(metres / 250); i++) {
-      const x = cx + k * i * 0.45 * ppm;
+      const x = cx + k * i * 0.5 * ppm; // wind wing ticks every 0.5 mil
       if (Math.abs(x - cx) > half) break;
       ctx.beginPath(); ctx.moveTo(x, y - 0.18 * ppm); ctx.lineTo(x, y + 0.18 * ppm); ctx.stroke();
     }
     if (even) ctx.fillText(String(metres / 100), cx - half - 0.35 * ppm, y);
   }
+  ctx.restore();
+}
+
+/**
+ * Wind call (optional mode): speed, the direction it comes from, an arrow of
+ * where it blows relative to the view, and the rifle's wind card. Top-left
+ * while observing; in the black margin beside the lens through the scope.
+ */
+function drawWindHud(ctx, quiz, frame, w, h, s) {
+  const wind = quiz.sniper.wind;
+  if (!wind) return;
+  const scoped = frame.raise >= 0.6;
+  const margin = scoped ? (w - 2 * SCOPE_CIRCLE * Math.min(w, h)) / 2 : w;
+  if (scoped && margin < 120 * s) return; // no room beside the lens (portrait)
+  const font = Math.max(10, 15 * s), line = font * 1.32, x = 12 * s + 4, top = (scoped ? 16 : 44) * s + 6;
+  const rows = wind.card.map((c) => [`${c.metres} m`, c.milPerMps.toFixed(2)]);
+  const boxW = Math.min(scoped ? margin - 20 * s : 240 * s, 250 * s), boxH = line * (rows.length + 3.4);
+  ctx.save();
+  ctx.fillStyle = scoped ? 'rgba(0, 0, 0, 0)' : 'rgba(10, 14, 18, .66)';
+  ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x - 6, top - 4, boxW, boxH, 8) : ctx.rect(x - 6, top - 4, boxW, boxH); ctx.fill();
+  ctx.fillStyle = '#ffd666'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+  ctx.font = `800 ${font}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  ctx.fillText(`WIND ${wind.speed.toFixed(1)} m/s`, x, top);
+  ctx.font = `600 ${font * 0.86}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  ctx.fillStyle = '#e9e4d8';
+  ctx.fillText(`FROM ${String(wind.from).padStart(3, '0')}°`, x, top + line);
+  // Arrow: where the air moves, seen from above with the view direction up.
+  const ax = x + boxW - 34 * s, ay = top + line * 0.9, r = 13 * s;
+  const a = ((wind.from + 180 - frame.camera.heading) * Math.PI) / 180;
+  ctx.strokeStyle = '#ffd666'; ctx.lineWidth = 2.2 * s;
+  ctx.beginPath(); ctx.arc(ax, ay, r + 4 * s, 0, Math.PI * 2); ctx.globalAlpha = 0.35; ctx.stroke(); ctx.globalAlpha = 1;
+  const dx = Math.sin(a), dy = -Math.cos(a);
+  ctx.beginPath(); ctx.moveTo(ax - dx * r, ay - dy * r); ctx.lineTo(ax + dx * r, ay + dy * r); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(ax + dx * r, ay + dy * r);
+  ctx.lineTo(ax + dx * r * 0.35 - dy * r * 0.45, ay + dy * r * 0.35 + dx * r * 0.45);
+  ctx.lineTo(ax + dx * r * 0.35 + dy * r * 0.45, ay + dy * r * 0.35 - dx * r * 0.45); ctx.closePath(); ctx.fillStyle = '#ffd666'; ctx.fill();
+  ctx.fillStyle = '#cfd3d6'; ctx.font = `700 ${font * 0.72}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  ctx.fillText('WIND CARD · mil per 1 m/s', x, top + line * 2.25);
+  ctx.font = `600 ${font * 0.8}px ui-monospace, Menlo, Consolas, monospace`;
+  rows.forEach(([range, mil], i) => {
+    const y = top + line * (3.1 + i * 0.92);
+    ctx.fillStyle = '#e9e4d8'; ctx.fillText(range, x, y);
+    ctx.fillStyle = '#ffd666'; ctx.textAlign = 'right'; ctx.fillText(mil, x + boxW - 18 * s, y); ctx.textAlign = 'left';
+  });
   ctx.restore();
 }
 
@@ -113,5 +157,6 @@ export function drawSniperOverlay(ctx, quiz, frame, { x = 0, y = 0, width: w, he
       ctx.restore();
     }
   }
+  drawWindHud(ctx, quiz, frame, w, h, s);
   ctx.restore();
 }

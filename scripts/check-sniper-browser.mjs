@@ -63,7 +63,7 @@ try {
   await page.keyboard.press(String(wrong.metres / 100 % 10));
   await page.waitForSelector('#sniper-replay');
   const result = await page.locator('#result').innerText();
-  assert.match(result, /Miss — the .* mark was right/);
+  assert.match(result, /Miss — .* was right/);
   assert.match(result, new RegExp(`${Math.round(q.sniper.horizontal)} m horizontally`));
   assert.match(result, /head shot/);
   assert.match(await page.locator('.answer-explanation').innerText(), /horizontal range/);
@@ -92,8 +92,33 @@ try {
   assert.ok(exported.video > 1000);
   if (out) await writeFile(join(out, 'sniper-export.png'), Buffer.from(exported.png.split(',')[1], 'base64'));
   if (out) await writeFile(join(out, 'sniper-export-overview.png'), Buffer.from(exported.overview.split(',')[1], 'base64'));
+  // Optional crosswind call: the Wind control, w= link, HUD + card on the scene, mark + windage answers.
+  const qw = await generate({ seed: 'sniper-check', difficulty: 'medium', mode: 'sniper', sniperWind: true });
+  await page.goto(`${url}/#seed=sniper-check&d=medium&m=sniper&wind=1`, { waitUntil: 'domcontentloaded' });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => document.getElementById('loading').classList.contains('hidden') && document.getElementById('prompt').textContent.includes('windage'), null, { timeout: 120000 });
+  assert.equal(await page.locator('#sniper-wind-field').isHidden(), false);
+  assert.equal(await page.locator('#sniper-wind').inputValue(), 'on');
+  assert.deepEqual(await page.locator('#answers .answer').evaluateAll(b => b.map(x => x.dataset.label)), qw.options.map(o => o.label));
+  await seek(page, 2); await page.waitForTimeout(300);
+  const hud = await page.locator('#tape').evaluate(canvas => {
+    const d = canvas.getContext('2d').getImageData(0, 0, Math.round(canvas.width * 0.3), Math.round(canvas.height * 0.5)).data;
+    let yellow = 0; for (let i = 0; i < d.length; i += 4) if (d[i] > 200 && d[i + 1] > 170 && d[i + 2] < 140 && d[i + 3] > 200) yellow++;
+    return yellow;
+  });
+  assert.ok(hud > 80, 'wind HUD and card drawn top-left');
+  if (out) await page.locator('.scene-wrap').screenshot({ path: join(out, 'sniper-wind.png') });
+  await page.keyboard.press(String(qw.options.findIndex(o => o.correct) + 1));
+  await page.waitForSelector('#sniper-replay');
+  assert.match(await page.locator('#result').innerText(), /Hit — .* was right[\s\S]*Crosswind/);
+  assert.match(await page.locator('.answer-explanation').innerText(), /into the wind/);
+  // Switching the control off returns to the plain mark question on the same terrain.
+  await page.locator('#sniper-wind').selectOption('off');
+  await page.waitForFunction(() => !location.hash.includes('wind=1') && document.getElementById('loading').classList.contains('hidden'), null, { timeout: 120000 });
+  assert.deepEqual(await page.locator('#answers .answer').evaluateAll(b => b.map(x => x.dataset.label)), q.options.map(o => o.label));
+
   assert.deepEqual(errors, []);
-  console.log('Sniper browser checks passed: overview spot, scope housing and reticle, timeline, number keys, ballistic reveal, YOU/ENEMY map and PNG/video exports.');
+  console.log('Sniper browser checks passed: crosswind option (HUD, card, mark + windage answers), overview spot, scope housing and reticle, timeline, number keys, ballistic reveal, YOU/ENEMY map and PNG/video exports.');
 } finally {
   await browser.close();
   server.close();

@@ -52,6 +52,18 @@ function trajectoryHeight(bore, x, rifle = RIFLE) {
   return -Infinity;
 }
 
+/** Time of flight (s) to horizontal distance x. */
+function flightTime(bore, x, rifle = RIFLE) {
+  let px = 0, vx = rifle.muzzle * Math.cos(bore), vy = rifle.muzzle * Math.sin(bore), t = 0;
+  const dt = 0.0015;
+  for (let i = 0; i < 4000; i++) {
+    const v = Math.hypot(vx, vy), nx = px + vx * dt;
+    if (nx >= x) return t + dt * (x - px) / (nx - px);
+    px = nx; t += dt; vx += -rifle.drag * v * vx * dt; vy += (-rifle.drag * v * vy - rifle.g) * dt;
+  }
+  return Infinity;
+}
+
 /** Bore angle (rad above horizontal) that crosses (x, y). */
 function boreFor(x, y, rifle = RIFLE) {
   let lo = -0.3, hi = 0.5;
@@ -75,6 +87,18 @@ export function holdMiss(horizontal, rise, mark) {
   return trajectoryHeight(los + ZERO_BORE + MARK_MILS[mark] / 1000, horizontal) - rise;
 }
 
+/**
+ * Crosswind drift (m) at a target: Didion's relation, exact for drag that acts
+ * on the air-relative velocity — the lag behind a vacuum flight times the wind.
+ */
+export function windDrift(horizontal, rise, crossMps, mark) {
+  const bore = Math.atan2(rise, horizontal) + ZERO_BORE + MARK_MILS[mark] / 1000;
+  return crossMps * (flightTime(bore, horizontal) - horizontal / (RIFLE.muzzle * Math.cos(bore)));
+}
+
+/** Windage hold (mil) for 1 m/s of full crosswind at each range on flat ground: the shooter's wind card. */
+export const WIND_CARD = Object.freeze(MARKS.filter(m => m >= 300).map(m => ({ metres: m, milPerMps: +(windDrift(m, 0, 1, m) / m * 1000).toFixed(3) })));
+
 export function bestMark(horizontal, rise) {
   const misses = MARKS.map(mark => ({ mark, miss: holdMiss(horizontal, rise, mark) }));
   misses.sort((a, b) => Math.abs(a.miss) - Math.abs(b.miss));
@@ -82,6 +106,14 @@ export function bestMark(horizontal, rise) {
 }
 
 const nearestMark = metres => MARKS.reduce((best, m) => Math.abs(m - metres) < Math.abs(best - metres) ? m : best, MARKS[0]);
+
+/** Scene weather with the quiz's steady wind (vegetation, rain and snow drift with it). */
+export function sniperWeather(quiz, weather) {
+  const w = quiz.sniper?.wind;
+  if (!w) return weather;
+  const toward = (w.from + 180) * DEG;
+  return { ...weather, wind: [w.speed * Math.sin(toward), w.speed * Math.cos(toward)], gusts: false };
+}
 
 // --------------------------------------------------------------- timeline
 
@@ -152,7 +184,36 @@ function targetSight(model, camera, x, y, bearing) {
   return { z, visible, pitch };
 }
 
-export function generateSniperQuiz({ seed, world = 'classic', difficulty = 'medium', variant = 0, tuning = null,
+const WIND_OPTIONS = { easy: 3, medium: 4, hard: 4, expert: 5, master: 6 };
+const holdLabel = (metres, wind) => `${metres} m · ${wind > 0 ? 'R' : 'L'} ${Math.abs(wind).toFixed(1)}`;
+
+/**
+ * Optional crosswind call. A wind (from-direction and speed) is drawn so the
+ * exact windage hold lands on a 0.5 mil stadia tick; the options then pair
+ * scope marks with windage holds (including the wrong side). Exactly one pair
+ * puts the round on the head. Returns null when no clean wind fits.
+ */
+function planWind(rng, { difficulty, bearing, horizontal, rise, mark }) {
+  for (let tries = 0; tries < 30; tries++) {
+    const hold = rng.int(1, difficulty === 'easy' ? 4 : 7) * 0.5 * rng.sign(); // + = hold right
+    // The shown direction is a whole degree; the physics uses exactly what is shown.
+    const from = Math.round(wrap360(bearing + rng.range(25, 155) * rng.sign())) % 360;
+    const relative = wrap360(from - bearing + 180) - 180;                     // wind from the right when > 0
+    // Wind from the right pushes the round left, so the hold goes right (+).
+    const perMps = windDrift(horizontal, rise, 1, mark) / horizontal * 1000;
+    const cross = hold / perMps;                       // needed crosswind (m/s, + from the right)
+    if (Math.sign(cross) !== Math.sign(relative)) continue;
+    const speed = Math.round(Math.abs(cross / Math.sin(relative * DEG)) * 10) / 10;
+    if (speed < 1 || speed > 9) continue;
+    const actualCross = speed * Math.sin(relative * DEG);
+    const exact = actualCross * perMps;
+    if (Math.abs(exact - hold) * horizontal / 1000 > 0.06) continue;
+    return { from, speed, cross: +actualCross.toFixed(2), holdMil: hold, exactHoldMil: +exact.toFixed(3) };
+  }
+  return null;
+}
+
+export function generateSniperQuiz({ seed, world = 'classic', difficulty = 'medium', variant = 0, tuning = null, sniperWind = false,
   size, n, maxTerrainAttempts = 5, onProgress = () => {} }) {
   if (!BANDS[difficulty]) difficulty = 'medium';
   const t0 = now(), base = applyTuning(getDifficulty(difficulty), tuning), band = sniperBand(difficulty);
@@ -195,8 +256,26 @@ export function generateSniperQuiz({ seed, world = 'classic', difficulty = 'medi
         let marks = Array.from({ length: count }, (_, i) => lowest + 100 * i);
         if (difficulty === 'master' && slantMark !== mark && !marks.includes(slantMark)) marks = [...marks.slice(0, -1), slantMark].sort((a, b) => a - b);
         if (!marks.includes(mark)) continue;
-        const options = marks.map(m => ({ label: `${m} m`, metres: m, mil: +MARK_MILS[m].toFixed(3),
+        let options = marks.map(m => ({ label: `${m} m`, metres: m, mil: +MARK_MILS[m].toFixed(3),
           miss: +holdMiss(horizontal, rise, m).toFixed(3), correct: m === mark }));
+        let wind = null;
+        if (sniperWind) {
+          const wr = rng.fork(`wind-${attempt}-${tried}`);
+          wind = planWind(wr, { difficulty, bearing, horizontal, rise, mark });
+          if (!wind) continue;
+          const W = wind.holdMil, lateral = (m, w) => (w - wind.exactHoldMil) * horizontal / 1000; // + = right of the head
+          const pairs = [[mark, W + 0.5], [mark, W - 0.5], [mark, -W], [mark - 100, W], [mark + 100, W], [mark + 100, -W], [mark, W + 1]]
+            .filter(([m, w], i, all) => m >= 300 && m <= 1000 && w !== 0 && Math.abs(w) <= 4.5
+              && !(m === mark && w === W) && all.findIndex(([m2, w2]) => m2 === m && w2 === w) === i);
+          const chosen = [[mark, W], ...wr.shuffle(pairs).slice(0, WIND_OPTIONS[difficulty] - 1)];
+          options = chosen.map(([m, w]) => {
+            const v = holdMiss(horizontal, rise, m), h = lateral(m, w);
+            return { label: holdLabel(m, w), metres: m, mil: +MARK_MILS[m].toFixed(3), windMil: w,
+              miss: +v.toFixed(3), lateral: +h.toFixed(3), correct: m === mark && w === W };
+          }).sort((a, b) => a.metres - b.metres || a.windMil - b.windMil);
+          const off = (o) => Math.hypot(o.miss, o.lateral);
+          if (off(options.find(o => o.correct)) > HEAD_RADIUS - 0.01 || options.some(o => !o.correct && off(o) < 0.18)) continue;
+        }
         camera.pitch = +clamp(angle * 0.6 - 1, -14, 8).toFixed(2);
         const confidence = saturate(0.6 + 0.25 * Math.min(1, (Math.abs(second.miss) - Math.abs(best.miss)) / 2) + 0.15 * vp.quality.total);
         if (confidence < base.minConfidence) continue;
@@ -208,10 +287,11 @@ export function generateSniperQuiz({ seed, world = 'classic', difficulty = 'medi
           terrain: terrainSummary(model, interval, terrainCheck), camera,
           sniper: { target, bearing: +bearing.toFixed(3), elevation: +(Math.atan2(rise, horizontal) / DEG).toFixed(4),
             horizontal: +horizontal.toFixed(1), slant: +slant.toFixed(1), rise: +rise.toFixed(2), angle: +angle.toFixed(2),
-            correctMark: mark, slantMark, rifle: RIFLE, marks: MARKS.map(m => ({ metres: m, mil: +MARK_MILS[m].toFixed(3) })) },
+            correctMark: mark, slantMark, rifle: RIFLE, marks: MARKS.map(m => ({ metres: m, mil: +MARK_MILS[m].toFixed(3) })),
+            ...(wind ? { wind: { ...wind, card: WIND_CARD } } : {}) },
           heading: { degrees: camera.heading, ...formatHeading(camera.heading, 'exact'), mode: 'exact' },
           mapRotation: base.mapRotation ? rng.fork('rotation').pick([0, 90, 180, 270]) : 0,
-          options, correctLabel: `${mark} m`, landmarks: landmarkSummary(model),
+          options, correctLabel: wind ? holdLabel(mark, wind.holdMil) : `${mark} m`, landmarks: landmarkSummary(model),
           quality: { total: vp.quality.total, ...vp.quality.components, blockedFrac: vp.quality.blockedFrac, edgeFrac: vp.quality.edgeFrac },
           validation: { ok: true, issues: [], confidence, margin: +(Math.abs(second.miss) - Math.abs(best.miss)).toFixed(3),
             uniqueness: saturate((Math.abs(second.miss) - Math.abs(best.miss)) / 1.5) },
@@ -231,6 +311,14 @@ export function generateSniperQuiz({ seed, world = 'classic', difficulty = 'medi
 
 const fmt = (v, d = 1) => Number(v).toFixed(d);
 
+function windEvidence(s) {
+  const w = s.wind, fromRight = w.cross > 0, perMps = Math.abs(w.exactHoldMil / w.cross);
+  return { type: 'crosswind', text: `Wind ${w.speed} m/s from ${String(w.from).padStart(3, '0')}° against your ${String(Math.round(s.bearing)).padStart(3, '0')}° line of fire `
+    + `is ${fmt(Math.abs(w.cross))} m/s of crosswind from the ${fromRight ? 'right' : 'left'}. At ${s.correctMark} m the card gives ${fmt(perMps, 3)} mil per m/s, `
+    + `so hold ${Math.abs(w.holdMil).toFixed(1)} mil ${w.holdMil > 0 ? 'right' : 'left'} — into the wind.`,
+  data: { speedMps: w.speed, fromDegrees: w.from, crossMps: w.cross, milPerMps: +perMps.toFixed(3), holdMil: w.holdMil } };
+}
+
 /** Same machine-readable shape as the other quiz explanations. */
 export function sniperExplanation(quiz) {
   const s = quiz.sniper, uphill = s.rise >= 0;
@@ -242,17 +330,22 @@ export function sniperExplanation(quiz) {
     { type: 'rifleman-rule', text: 'Gravity only pulls across the horizontal distance, so up- and downhill shots use the mark for the horizontal range, '
       + `not the straight-line range${s.slantMark !== s.correctMark ? ` (${s.slantMark} m here, which shoots high)` : ''}.`,
     data: { correctMark: s.correctMark, slantMark: s.slantMark } },
-    { type: 'ballistic-hit', text: `Holding the head on the ${correct.label} mark, the simulated round lands ${fmt(Math.abs(correct.miss * 100), 0)} cm ${correct.miss >= 0 ? 'high' : 'low'}, inside the head (±${HEAD_RADIUS * 100} cm).`,
-      data: { mark: correct.metres, missMetres: correct.miss, muzzleVelocity: s.rifle.muzzle, zeroMetres: s.rifle.zero } },
+    ...(s.wind ? [windEvidence(s)] : []),
+    { type: 'ballistic-hit', text: `Holding the head on the ${s.correctMark} m mark${s.wind ? ` with ${Math.abs(s.wind.holdMil).toFixed(1)} mil ${s.wind.holdMil > 0 ? 'right' : 'left'}` : ''}, the simulated round lands `
+      + `${fmt(Math.abs(correct.miss * 100), 0)} cm ${correct.miss >= 0 ? 'high' : 'low'}${s.wind ? ` and ${fmt(Math.abs(correct.lateral * 100), 0)} cm ${correct.lateral >= 0 ? 'right' : 'left'}` : ''}, inside the head (±${HEAD_RADIUS * 100} cm).`,
+      data: { mark: correct.metres, missMetres: correct.miss, ...(s.wind ? { lateralMetres: correct.lateral, windMil: correct.windMil } : {}), muzzleVelocity: s.rifle.muzzle, zeroMetres: s.rifle.zero } },
     { type: 'ranging', text: `Ranging check: his ${SHOULDER_WIDTH.toFixed(2)} m shoulders at ${Math.round(s.slant)} m span ${fmt(SHOULDER_WIDTH * 1000 / s.slant, 2)} mil in the scope (metres = 500 / mil).`,
       data: { shoulderWidthMetres: SHOULDER_WIDTH, mils: +(SHOULDER_WIDTH * 1000 / s.slant).toFixed(3) } },
   ];
   const alternatives = quiz.options.filter(o => !o.correct).map(o => ({
     label: o.label, difference: Math.abs(o.miss), plausibility: o.metres === s.slantMark ? 'This is the mark for the straight-line range.' : '',
     status: 'distinguished',
-    reasons: [{ type: 'holdover-miss', text: `The ${o.label} mark puts the round ${fmt(Math.abs(o.miss), 2)} m ${o.miss >= 0 ? 'high' : 'low'} of the head${o.miss > 0.2 ? ', over the target' : o.miss < -1.6 ? ', into the ground in front' : ''}.`,
-      data: { mark: o.metres, missMetres: o.miss } }],
+    reasons: [s.wind ? { type: 'hold-miss', text: `${o.label} puts the round ${fmt(Math.abs(o.miss), 2)} m ${o.miss >= 0 ? 'high' : 'low'} and ${fmt(Math.abs(o.lateral), 2)} m ${o.lateral >= 0 ? 'right' : 'left'} of the head`
+      + `${Math.sign(o.windMil) !== Math.sign(s.wind.holdMil) ? ' — that holds with the wind instead of into it' : ''}.`, data: { mark: o.metres, windMil: o.windMil, missMetres: o.miss, lateralMetres: o.lateral } }
+      : { type: 'holdover-miss', text: `The ${o.label} mark puts the round ${fmt(Math.abs(o.miss), 2)} m ${o.miss >= 0 ? 'high' : 'low'} of the head${o.miss > 0.2 ? ', over the target' : o.miss < -1.6 ? ', into the ground in front' : ''}.`,
+        data: { mark: o.metres, missMetres: o.miss } }],
   }));
+  if (s.wind) for (const a of alternatives) { const o = quiz.options.find(x => x.label === a.label); a.difference = Math.hypot(o.miss, o.lateral); }
   return { version: 1, language: 'en', source: 'ballistic-trajectory-analysis', kind: 'holdover',
     correct: { label: quiz.correctLabel, summary: `The ${quiz.correctLabel} mark is the only hold that puts the round on the enemy sniper's head.`, evidence },
     closestLabels: [...alternatives].sort((a, b) => a.difference - b.difference).slice(0, 3).map(o => o.label), alternatives };
