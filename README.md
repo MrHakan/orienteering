@@ -88,6 +88,12 @@ Question: which bullet-drop mark puts the round on the enemy's **head**? Options
 - **Optional crosswind call** (Wind → Crosswind call, `wind=1` in links): a steady wind is shown as speed and from-direction (the grass and rain drift with it), with the rifle's wind card — windage hold in mil per 1 m/s of full crosswind for 300–1000 m. The drift is Didion's relation (crosswind × (time of flight − range ÷ muzzle velocity)) on the simulated trajectory; the wind is drawn so the exact hold falls on a 0.5 mil stadia tick. Options pair scope marks with windage holds — including holding with the wind instead of into it — and exactly one pair hits the head. Plain quizzes are unchanged when the option is off.
 - **Scope**: the circle spans ±12 mil; horizontal stadia are numbered 2/4/6/8 mil, vertical marks 2–10 (×100 m) with wind wings. The live view and exports share one sampler (`sniperFrame`), so the 15 s Reels video is exactly the 5 s overview + 10 s scope sequence. After answering, the map shows YOU, the ENEMY and the line of fire with its length, and the explanation lists each mark's impact.
 
+## Daily, challenges and runs
+
+- **Daily** — one question a day, the same for everyone (UTC date → seed `daily-YYYY-MM-DD`, mode rotating through twelve modes, difficulty by weekday: Monday Easy … Sunday Master, world chosen from the seed). One attempt: reopening shows your result. The share card is Wordle-style (`🟩 18 s · 🔥 4` and a `#daily=` link); the streak counts consecutive days played. Results stay in local storage.
+- **Challenge a friend** — after any answer, the link carries your name, whether you were right and your time (`&ch=…`), never the answer. Your friend sees "⚔️ Ayşe got this right in 12 s — your turn", then who won (right beats wrong; then the faster time) and can send it back.
+- **10-question run** — mixed modes, Easy → Master, 100 points per correct answer plus up to 50 for speed. The banner shows progress and points, N moves on, and the best run is remembered with a shareable result row.
+
 ## Map-reading modes
 
 Six modes test map skills directly. Each has a 15-second clip (the Play / Replay timeline and the Reels export follow it), tappable answers on the map where it makes sense, a reveal drawn on the map, and the machine-readable explanation (`src/engine/<mode>Quiz.js`, presentation in `src/render/mapModesView.js`).

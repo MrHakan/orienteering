@@ -127,12 +127,14 @@
       </label>
       <button type="submit" class="btn ghost" id="load-seed" title="Generate the quiz for this seed">Load</button>
       <button type="button" class="btn ghost" id="new-positions" title="Same terrain, new observer and answer positions (P)">New positions</button>
+      <button type="button" class="btn ghost" id="daily" title="Today's question — the same for everyone">Daily</button>
       <button type="button" class="btn primary" id="new-quiz" title="New random quiz (N)">New quiz</button>
     </form>
   </header>
 
   <main class="layout">
     <section class="card" aria-labelledby="quiz-title">
+      <div id="play-banner" class="play-banner" role="status" hidden></div>
       <h1 id="quiz-title">WHERE ARE YOU?</h1>
       <p class="facing"><span id="facing-text">&nbsp;</span> <span id="facing-arrow" class="arrow"></span></p>
 
@@ -243,6 +245,8 @@
           <div><strong id="score-total">0</strong><span>answered</span></div>
           <div><strong id="score-streak">0</strong><span>streak</span></div>
         </div>
+        <button type="button" class="btn ghost small" id="run-start">Start a 10-question run</button>
+        <p class="dev-note" id="run-best"></p>
       </section>
 
       <section class="box">

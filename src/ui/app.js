@@ -18,6 +18,8 @@ import { TrailPlayback } from './trailPlayback.js';
 import { usesSunWatch, supportsSunWatch, sunWatchFrame, SUN_WATCH_DURATION } from '../engine/sunWatch.js';
 import { sniperFrame, sniperWeather, SNIPER_DURATION, SNIPER_TIMING } from '../engine/sniper.js';
 import { drawSniperOverlay } from '../render/sniperOverlay.js';
+import { dateKey, isDateKey, dailyPlan, dailyStreak, dailyShareText, MODE_NAMES, encodeChallenge, decodeChallenge, compareChallenge,
+  RUN_LENGTH, runPlan, runPoints, runShareText } from './play.js';
 import { MAP_MODES, isMapMode } from '../engine/mapModes.js';
 import { modeTitle, modeSubtitle, modePrompt, modeFrame, drawModeOverlay, modeFacts, modeResultHTML } from '../render/mapModesView.js';
 import { TerrainRenderer } from '../render/webglTerrain.js';
@@ -356,6 +358,9 @@ async function load(req) {
     return;
   }
   if (myId !== state.requestId) return; // superseded by a newer request
+  // Daily, challenge and run context travel with the request; any other load ends a run.
+  state.play = req.play || null;
+  if (state.play?.kind !== 'run') state.run = null;
   quiz.headingChoice = r.headingMode;
   if (quiz.mode === 'trail') quiz.appearance = { ...r.appearance };
   quiz.tuning = r.tuning;
@@ -367,6 +372,7 @@ async function load(req) {
 function updateHash() {
   const q = state.quiz;
   if (!q) return;
+  if (state.play?.kind === 'daily') { history.replaceState(null, '', `#daily=${state.play.plan.date}`); return; }
   const parts = [`seed=${encodeURIComponent(q.seed)}`, `d=${q.difficulty}`];
   if ((q.worldChoice || 'classic') !== 'classic') parts.push(`w=${q.worldChoice}`);
   if (q.mode === 'facing') parts.push('m=facing');
@@ -508,6 +514,10 @@ function show(quiz) {
   renderFacts();
   setLoading(false);
   setAnswersEnabled(true);
+  renderPlayBanner();
+  state.shownAt = performance.now();
+  const replay = state.play?.kind === 'daily' && store.get('otq.daily', {})[state.play.plan.date];
+  if (replay) setTimeout(() => answer(replay.label, { replay: true }), 0); // one attempt a day: show today's result
   if (!usesSunWatch(quiz) && quiz.mode === 'friend' && quiz.friend.skin === 'conquest') startFriendArrival();
   if (quiz.mode === 'trail' && renderer && !window.matchMedia('(prefers-reduced-motion: reduce)').matches && !document.hidden) trailPlayer.play();
   if ((quiz.mode === 'sniper' || isMapMode(quiz)) && renderer && !reducedMotion.matches && !document.hidden && !$('export-dialog').open) sunPlayer.play();
@@ -710,19 +720,22 @@ $('grid-answer').addEventListener('submit', (e) => {
   answer(label);
 });
 
-function answer(label) {
+function answer(label, { replay = false } = {}) {
   if (!state.quiz || state.answered || state.loading) return;
   const quiz = state.quiz;
   if (!quiz.options.some((o) => o.label === label)) return;
+  const seconds = replay ? store.get('otq.daily', {})[state.play.plan.date].seconds : (performance.now() - (state.shownAt || performance.now())) / 1000;
   if (quiz.mode === 'trail') trailPlayer.pause();
   if (usesSunWatch(quiz)) sunPlayer.seek(SUN_WATCH_DURATION);
   state.answered = true;
   state.chosen = label;
   const right = label === quiz.correctLabel;
-  state.score.total++;
-  if (right) { state.score.correct++; state.score.streak++; } else state.score.streak = 0;
-  store.set('otq.score', state.score);
-  renderScore();
+  if (!replay) {
+    state.score.total++;
+    if (right) { state.score.correct++; state.score.streak++; } else state.score.streak = 0;
+    store.set('otq.score', state.score);
+    renderScore();
+  }
 
   for (const b of $('answers').children) {
     b.disabled = true;
@@ -737,7 +750,111 @@ function answer(label) {
   renderFacts();
   showAnswerResult(label, right);
   appendAnswerExplanation($('result'), quiz, label, state.model);
+  renderPlayResult(label, right, seconds, replay);
 }
+
+// ---------------------------------------------------------------- daily / challenge / run
+
+function renderPlayBanner() {
+  const p = state.play, el = $('play-banner');
+  el.hidden = !p;
+  if (!p) return;
+  if (p.kind === 'daily') el.textContent = `DAILY #${p.plan.number} · ${p.plan.date} · ${p.plan.difficulty.toUpperCase()} · ONE ATTEMPT`;
+  if (p.kind === 'challenge') el.textContent = `⚔️ ${p.challenge.name} ${p.challenge.correct ? 'got this right' : 'missed this'} in ${Math.round(p.challenge.seconds)} s — your turn`;
+  if (p.kind === 'run') el.textContent = `RUN ${state.run.i + 1}/${RUN_LENGTH} · ${MODE_NAMES[state.quiz.mode]} · ${state.quiz.difficulty.toUpperCase()} · ${state.run.total} PTS`;
+}
+
+const pageUrl = () => `${location.origin}${location.pathname}`;
+async function shareText(text, button) {
+  try {
+    if (navigator.share && matchMedia('(pointer: coarse)').matches) await navigator.share({ text });
+    else { await navigator.clipboard.writeText(text); button.textContent = 'Copied!'; }
+  } catch { button.textContent = 'Copy failed'; }
+}
+
+function challengeLink(correct, seconds) {
+  const name = store.get('otq.name', '');
+  const hash = location.hash.replace(/^#/, '').split('&').filter((p) => p && !p.startsWith('ch=')).join('&');
+  return `${pageUrl()}#${hash}&ch=${encodeChallenge({ name, correct, seconds })}`;
+}
+
+/** Extra box under the verdict: daily share, challenge comparison, run progress, and "challenge a friend". */
+function renderPlayResult(label, right, seconds, replay) {
+  const p = state.play, box = document.createElement('div');
+  box.className = 'play-extra'; box.id = 'play-extra';
+  const parts = [];
+  if (p?.kind === 'daily') {
+    const history = store.get('otq.daily', {});
+    if (!replay) { history[p.plan.date] = { correct: right, seconds: +seconds.toFixed(1), label }; store.set('otq.daily', history); }
+    const streak = dailyStreak(history, dateKey(Date.now()));
+    p.share = dailyShareText(p.plan, history[p.plan.date], streak, `${pageUrl()}#daily=${p.plan.date}`);
+    parts.push(`<p class="big">${right ? '🟩' : '🟥'} ${Math.round(seconds)} s${streak.played > 1 ? ` · 🔥 ${streak.played}` : ''}</p>`,
+      `<p>${replay ? 'You already played today’s question.' : 'Come back tomorrow for the next one.'}</p>`,
+      '<button type="button" class="btn primary small" id="play-share">Share result</button>');
+  }
+  if (p?.kind === 'challenge') {
+    const outcome = compareChallenge({ correct: right, seconds }, p.challenge);
+    parts.push(`<p class="big">${outcome === 'win' ? '🏆 You win' : outcome === 'lose' ? `${p.challenge.name} wins` : 'Draw'}</p>`,
+      `<p>You: ${right ? '✓' : '✗'} ${Math.round(seconds)} s · ${p.challenge.name}: ${p.challenge.correct ? '✓' : '✗'} ${Math.round(p.challenge.seconds)} s</p>`);
+  }
+  if (p?.kind === 'run') {
+    const points = runPoints(right, seconds), run = state.run;
+    run.total += points; run.results.push({ mode: state.quiz.mode, correct: right, seconds, points });
+    const last = run.i === RUN_LENGTH - 1;
+    if (last) {
+      const best = Math.max(store.get('otq.runBest', 0), run.total);
+      run.share = runShareText(run.results, run.total, store.get('otq.runBest', 0), pageUrl());
+      store.set('otq.runBest', best); renderRunBest();
+      parts.push(`<p class="big">Run complete · ${run.total} pts</p><p>${run.results.map((r) => (r.correct ? '🟩' : '🟥')).join('')} · best ${best}</p>`,
+        '<button type="button" class="btn primary small" id="play-share">Share run</button>');
+    } else parts.push(`<p class="big">+${points} pts · ${run.total} total</p>`, `<button type="button" class="btn primary small" id="run-next">Question ${run.i + 2}/${RUN_LENGTH} (N)</button>`);
+    renderPlayBanner();
+  }
+  if (p?.kind !== 'daily' || !replay) parts.push(`<p><input type="text" id="challenge-name" maxlength="24" placeholder="Your name" value="${String(store.get('otq.name', '')).replace(/"/g, '')}">`
+    + `<button type="button" class="btn ghost small" id="challenge-copy">${p?.kind === 'challenge' ? 'Send it back' : 'Challenge a friend'}</button></p>`);
+  box.innerHTML = parts.join('');
+  const verdict = $('result').querySelector('.verdict');
+  (verdict || $('result').firstChild)?.after(box);
+  $('play-share')?.addEventListener('click', (e) => shareText(p.kind === 'run' ? state.run.share : p.share, e.currentTarget));
+  $('run-next')?.addEventListener('click', nextRunQuestion);
+  $('challenge-name')?.addEventListener('change', (e) => store.set('otq.name', e.target.value.trim().slice(0, 24)));
+  $('challenge-copy')?.addEventListener('click', (e) => {
+    store.set('otq.name', $('challenge-name').value.trim().slice(0, 24));
+    shareText(`Can you beat me? ${right ? '✓' : '✗'} ${Math.round(seconds)} s\n${challengeLink(right, seconds)}`, e.currentTarget);
+  });
+}
+
+function startDaily(key = dateKey(Date.now())) {
+  const plan = dailyPlan(key);
+  load({ seed: plan.seed, mode: plan.mode, difficulty: plan.difficulty, world: plan.world, variant: 0, scramble: 0,
+    headingMode: 'auto', direction: 'auto', sniperWind: false, play: { kind: 'daily', plan } });
+}
+
+function loadRunQuestion() {
+  const q = state.run.plan[state.run.i];
+  load({ seed: q.seed, mode: q.mode, difficulty: q.difficulty, world: 'auto', variant: 0, scramble: 0, headingMode: 'auto', direction: 'auto',
+    sniperWind: false, play: { kind: 'run' } });
+}
+
+function startRun() {
+  const seed = SeedManager.randomSeed();
+  state.run = { seed, plan: runPlan(seed), i: 0, total: 0, results: [] };
+  loadRunQuestion();
+}
+
+function nextRunQuestion() {
+  if (!state.run || state.run.i >= RUN_LENGTH - 1) return;
+  state.run.i++;
+  loadRunQuestion();
+}
+
+function renderRunBest() {
+  const best = store.get('otq.runBest', 0);
+  $('run-best').textContent = best ? `Best run: ${best} pts` : 'Ten mixed questions, harder as you go; speed earns bonus points.';
+}
+renderRunBest();
+$('daily').addEventListener('click', () => startDaily());
+$('run-start').addEventListener('click', startRun);
 
 function showAnswerResult(label, right) {
   const quiz = state.quiz;
@@ -1025,6 +1142,8 @@ function setAnswersEnabled(on) {
 // ---------------------------------------------------------------- controls
 
 function newQuiz() {
+  // During a run, N moves on to the next question once this one is answered.
+  if (state.run && state.answered && state.run.i < RUN_LENGTH - 1) { nextRunQuestion(); return; }
   load({ seed: SeedManager.randomSeed() });
 }
 
@@ -1395,12 +1514,15 @@ function parseHash() {
     direction: DIRECTIONS.some((d) => d.label === p.get('dir')) ? p.get('dir') : 'auto',
     headingMode: ['exact', 'intercardinal', 'cardinal'].includes(h) ? h : 'auto',
     tuning: p.has('dev') ? decodeTuning(p.get('dev')) : null,
+    daily: isDateKey(p.get('daily')) ? p.get('daily') : null,
+    challenge: p.has('ch') ? decodeChallenge(p.get('ch')) : null,
   };
 }
 
 window.addEventListener('hashchange', () => {
   const h = parseHash();
   const q = state.quiz;
+  if (h.daily) { if (h.daily !== state.play?.plan?.date) startDaily(h.daily); return; }
   if (h.seed && (h.seed !== q?.seed || h.world !== (q?.worldChoice || 'classic') || (h.mode === 'sniper' && h.sniperWind !== !!q?.sniper?.wind) || h.difficulty !== q?.difficulty || h.variant !== (q?.variant || 0) || h.scramble !== (q?.scramble || 0)
     || h.mode !== q?.mode || h.headingMode !== (q?.headingChoice || 'auto')
     || (h.mode === 'lookalike' && h.direction !== q?.directionChoice)
@@ -1517,7 +1639,9 @@ $('sniper-wind').value = store.get('otq.sniperWind', 'off') === 'on' ? 'on' : 'o
 const initial = parseHash();
 adoptLinkTuning(initial.tuning);
 renderDevPanel();
-if (initial.seed) load({ ...initial, difficulty: initial.difficulty || store.get('otq.difficulty', 'medium') });
+if (initial.daily) startDaily(initial.daily);
+else if (initial.seed) load({ ...initial, difficulty: initial.difficulty || store.get('otq.difficulty', 'medium'),
+  play: initial.challenge ? { kind: 'challenge', challenge: initial.challenge } : null });
 else load({ difficulty: store.get('otq.difficulty', 'medium'), mode: store.get('otq.mode', 'where-am-i') });
 $('difficulty').addEventListener('change', () => store.set('otq.difficulty', $('difficulty').value));
 $('world').addEventListener('change', () => store.set('otq.world', $('world').value));
