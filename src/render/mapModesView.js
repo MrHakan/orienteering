@@ -27,7 +27,7 @@ export function modePrompt(q) {
   switch (q.mode) {
     case 'resection': return q.resection.peaksMarked
       ? `Your position is unknown. Compass bearings to the marked peaks: ${modeSubtitle(q)}. Where are you: ${list}? Draw each back-bearing (±180°) from its peak; the lines cross where you stand.`
-      : `Your position is unknown. Compass bearings to the labelled hills in the view: ${modeSubtitle(q)}. The peaks are not marked on the map — find each hill among the contours first, then draw its back-bearing (±180°). Where are you: ${list}?`;
+      : `Your position is unknown. Compass bearings to the labelled hills in the view: ${modeSubtitle(q)}. The peaks are not marked on the map — find each hill among the contours first, then draw its back-bearing (±180°). Similar hills elsewhere fit the wrong points, so check every bearing and how far and how high each hill looks. Where are you: ${list}?`;
     case 'route': return `Which route from the start ▲ to the finish ◎ is fastest on foot, off-trail: ${list}? Climbing costs time, and so does a long detour. Tap a route or its letter.`;
     case 'visibility': return `You stand at YOU, eyes 1.7 m above the ground. Exactly one of the 2 m flags ${list} is in sight; the others hide behind terrain. Which one can you see? Read the contours between YOU and each flag.`;
     case 'profile': return `Which elevation profile matches the straight line from ▲ to ◎ on the map: ${list}? Profiles run left to right from ▲ to ◎; heights share one vertical scale.`;
@@ -134,7 +134,14 @@ export function modeResultHTML(q, label, right) {
   const verdict = `<div class="verdict ${right ? 'good' : 'bad'}">${right ? 'Correct' : 'Not quite'} — the answer is ${q.correctLabel}.</div>`;
   const row = (o, cells) => `<tr><td><strong>${o.label}</strong>${o.correct ? ' ✓' : o.label === label ? ' (your pick)' : ''}</td>${cells.map((c) => `<td>${c}</td>`).join('')}</tr>`;
   let table = '';
-  if (q.mode === 'resection') table = `<table><tr><th>Point</th>${q.resection.peaks.map((p) => `<th>${p.label} error</th>`).join('')}</tr>${q.options.map((o) => row(o, o.errors.map((e) => `${e.toFixed(1)}°`))).join('')}</table>`;
+  if (q.mode === 'resection' && q.options[0].lines) {
+    // Hidden peaks: what each bearing line from the point runs to, and what rules the point out.
+    const peaks = q.resection.peaks, onHill = q.resection.rounding / 2 + 1;
+    const meets = (l) => l.error > onHill ? `no hill (${l.error.toFixed(1)}° off)` : l.hill.peak >= 0 ? peaks[l.hill.peak].label : `${l.hill.height} m ${l.hill.kind === 'knoll' ? 'knoll' : 'hill'}`;
+    const cue = { hidden: 'a hill would be hidden', distance: 'hill distance', elevation: 'height vs eye level' };
+    const out = (o) => o.correct ? 'matches' : o.refute === 'view' ? [...new Set(o.cues.map((c) => cue[c.type]))].join(', ') : `the ${o.lines.map((l, i) => l.error > onHill ? peaks[i].label : '').filter(Boolean).join('/')} bearing`;
+    table = `<table><tr><th>Point</th>${peaks.map((p) => `<th>${p.label} line meets</th>`).join('')}<th>Ruled out by</th></tr>${q.options.map((o) => row(o, [...o.lines.map(meets), out(o)])).join('')}</table>`;
+  } else if (q.mode === 'resection') table = `<table><tr><th>Point</th>${q.resection.peaks.map((p) => `<th>${p.label} error</th>`).join('')}</tr>${q.options.map((o) => row(o, o.errors.map((e) => `${e.toFixed(1)}°`))).join('')}</table>`;
   if (q.mode === 'route') table = `<table><tr><th>Route</th><th>Time</th><th>Length</th><th>Climb</th></tr>${q.options.map((o) => row(o, [`${o.minutes.toFixed(1)} min`, `${Math.round(o.length)} m`, `${Math.round(o.climb)} m`])).join('')}</table>`;
   if (q.mode === 'visibility') table = `<table><tr><th>Flag</th><th>Distance</th><th>Result</th></tr>${q.options.map((o) => row(o, [`${Math.round(o.distance)} m`, o.visible ? 'visible' : `hidden by ground ${o.blockDistance ? `at ${Math.round(o.blockDistance)} m` : ''}`])).join('')}</table>`;
   if (q.mode === 'profile') table = `<table><tr><th>Profile</th><th>What it is</th></tr>${q.options.map((o) => row(o, [o.what])).join('')}</table>`;

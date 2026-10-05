@@ -40,6 +40,25 @@ test('resection: only the true position matches every bearing', async () => {
   }
 });
 
+test('resection with hidden peaks: answers spread over the map, each a look-alike with a clear tell', async () => {
+  for (const difficulty of ['medium', 'hard', 'master']) {
+    const q = await generate({ seed: 'res-h', difficulty, mode: 'resection' }); one(q); shape(q);
+    const { peaks, rounding, peaksMarked } = q.resection, onHill = rounding / 2 + 1, size = modelOf(q).size;
+    assert.equal(peaksMarked, false);
+    assert.equal(q.map.extras.length, 0, 'no peaks on the map before answering');
+    assert.ok(q.map.revealExtras.some((e) => e.shape === 'peak'), 'peaks appear after answering');
+    for (const a of q.options) for (const b of q.options) if (a !== b) assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= 0.25 * size - 1e-6, `${a.label}–${b.label} spread over the map`);
+    for (const o of q.options.filter((o) => !o.correct)) {
+      assert.equal(o.lines.length, peaks.length);
+      assert.ok(o.lines.filter((l) => l.error <= onHill).length >= peaks.length - 1, `${o.label}: all bearings but one meet hills`);
+      if (o.refute === 'map') assert.ok(o.lines.some((l) => l.error >= 5 + rounding / 2), `${o.label}: a bearing meets no hill`);
+      else assert.ok(difficulty !== 'medium' && o.cues.length >= 1, `${o.label}: the view tells it apart`);
+      assert.ok(q.explanation.alternatives.find((a) => a.label === o.label).reasons.length >= 1);
+    }
+    assert.ok(q.options.some((o) => o.trap), 'one answer sits on a true bearing line');
+  }
+});
+
 test('route choice: Tobler time picks the fastest route by a clear margin', async () => {
   assert.ok(toblerSpeed(-0.05) > toblerSpeed(0) && toblerSpeed(0) > toblerSpeed(0.2) && toblerSpeed(-0.05) > toblerSpeed(-0.3));
   const q = await generate({ seed: 'route-t', difficulty: 'hard', mode: 'route' }); one(q); shape(q);
