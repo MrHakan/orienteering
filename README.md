@@ -88,6 +88,21 @@ Question: which bullet-drop mark puts the round on the enemy's **head**? Options
 - **Optional crosswind call** (Wind → Crosswind call, `wind=1` in links): a steady wind is shown as speed and from-direction (the grass and rain drift with it), with the rifle's wind card — windage hold in mil per 1 m/s of full crosswind for 300–1000 m. The drift is Didion's relation (crosswind × (time of flight − range ÷ muzzle velocity)) on the simulated trajectory; the wind is drawn so the exact hold falls on a 0.5 mil stadia tick. Options pair scope marks with windage holds — including holding with the wind instead of into it — and exactly one pair hits the head. Plain quizzes are unchanged when the option is off.
 - **Scope**: the circle spans ±12 mil; horizontal stadia are numbered 2/4/6/8 mil, vertical marks 2–10 (×100 m) with wind wings. The live view and exports share one sampler (`sniperFrame`), so the 15 s Reels video is exactly the 5 s overview + 10 s scope sequence. After answering, the map shows YOU, the ENEMY and the line of fire with its length, and the explanation lists each mark's impact.
 
+## Map-reading modes
+
+Six modes test map skills directly. Each has a 15-second clip (the Play / Replay timeline and the Reels export follow it), tappable answers on the map where it makes sense, a reveal drawn on the map, and the machine-readable explanation (`src/engine/<mode>Quiz.js`, presentation in `src/render/mapModesView.js`).
+
+| Mode | Question | How the answer is computed |
+|---|---|---|
+| **Resection** | Compass bearings to 2–3 marked peaks: where are you (A–D)? | Only the true point is within the reading accuracy of every bearing; one distractor sits on a single bearing line (the classic trap). Easy/Medium give 3 peaks, harder levels 2; Master reads bearings to the nearest 5°. The scene pans to each labelled peak. After answering, the back-bearings cross at YOU. |
+| **Route choice** | Straight, or around the left / right: which route from ▲ to ◎ is fastest (A–C)? | Walking time from Tobler's hiking function, off-trail (×0.6), on 5 m steps; the detours are least-time Dijkstra legs through a waypoint. The winner must beat the next route by 20 % (Easy) down to 4.5 % (Master), and straight-line wins are rationed so the answer stays unpredictable. |
+| **Intervisibility** | From YOU, which one of five 2 m flags (A–E) is in sight? | For every flag, the lowest visible height above its foot along the sightline. Exactly one shows; the others need from ~14 m (Easy) down to ~3 m (Master) to appear. After answering, green / red sightlines show where the ground cuts them. |
+| **Profile** | Which of four elevation profiles is the line ▲ → ◎? | Distractors: the same line read backwards, lines turned about the same centre, parallel lines beside it or lines elsewhere — closer look-alikes on harder levels (minimum RMS difference 10 m → 3.2 m). |
+| **Drainage** | Rain falls at the drop: where does the water leave the area (A–D)? | D8 steepest descent over the depression-filled surface, so every cell drains to a map-edge outlet; options are the main outlets. Harder levels drop the rain within 140 m (Hard) to 55 m (Master) of a watershed. |
+| **Fog navigation** | Visibility 110 → 60 m: you walk a few steps on a known heading — where are you (A–C)? | The skyline is lost in a forced whiteout; candidates are compared only on the near ground (40 m terrain probes), with distractors inside a difficulty band. |
+
+Route, visibility, profile and drainage scenes show a slow drone orbit over the area; profile charts are drawn over the scene.
+
 ## Bunny-hop trails
 
 **Mode → Bunny-hop trails** (`&m=trail`) plays a 24-second first-person run (about 407 m) over changing slopes. Routes need at least 6 m of ground relief and a sustained slope/grade change; selection rewards ridge-side and valley passages. The 4×4 grid uses 36 seconds on the standard terrain to reach at least three cells without changing the speed ceiling. Choose which map trail you followed: **A red, B green or C cyan**. All three have the same shape, speed and steering; their moving terrain views are matched pairwise so the skyline and nearby slopes decide the answer. After answering, replay each route or compare the specific time and bearing that rules it out.

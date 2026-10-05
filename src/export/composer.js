@@ -17,6 +17,8 @@ import { trailFrame } from '../engine/trailMotion.js';
 import { usesSunWatch, sunWatchFrame } from '../engine/sunWatch.js';
 import { sniperFrame, sniperWeather } from '../engine/sniper.js';
 import { drawSniperOverlay } from '../render/sniperOverlay.js';
+import { isMapMode } from '../engine/mapModes.js';
+import { modeTitle, modeSubtitle, modeCaption, modeFrame, drawModeOverlay } from '../render/mapModesView.js';
 
 export const FORMATS = {
   reels: { label: 'Reels / Story 9:16', width: 1080, height: 1920 },
@@ -29,6 +31,7 @@ export { weatherParams } from '../render/environment.js';
 const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 
 export function captionText(quiz) {
+  if (isMapMode(quiz)) return modeCaption(quiz);
   if (quiz.mode === 'sniper') return quiz.sniper.wind ? `Wind ${quiz.sniper.wind.speed} m/s: which mark and windage hit his head?`
     : `Which hold hits his head: ${quiz.options.map((o) => o.label).join(', ')}?`;
   if (quiz.mode === 'facing') return 'Which way: N, NE, E, SE, S, SW, W or NW?';
@@ -147,13 +150,14 @@ export class ExportComposer {
       mr.setData({ model: this.model, interval: q.terrain.contourInterval, options: quizMarkers(q), rotation: this.options.northUp ? 0 : q.mapRotation, landmarks: q.landmarks,
         grid: q.grid ? { ...q.grid, correctLabel: q.correctLabel } : null,
         extent: q.mapExtent || null, routes: q.trail?.routes, trails: q.mode === 'trail', trailDuration: q.trail?.duration, observer: friendObserver(q),
-        friendMode: q.mode === 'friend' || q.mode === 'sniper', target: q.mode === 'sniper' ? q.sniper.target : null });
+        friendMode: q.mode === 'friend' || q.mode === 'sniper' || !!q.map?.revealYou, target: q.mode === 'sniper' ? q.sniper.target : null,
+        extras: q.map?.extras, revealExtras: q.map?.revealExtras, lineOptions: q.map?.lineOptions });
       if (q.mode === 'trail') {
         if (reveal) this.trailRevealMap = mr;
         else this.trailQuestionMap = mr;
       }
       if (reveal) {
-        mr.setReveal({ chosen: null, camera: q.camera });
+        mr.setReveal({ chosen: null, camera: isMapMode(q) && !q.map.revealYou ? null : q.camera });
         if (q.mode === 'trail') {
           mr.setViewing({ ...trailFrame(q, q.trail.duration, q.correctLabel, this.model).camera, label: q.correctLabel });
           this.trailRevealMap = mr; this.trailRevealMapTime = q.trail.duration;
@@ -173,7 +177,8 @@ export class ExportComposer {
     const watchFrame = usesSunWatch(q) ? q.mode === 'friend' ? friendFrame
       : sunWatchFrame(q, t, { active: this.animated || !reveal }) : null;
     const sniper = q.mode === 'sniper' ? sniperFrame(q, t, this.layout.scene.w / this.layout.scene.h) : null;
-    const camera = sniper ? sniper.camera : watchFrame ? watchFrame.camera : frame ? frame.camera : friendFrame.camera;
+    const mode = isMapMode(q) ? modeFrame(q, this.model, t, this.layout.scene.w / this.layout.scene.h) : null;
+    const camera = mode ? mode.camera : sniper ? sniper.camera : watchFrame ? watchFrame.camera : frame ? frame.camera : friendFrame.camera;
     const W = this.canvas.width, H = this.canvas.height;
     const duration = this.options.duration;
     ctx.save();
@@ -186,11 +191,11 @@ export class ExportComposer {
     ctx.font = `800 ${L.title.size}px ${FONT}`;
     if ('letterSpacing' in ctx) ctx.letterSpacing = `${Math.round(L.title.size * 0.06)}px`;
     const facingMode = q.mode === 'facing';
-    ctx.fillText(q.mode === 'sniper' ? 'SNIPER · WHICH HOLD?' : q.mode === 'trail' ? q.grid ? 'WHERE DID YOU FINISH?' : 'WHICH TRAIL?' : q.mode === 'friend' ? 'FIND YOUR FRIEND' : facingMode ? 'WHICH WAY?' : q.mode === 'lookalike' ? 'LOOK-ALIKES' : q.mode === 'grid' ? `${q.grid.size} × ${q.grid.size} GRID` : 'WHERE ARE YOU?', W / 2, L.title.y, W - 80);
+    ctx.fillText(isMapMode(q) ? modeTitle(q) : q.mode === 'sniper' ? 'SNIPER · WHICH HOLD?' : q.mode === 'trail' ? q.grid ? 'WHERE DID YOU FINISH?' : 'WHICH TRAIL?' : q.mode === 'friend' ? 'FIND YOUR FRIEND' : facingMode ? 'WHICH WAY?' : q.mode === 'lookalike' ? 'LOOK-ALIKES' : q.mode === 'grid' ? `${q.grid.size} × ${q.grid.size} GRID` : 'WHERE ARE YOU?', W / 2, L.title.y, W - 80);
     if ('letterSpacing' in ctx) ctx.letterSpacing = `${Math.round(L.facing.size * 0.08)}px`;
     ctx.font = `500 ${L.facing.size}px ${FONT}`;
     ctx.fillStyle = '#cfd3d6';
-    const facing = q.mode === 'sniper' ? q.heading.text : q.mode === 'trail' ? q.grid ? 'BUNNY HOP · FIND YOUR FINISH CELL' : 'BUNNY HOP · READ THE MOVING TERRAIN' : facingMode ? 'YOU ARE AT THE MARKED POINT' : headingHidden(q) && !reveal ? 'LOST COMPASS · FIND YOUR CELL' : q.heading.mode === 'exact' ? q.heading.text : `${q.heading.text} ${q.heading.arrow}`;
+    const facing = isMapMode(q) ? modeSubtitle(q) : q.mode === 'sniper' ? q.heading.text : q.mode === 'trail' ? q.grid ? 'BUNNY HOP · FIND YOUR FINISH CELL' : 'BUNNY HOP · READ THE MOVING TERRAIN' : facingMode ? 'YOU ARE AT THE MARKED POINT' : headingHidden(q) && !reveal ? 'LOST COMPASS · FIND YOUR CELL' : q.heading.mode === 'exact' ? q.heading.text : `${q.heading.text} ${q.heading.arrow}`;
     if (!usesSunWatch(q)) ctx.fillText(q.mode === 'friend' ? `${q.friend.observerHidden && !reveal ? 'READ THE TERRAIN' : 'FROM YOU'} · ${facing}` : facing, W / 2, L.facing.y);
     if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
 
@@ -205,13 +210,14 @@ export class ExportComposer {
       personMotion: friendFrame.personMotion,
       solar: watchFrame?.solar, watch: watchFrame?.watch,
       motion: frame ? { ...frame.motion, clockRunning: this.animated } : {}, sunHeading: q.mode === 'trail' ? q.camera.heading : camera.heading,
-      rifle: sniper ? { raise: sniper.raise, time: t } : null });
+      rifle: sniper ? { raise: sniper.raise, time: t } : null, ...(mode ? mode.options : {}) });
     ctx.drawImage(this.glCanvas, S.x, S.y, S.w, S.h);
     ctx.save();
     ctx.beginPath(); ctx.rect(S.x, S.y, S.w, S.h); ctx.clip();
     // The bearing tape would reveal the answer in "Which way?" until the reveal.
     if (sniper) drawSniperOverlay(ctx, q, sniper, { x: S.x, y: S.y, width: S.w, height: S.h });
-    if (!usesSunWatch(q) && this.options.tape && (!headingHidden(q) || reveal) && !(sniper && sniper.raise > 0)) drawCompassTape(null, camera, { exact: q.heading.mode === 'exact', target: { ctx, x: S.x, y: S.y, width: S.w, scale: S.w / 666 } });
+    if (mode) drawModeOverlay(ctx, q, mode, { x: S.x, y: S.y, width: S.w, height: S.h, answered: reveal });
+    if (!usesSunWatch(q) && this.options.tape && (!headingHidden(q) || reveal) && !(sniper && sniper.raise > 0) && q.mode !== 'profile') drawCompassTape(null, camera, { exact: q.heading.mode === 'exact', target: { ctx, x: S.x, y: S.y, width: S.w, scale: S.w / 666 } });
     if (watchFrame) drawRelativeBearing(ctx, relativeBearing(camera.heading, q.camera.heading, watchFrame.relativeTurn), {
       x: S.x, y: S.y, width: S.w, scale: S.w / 666,
     });
@@ -266,7 +272,7 @@ export class ExportComposer {
     // Through the scope the decorative layer would cover the reticle: overview only.
     if (this.easter && !(sniper && sniper.raise > 0)) {
       // Sky objects must still disappear behind the terrain as the lens zooms.
-      if (this.easterFov !== camera.fov || ((usesSunWatch(q) || ['trail', 'friend', 'sniper'].includes(q.mode)) && this.easterCameraKey !== JSON.stringify(camera))) {
+      if (this.easterFov !== camera.fov || ((usesSunWatch(q) || ['trail', 'friend', 'sniper'].includes(q.mode) || isMapMode(q)) && this.easterCameraKey !== JSON.stringify(camera))) {
         this.easter.stage.setSkyline(skylineScreenPoints(camera, this.model, S.w, S.h));
         this.easterFov = camera.fov;
         this.easterCameraKey = JSON.stringify(camera);

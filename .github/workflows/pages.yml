@@ -77,6 +77,10 @@ jobs:
         env:
           CHECK_SITE: _site
         run: node scripts/check-sniper-browser.mjs browser-artifacts
+      - name: Test map-reading modes in Chromium
+        env:
+          CHECK_SITE: _site
+        run: node scripts/check-map-modes-browser.mjs browser-artifacts
       - uses: actions/upload-artifact@v4
         if: always()
         with:

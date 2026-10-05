@@ -24,6 +24,7 @@ const COLORS = {
  */
 export function quizMarkers(quiz) {
   if (quiz.grid || quiz.mode === 'sniper') return [];
+  if (quiz.map?.markers === false) return [];
   if (quiz.mode === 'facing') return [{ label: '', x: quiz.point.x, y: quiz.point.y, correct: true }];
   return quiz.options;
 }
@@ -158,6 +159,16 @@ export class MapRenderer {
       return best;
     }
     let best = null, bd = 22;
+    // Map-reading modes may answer with lines (route choice): pick the nearest one.
+    for (const line of this.data.lineOptions || []) {
+      for (let i = 1; i < line.points.length; i++) {
+        const a = this.toCanvas(line.points[i - 1].x, line.points[i - 1].y), b = this.toCanvas(line.points[i].x, line.points[i].y);
+        const dx = b[0] - a[0], dy = b[1] - a[1], length2 = dx * dx + dy * dy;
+        const t = length2 ? Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy) / length2)) : 0;
+        const d = Math.hypot(px - a[0] - t * dx, py - a[1] - t * dy);
+        if (d < Math.min(bd, 14)) { bd = d; best = line; }
+      }
+    }
     for (const o of this.data.options) {
       const [x, y] = this.toCanvas(o.x, o.y);
       const d = Math.hypot(x - px, y - py);
@@ -251,6 +262,7 @@ export class MapRenderer {
     if (this.data.grid) this.drawGrid();
     if (this.data.trails && !staticOnly) this.drawTrails();
     if (!this.data.trails) this.drawCone();
+    this.drawExtras('lines');
     ctx.restore();
 
     ctx.strokeStyle = COLORS.frame;
@@ -265,8 +277,62 @@ export class MapRenderer {
     if (this.data.grid) { this.drawGridLabels(); this.drawGridTarget(); }
     else if (this.data.trails) { if (!staticOnly) this.drawTrailLabels(); }
     else this.drawMarkers(); // last, so nothing ever hides an answer option
+    this.drawExtras('points');
     if (this.reveal && this.data.target) this.drawTarget();
     if (this.currentObserver()) this.drawObserver();
+  }
+
+  /**
+   * Map-reading modes: `extras` are always drawn, `revealExtras` after answering.
+   * Lines: { type: 'line', points, color, width, dash, label, arrow }.
+   * Points: { type: 'point', x, y, label, shape: 'peak'|'drop'|'flag'|'start'|'finish'|'dot'|'number', color }.
+   */
+  drawExtras(phase) {
+    const items = [...(this.data.extras || []), ...(this.reveal ? this.data.revealExtras || [] : [])];
+    const { ctx } = this;
+    for (const e of items) {
+      if (phase === 'lines' && e.type === 'line') {
+        const pts = e.points.map((p) => this.toCanvas(p.x, p.y));
+        ctx.save();
+        ctx.strokeStyle = e.color || '#ffd666'; ctx.lineWidth = e.width || 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+        ctx.setLineDash(e.dash || []);
+        if (e.halo) { ctx.save(); ctx.strokeStyle = 'rgba(21, 26, 32, .8)'; ctx.lineWidth = (e.width || 2) + 3; ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.stroke(); ctx.restore(); }
+        ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.stroke();
+        ctx.setLineDash([]);
+        if (e.arrow && pts.length > 1) {
+          const [x1, y1] = pts[pts.length - 1], [x0, y0] = pts[pts.length - 2], a = Math.atan2(y1 - y0, x1 - x0);
+          ctx.fillStyle = e.color || '#ffd666'; ctx.beginPath(); ctx.moveTo(x1, y1);
+          ctx.lineTo(x1 - Math.cos(a - 0.45) * 10, y1 - Math.sin(a - 0.45) * 10); ctx.lineTo(x1 - Math.cos(a + 0.45) * 10, y1 - Math.sin(a + 0.45) * 10); ctx.closePath(); ctx.fill();
+        }
+        if (e.label) {
+          const [x, y] = pts[Math.floor(pts.length * (e.labelAt ?? 0.5))] || pts[0];
+          ctx.font = '800 12px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          ctx.lineWidth = 3.5; ctx.strokeStyle = 'rgba(21, 26, 32, .9)'; ctx.strokeText(e.label, x, y - 10);
+          ctx.fillStyle = e.color || '#ffd666'; ctx.fillText(e.label, x, y - 10);
+        }
+        ctx.restore();
+      }
+      if (phase === 'points' && e.type === 'point') {
+        const [x, y] = this.toCanvas(e.x, e.y), c = e.color || '#ffd666';
+        ctx.save();
+        ctx.fillStyle = c; ctx.strokeStyle = COLORS.bg; ctx.lineWidth = 2;
+        ctx.beginPath();
+        if (e.shape === 'peak') { ctx.moveTo(x, y - 9); ctx.lineTo(x + 8, y + 6); ctx.lineTo(x - 8, y + 6); ctx.closePath(); }
+        else if (e.shape === 'drop') { ctx.moveTo(x, y - 11); ctx.quadraticCurveTo(x + 8, y, x, y + 7); ctx.quadraticCurveTo(x - 8, y, x, y - 11); }
+        else if (e.shape === 'start') { ctx.moveTo(x, y - 10); ctx.lineTo(x + 9, y + 6); ctx.lineTo(x - 9, y + 6); ctx.closePath(); ctx.fillStyle = 'rgba(0,0,0,0)'; }
+        else if (e.shape === 'finish') { ctx.arc(x, y, 9, 0, Math.PI * 2); ctx.moveTo(x + 5, y); ctx.arc(x, y, 5, 0, Math.PI * 2); ctx.fillStyle = 'rgba(0,0,0,0)'; }
+        else if (e.shape === 'flag') { ctx.rect(x - 1, y - 12, 2, 12); ctx.moveTo(x + 1, y - 12); ctx.lineTo(x + 10, y - 8.5); ctx.lineTo(x + 1, y - 5); }
+        else ctx.arc(x, y, e.shape === 'number' ? 10 : 4, 0, Math.PI * 2);
+        if (['start', 'finish'].includes(e.shape)) { ctx.strokeStyle = c; ctx.lineWidth = 2.4; ctx.stroke(); }
+        else { ctx.fill(); ctx.stroke(); }
+        if (e.label) {
+          ctx.font = `800 ${e.shape === 'number' ? 12 : 11}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+          if (e.shape === 'number') { ctx.fillStyle = COLORS.bg; ctx.fillText(e.label, x, y + 0.5); }
+          else { const dy = e.shape === 'peak' || e.shape === 'flag' ? -19 : 17; ctx.lineWidth = 3; ctx.strokeStyle = COLORS.bg; ctx.strokeText(e.label, x, y + dy); ctx.fillStyle = c; ctx.fillText(e.label, x, y + dy); }
+        }
+        ctx.restore();
+      }
+    }
   }
 
   /** Sniper answer: the enemy and the line of fire, shown only after answering. */
@@ -604,7 +670,7 @@ export class MapRenderer {
 
   drawCone() {
     const v = this.viewing || (this.reveal && this.reveal.camera ? { ...this.reveal.camera, color: COLORS.coneLine } : this.data.observer);
-    if (!v) return;
+    if (!v || !v.fov) return; // a bare observer point (map-reading modes) has no view wedge
     const { ctx } = this;
     const len = this.data.extent ? this.data.extent.size * 0.8 : 750;
     const a0 = ((v.heading - v.fov / 2) * Math.PI) / 180, a1 = ((v.heading + v.fov / 2) * Math.PI) / 180;

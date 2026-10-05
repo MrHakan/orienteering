@@ -598,7 +598,7 @@ export class TerrainRenderer {
    * environment: optional hd / foliage / nature flags; environmentTime in seconds.
    * Weather is purely visual: it never changes the terrain geometry.
    */
-  render(camera, { weather = {}, environment = {}, time = 0, environmentTime = time, motion = {}, personMotion = {}, sunHeading = camera.heading, solar = null, watch = null, rifle = null } = {}) {
+  render(camera, { weather = {}, environment = {}, time = 0, environmentTime = time, motion = {}, personMotion = {}, sunHeading = camera.heading, solar = null, watch = null, rifle = null, fogDistance = 0 } = {}) {
     if (!this.model) return;
     const textureMode = normaliseTextureMode(environment.texture);
     if (textureMode !== this.textureMode) {
@@ -629,6 +629,7 @@ export class TerrainRenderer {
     horizon = mixc(horizon, grey, overcast); zenith = mixc(zenith, [0.38, 0.42, 0.46], overcast);
     if (fog > 0) { horizon = mixc(horizon, [0.66, 0.69, 0.71], fog); zenith = mixc(zenith, [0.55, 0.59, 0.62], fog * 0.8); }
     if (dusk) { horizon = mixc(horizon, [.78, .53, .34], dusk * .8); zenith = mixc(zenith, [.29, .34, .47], dusk); }
+    if (fogDistance) { horizon = [0.68, 0.7, 0.71]; zenith = [0.62, 0.65, 0.67]; } // milky whiteout
     if (weather.storm) { horizon = mixc(horizon, [.31, .36, .4], .6); zenith = mixc(zenith, [.23, .28, .33], .65); }
 
     gl.disable(gl.DEPTH_TEST);
@@ -671,7 +672,8 @@ export class TerrainRenderer {
     gl.uniform2fv(gl.getUniformLocation(p, 'uHeightRange'), [m.min, m.max]);
     gl.uniform3fv(gl.getUniformLocation(p, 'uFogColor'), horizon);
     // Fog shortens visibility to ~1.5 km but keeps the near and middle distance readable.
-    const fogDensity = 1 / Math.max(1400, 5200 - 3700 * fog - 1200 * wet);
+    // fogDistance (fog navigation) forces a whiteout: ~63% fog at that range, nearly opaque at twice it.
+    const fogDensity = fogDistance ? 1 / fogDistance : 1 / Math.max(1400, 5200 - 3700 * fog - 1200 * wet);
     gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), fogDensity);
     gl.uniform1f(gl.getUniformLocation(p, 'uTime'), environmentTime);
     gl.uniform1f(gl.getUniformLocation(p, 'uCloud'), Math.max(cloud, wet * 0.6));

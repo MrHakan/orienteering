@@ -40,7 +40,20 @@ export async function generate(opts) {
   return quiz;
 }
 
+const MAP_MODE_LOADERS = {
+  resection: () => import('./resectionQuiz.js').then((m) => m.generateResectionQuiz),
+  route: () => import('./routeQuiz.js').then((m) => m.generateRouteQuiz),
+  visibility: () => import('./visibilityQuiz.js').then((m) => m.generateVisibilityQuiz),
+  profile: () => import('./profileQuiz.js').then((m) => m.generateProfileQuiz),
+  drainage: () => import('./drainageQuiz.js').then((m) => m.generateDrainageQuiz),
+  fog: () => import('./fogQuiz.js').then((m) => m.generateFogQuiz),
+};
+
 async function generateMode(opts) {
+  if (MAP_MODE_LOADERS[opts.mode]) {
+    const generator = await MAP_MODE_LOADERS[opts.mode]();
+    return generator({ ...opts, difficulty: opts.difficulty === 'sun-watch' ? 'medium' : opts.difficulty });
+  }
   if (opts.mode === 'sniper') {
     const { generateSniperQuiz } = await import('./sniper.js');
     return generateSniperQuiz({ ...opts, difficulty: opts.difficulty === 'sun-watch' ? 'medium' : opts.difficulty });
