@@ -88,6 +88,16 @@ Question: which bullet-drop mark puts the round on the enemy's **head**? Options
 - **Optional crosswind call** (Wind → Crosswind call, `wind=1` in links): a steady wind is shown as speed and from-direction (the grass and rain drift with it), with the rifle's wind card — windage hold in mil per 1 m/s of full crosswind for 300–1000 m. The drift is Didion's relation (crosswind × (time of flight − range ÷ muzzle velocity)) on the simulated trajectory; the wind is drawn so the exact hold falls on a 0.5 mil stadia tick. Options pair scope marks with windage holds — including holding with the wind instead of into it — and exactly one pair hits the head. Plain quizzes are unchanged when the option is off.
 - **Scope**: the circle spans ±12 mil; horizontal stadia are numbered 2/4/6/8 mil, vertical marks 2–10 (×100 m) with wind wings. The live view and exports share one sampler (`sniperFrame`), so the 15 s Reels video is exactly the 5 s overview + 10 s scope sequence. After answering, the map shows YOU, the ENEMY and the line of fire with its length, and the explanation lists each mark's impact.
 
+## Your own terrain
+
+**Your terrain** (side panel) loads real ground for every mode (`src/engine/demImport.js`):
+
+- **ESRI ASCII grid** (`.asc`) — what QGIS, GDAL (`gdal_translate -of AAIGrid`) and most DEM portals export; geographic grids are converted from degrees to metres.
+- **SRTM tile** (`.hgt`, 1″ or 3″) — the latitude is read from the file name (`N37E032.hgt`).
+- **Greyscale heightmap image** — with the image width in metres and the lowest / highest elevation.
+
+Voids are filled from their neighbours, the centre 2 km (or the whole area when smaller, at least 500 m) is resampled to the engine's 257 × 257 grid, and the World selector gains **Uploaded map**. Real data skips the generator's spike/slope limits but still needs clean contours and some relief. The terrain stays on this device (local storage); shared links fall back to the Classic world for others.
+
 ## Sound and vibration
 
 All sound is synthesised with WebAudio (`src/audio/`) — no audio files. Wind and rain beds follow the scene's weather (and the sniper's crosswind), storms add thunder, the sniper scope clicks as the rifle comes up and the shot echoes down the valley; answers get a chime or a low buzz and a short vibration on phones. **Sound & vibration** in the Map panel mutes everything; audio starts on the first tap or key (browsers block autoplay).

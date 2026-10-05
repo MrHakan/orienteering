@@ -104,6 +104,9 @@ body {
   width: 58px; height: 58px; border-radius: 50%; border: 2px solid #e9e4d8; background: transparent; color: #e9e4d8;
   font: 800 20px system-ui, sans-serif; cursor: pointer; transition: transform 0.08s, background 0.15s;
 }
+.pair { display: flex; gap: 6px; }
+.pair input { width: 50%; min-width: 0; }
+#dem-file { max-width: 100%; margin: 6px 0; color: #cfd3d6; font-size: 12px; }
 .play-banner { margin: 0 0 8px; padding: 6px 12px; border-radius: 8px; background: rgba(255, 214, 102, .1); border: 1px solid rgba(255, 214, 102, .35);
   color: #ffd666; font-weight: 700; font-size: 13px; letter-spacing: .03em; text-align: center; }
 .play-extra { margin: 10px auto; padding: 10px 12px; max-width: 520px; border-radius: 10px; background: rgba(255, 255, 255, .04); border: 1px solid rgba(233, 228, 216, .15); text-align: center; }

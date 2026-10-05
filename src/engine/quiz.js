@@ -22,7 +22,21 @@ export const HEADING_MODES = ['cardinal', 'intercardinal', 'exact'];
  * Terrain for (seed, difficulty, attempt). Shared by every quiz mode, so one
  * seed gives the same landscape in "Where are you?" and "Which way?".
  */
+/** An imported real terrain (see demImport.js), used when the world is 'custom'. */
+let customTerrain = null;
+export function setCustomTerrain(terrain) { customTerrain = terrain || null; }
+
 export function buildTerrain({ seed, difficulty, attempt, preset, seeds, size = DEFAULT_SIZE, n = DEFAULT_RES, world = 'classic' }) {
+  if (world === 'custom') {
+    if (!customTerrain) throw new Error('No uploaded terrain is loaded. Upload a map first.');
+    const t = customTerrain;
+    const model = new TerrainModel({ ...t, heights: Float32Array.from(t.heights), seed: `${seed}#${difficulty}#custom` });
+    const interval = model.chooseContourInterval();
+    // Real data is not held to the generator's spike/slope limits; it only needs relief and clean contours.
+    const check = QuizValidator.validateTerrain(model, model.getContours(interval));
+    const issues = check.issues.filter((i) => /broken contour|relief too low/.test(i) && !(/relief too low/.test(i) && model.max - model.min >= 15));
+    return { model, interval, terrainCheck: { ...check, ok: issues.length === 0, issues } };
+  }
   // Classic keeps its original streams and model seed; other worlds get their own.
   const tag = world === 'classic' ? [] : [world];
   const terrain = TerrainGenerator.generate(seeds.stream('terrain', attempt, ...tag), preset.terrain, { size, n, world });
@@ -34,8 +48,10 @@ export function buildTerrain({ seed, difficulty, attempt, preset, seeds, size = 
 
 /** Dispatch on quiz mode; existing location quizzes retain their defaults. */
 export async function generate(opts) {
-  const worldChoice = normaliseWorld(opts.world);
-  const quiz = await generateMode({ ...opts, world: resolveWorld(worldChoice, opts.seed) });
+  if (opts.customTerrain) setCustomTerrain(opts.customTerrain);
+  const custom = opts.world === 'custom';
+  const worldChoice = custom ? 'custom' : normaliseWorld(opts.world);
+  const quiz = await generateMode({ ...opts, customTerrain: undefined, world: custom ? 'custom' : resolveWorld(worldChoice, opts.seed) });
   quiz.worldChoice = worldChoice;
   return quiz;
 }

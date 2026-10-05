@@ -19,6 +19,7 @@ import { usesSunWatch, supportsSunWatch, sunWatchFrame, SUN_WATCH_DURATION } fro
 import { sniperFrame, sniperWeather, SNIPER_DURATION, SNIPER_TIMING } from '../engine/sniper.js';
 import { drawSniperOverlay } from '../render/sniperOverlay.js';
 import { LiveAudio } from '../audio/liveAudio.js';
+import { parseAsc, parseHgt, parseHeightmap, gridToTerrain, packTerrain, unpackTerrain } from '../engine/demImport.js';
 import { dateKey, isDateKey, dailyPlan, dailyStreak, dailyShareText, MODE_NAMES, encodeChallenge, decodeChallenge, compareChallenge,
   RUN_LENGTH, runPlan, runPoints, runShareText } from './play.js';
 import { MAP_MODES, isMapMode } from '../engine/mapModes.js';
@@ -280,14 +281,14 @@ function getWorker() {
   return worker;
 }
 
-function requestQuiz({ seed, world, sniperWind, difficulty, variant = 0, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning }) {
+function requestQuiz({ seed, world, sniperWind, customTerrain, difficulty, variant = 0, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning }) {
   const id = ++state.requestId;
   return new Promise((resolve, reject) => {
     const w = getWorker();
     if (!w) {
       // Fallback: generate on the main thread.
       import('../engine/quiz.js').then(({ generate }) => {
-        setTimeout(() => generate({ seed, world, sniperWind, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning }).then(resolve, reject), 30);
+        setTimeout(() => generate({ seed, world, sniperWind, customTerrain, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning }).then(resolve, reject), 30);
       }, reject);
       return;
     }
@@ -299,7 +300,7 @@ function requestQuiz({ seed, world, sniperWind, difficulty, variant = 0, mode, h
       else reject(new Error(e.data.message));
     };
     w.addEventListener('message', onMessage);
-    w.postMessage({ id, seed, world, sniperWind, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning });
+    w.postMessage({ id, seed, world, sniperWind, customTerrain, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, tuning });
   });
 }
 
@@ -310,7 +311,7 @@ function requestQuiz({ seed, world, sniperWind, difficulty, variant = 0, mode, h
 async function load(req) {
   const r = {
     seed: req.seed || SeedManager.randomSeed(),
-    world: normaliseWorld(req.world ?? $('world').value),
+    world: (req.world ?? $('world').value) === 'custom' && state.customTerrain ? 'custom' : normaliseWorld(req.world ?? $('world').value),
     sniperWind: (req.sniperWind ?? $('sniper-wind').value === 'on') === true,
     difficulty: req.difficulty || $('difficulty').value,
     variant: req.variant || 0,
@@ -358,7 +359,8 @@ async function load(req) {
   const myId = state.requestId + 1;
   let quiz;
   try {
-    quiz = await requestQuiz({ ...r, headingMode: r.headingMode === 'auto' ? null : r.headingMode });
+    quiz = await requestQuiz({ ...r, headingMode: r.headingMode === 'auto' ? null : r.headingMode,
+      customTerrain: r.world === 'custom' ? { ...state.customTerrain, heights: Float32Array.from(state.customTerrain.heights) } : null });
   } catch (err) {
     if (myId !== state.requestId) return;
     console.error(err);
@@ -492,7 +494,7 @@ function show(quiz) {
     : 'You are at one of the marked points, facing the direction shown. Which one?';
   $('prompt').classList.toggle('grid-remark', grid);
   (grid ? document.querySelector('.map-wrap') : document.querySelector('.answer-row')).before($('prompt'));
-  $('credit').textContent = `seed ${quiz.seed}${quiz.variant ? ` · positions #${quiz.variant}` : ''} · ${DIFFICULTIES[quiz.difficulty].label.toLowerCase()}${t.world && t.world !== 'classic' ? ` · ${worldLabel(t.world).toLowerCase()} world` : ''} · ${Math.round(t.size / 1000 * 10) / 10} km × ${Math.round(t.size / 1000 * 10) / 10} km`;
+  $('credit').textContent = `seed ${quiz.seed}${quiz.variant ? ` · positions #${quiz.variant}` : ''} · ${DIFFICULTIES[quiz.difficulty].label.toLowerCase()}${t.world === 'custom' ? ' · uploaded map' : t.world && t.world !== 'classic' ? ` · ${worldLabel(t.world).toLowerCase()} world` : ''} · ${Math.round(t.size / 1000 * 10) / 10} km × ${Math.round(t.size / 1000 * 10) / 10} km`;
   $('viewing-badge').hidden = true;
   $('result').hidden = true;
   $('prompt').hidden = false;
@@ -1517,7 +1519,7 @@ function parseHash() {
   const sc = Math.max(0, Math.floor(+p.get('s') || 0));
   const h = p.get('h');
   return {
-    seed: p.get('seed'), world: normaliseWorld(p.get('w')), sniperWind: p.get('wind') === '1', difficulty: d && DIFFICULTIES[d] ? d : null, variant: v, scramble: sc,
+    seed: p.get('seed'), world: p.get('w') === 'custom' && state.customTerrain ? 'custom' : normaliseWorld(p.get('w')), sniperWind: p.get('wind') === '1', difficulty: d && DIFFICULTIES[d] ? d : null, variant: v, scramble: sc,
     mode: ['facing', 'lookalike', 'grid', 'friend', 'trail', 'sniper', ...Object.keys(MAP_MODES)].includes(p.get('m')) ? p.get('m') : 'where-am-i',
     gridSize: normaliseGridSize(p.get('g')),
     trailAnswer: normaliseTrailAnswer(p.get('ta')),
@@ -1650,7 +1652,54 @@ $('friend-answer').value = normaliseFriendAnswer(store.get('otq.friendAnswer', '
 $('friend-answer').addEventListener('change', () => store.set('otq.friendAnswer', $('friend-answer').value));
 $('friend-skin').value = normaliseFriendSkin(store.get('otq.friendSkin', 'classic'));
 $('world').innerHTML = WORLD_CHOICES.map((id) => `<option value="${id}" title="${id === 'auto' ? 'A world type chosen from the seed' : WORLDS[id].description}">${id === 'auto' ? 'Auto — by seed' : worldLabel(id)}</option>`).join('');
-$('world').value = normaliseWorld(store.get('otq.world', 'classic'));
+// ---------------------------------------------------------------- uploaded terrain
+
+function setCustomTerrain(terrain) {
+  state.customTerrain = terrain;
+  $('world').querySelector('[value="custom"]')?.remove();
+  if (terrain) $('world').insertAdjacentHTML('beforeend', `<option value="custom">Uploaded map</option>`);
+  $('dem-play').hidden = $('dem-remove').hidden = !terrain;
+  $('dem-status').textContent = terrain
+    ? `${terrain.meta.name} · ${terrain.meta.source} · ${(terrain.size / 1000).toFixed(1)} km × ${(terrain.size / 1000).toFixed(1)} km · ${Math.round(terrain.meta.min)}–${Math.round(terrain.meta.max)} m. Stays on this device; shared links fall back to the Classic world.`
+    : 'Your terrain stays on this device; shared links fall back to the Classic world.';
+}
+try { const saved = store.get('otq.customTerrain', null); if (saved) setCustomTerrain(unpackTerrain(saved)); } catch { store.set('otq.customTerrain', null); }
+
+async function readTerrainFile(file) {
+  const name = file.name.replace(/\.[^.]+$/, '');
+  if (/\.hgt$/i.test(file.name)) return gridToTerrain(parseHgt(await file.arrayBuffer(), file.name), { name });
+  if (/\.(asc|txt)$/i.test(file.name)) return gridToTerrain(parseAsc(await file.text()), { name });
+  const bitmap = await createImageBitmap(file), canvas = document.createElement('canvas');
+  canvas.width = bitmap.width; canvas.height = bitmap.height;
+  const ctx = canvas.getContext('2d'); ctx.drawImage(bitmap, 0, 0);
+  return gridToTerrain(parseHeightmap(ctx.getImageData(0, 0, bitmap.width, bitmap.height),
+    { metresWide: Number($('dem-width').value) || 2000, minHeight: Number($('dem-min').value) || 0, maxHeight: Number($('dem-max').value) || 200 }), { name });
+}
+
+$('dem-file').addEventListener('change', async () => {
+  const file = $('dem-file').files[0];
+  if (!file) return;
+  const image = !/\.(hgt|asc|txt)$/i.test(file.name);
+  $('dem-image-options').hidden = !image;
+  $('dem-status').textContent = `Reading ${file.name}…`;
+  try {
+    const terrain = await readTerrainFile(file);
+    setCustomTerrain(terrain);
+    store.set('otq.customTerrain', packTerrain(terrain));
+    $('world').value = 'custom'; store.set('otq.world', 'custom');
+    load({ seed: $('seed').value.trim() || SeedManager.randomSeed(), world: 'custom' });
+  } catch (err) {
+    $('dem-status').textContent = `Could not use ${file.name}: ${err.message}`;
+  }
+});
+for (const id of ['dem-width', 'dem-min', 'dem-max']) $(id).addEventListener('change', () => { if ($('dem-file').files[0]) $('dem-file').dispatchEvent(new Event('change')); });
+$('dem-play').addEventListener('click', () => { $('world').value = 'custom'; load({ seed: SeedManager.randomSeed(), world: 'custom' }); });
+$('dem-remove').addEventListener('click', () => {
+  setCustomTerrain(null); store.set('otq.customTerrain', null);
+  if ($('world').value === 'custom' || state.quiz?.terrain.world === 'custom') { $('world').value = 'classic'; store.set('otq.world', 'classic'); load({ seed: SeedManager.randomSeed(), world: 'classic' }); }
+});
+
+$('world').value = store.get('otq.world', 'classic') === 'custom' && state.customTerrain ? 'custom' : normaliseWorld(store.get('otq.world', 'classic'));
 $('sniper-wind').value = store.get('otq.sniperWind', 'off') === 'on' ? 'on' : 'off';
 const initial = parseHash();
 adoptLinkTuning(initial.tuning);
