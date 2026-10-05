@@ -40,7 +40,7 @@ try {
   assert.equal(await page.locator('#direction-tools').isHidden(), false);
   assert.equal(await page.locator('#scramble').isHidden(), true);
   assert.equal(await page.locator('#heading-field').isHidden(), true);
-  assert.match(await page.locator('#facing-text').textContent(), new RegExp(`PRONE · FACING ${String(Math.round(q.camera.heading)).padStart(3, '0')}° · POSITION UNKNOWN`));
+  assert.match(await page.locator('#facing-text').textContent(), new RegExp(`^FACING ${String(Math.round(q.sniper.bearing) % 360).padStart(3, '0')}°$`));
   assert.deepEqual(await page.locator('#answers .answer').evaluateAll(b => b.map(x => x.dataset.label)), q.options.map(o => o.label));
   // Overview: rifle and enemy spot, no scope housing.
   await page.locator('#direction-play').click();

@@ -455,7 +455,7 @@ function show(quiz) {
   const grid = usesGrid(quiz), friendGrid = quiz.mode === 'friend' && grid;
   $('quiz-title').textContent = quiz.mode === 'sniper' ? 'SNIPER · WHICH HOLD?' : quiz.mode === 'trail' ? grid ? 'WHERE DID YOU FINISH?' : 'WHICH TRAIL DID YOU FOLLOW?' : quiz.mode === 'friend' ? 'WHERE IS YOUR FRIEND?' : facing ? 'WHICH WAY ARE YOU FACING?' : lookalike ? 'LOOK-ALIKES' : grid ? `${quiz.grid.size} × ${quiz.grid.size} GRID` : 'WHERE ARE YOU?';
   $('quiz-title').classList.toggle('long', facing || ['friend', 'trail', 'sniper'].includes(quiz.mode));
-  $('facing-text').textContent = quiz.mode === 'sniper' ? `PRONE · ${quiz.heading.text} · POSITION UNKNOWN` : quiz.mode === 'trail' ? grid ? 'BUNNY HOP · FIND YOUR FINISH CELL' : 'BUNNY HOP · READ THE MOVING TERRAIN' : facing ? 'YOU ARE AT THE MARKED POINT' : headingHidden(quiz) ? 'LOST COMPASS · FIND YOUR CELL' : quiz.heading.text;
+  $('facing-text').textContent = quiz.mode === 'sniper' ? quiz.heading.text : quiz.mode === 'trail' ? grid ? 'BUNNY HOP · FIND YOUR FINISH CELL' : 'BUNNY HOP · READ THE MOVING TERRAIN' : facing ? 'YOU ARE AT THE MARKED POINT' : headingHidden(quiz) ? 'LOST COMPASS · FIND YOUR CELL' : quiz.heading.text;
   $('facing-arrow').textContent = quiz.mode === 'trail' || quiz.mode === 'sniper' || headingHidden(quiz) || quiz.heading.mode === 'exact' ? '' : quiz.heading.arrow;
   $('facing-text').closest('.facing').hidden = usesSunWatch(quiz);
   document.querySelector('.card').classList.toggle('sun-watch', usesSunWatch(quiz));

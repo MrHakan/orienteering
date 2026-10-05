@@ -171,10 +171,11 @@ function perspective(fovY, aspect, near, far) {
 export function rifleModelMatrix(aspect, raise = 0, time = 0) {
   const e = raise * raise * (3 - 2 * raise);
   const bob = Math.sin(time * Math.PI * 0.5) * 0.004, sway = Math.sin(time * 0.9) * 0.002;
-  // Lower right, pointing into the scene slightly left of centre; wider screens move it right.
+  // Lower right, pointing straight ahead; wider screens move it right.
   const origin = [0.16 + 0.05 * Math.max(0, aspect - 1.2) + 0.2 * e + sway, -0.165 + bob - 0.9 * e, -0.6 + 0.1 * e];
-  const f = norm([-0.17 - 0.25 * e, 0.07 - 0.25 * e, -1]);
-  const roll = (-4 - 18 * e) * Math.PI / 180;
+  // Barrel parallel to the line of sight: it converges on the target at the centre of the view.
+  const f = norm([-0.25 * e, 0.03 - 0.25 * e, -1]);
+  const roll = (-2 - 18 * e) * Math.PI / 180;
   let up = norm(sub([0, 1, 0], mul(f, f[1])));
   let right = norm(cross(f, up));
   up = add(mul(up, Math.cos(roll)), mul(right, Math.sin(roll)));

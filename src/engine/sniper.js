@@ -276,6 +276,8 @@ export function generateSniperQuiz({ seed, world = 'classic', difficulty = 'medi
           const off = (o) => Math.hypot(o.miss, o.lateral);
           if (off(options.find(o => o.correct)) > HEAD_RADIUS - 0.01 || options.some(o => !o.correct && off(o) < 0.18)) continue;
         }
+        // The given heading points straight at the enemy; the view is pitched to keep him in frame.
+        camera.heading = +bearing.toFixed(3);
         camera.pitch = +clamp(angle * 0.6 - 1, -14, 8).toFixed(2);
         const confidence = saturate(0.6 + 0.25 * Math.min(1, (Math.abs(second.miss) - Math.abs(best.miss)) / 2) + 0.15 * vp.quality.total);
         if (confidence < base.minConfidence) continue;
