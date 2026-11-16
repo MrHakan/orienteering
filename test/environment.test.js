@@ -221,3 +221,26 @@ test('HD lighting height texture preserves elevations and leaves geometry unchan
   }
   assert.deepEqual(heights, before);
 });
+
+test('haze distance and clue visibility follow the weather and match the terrain fog curve', async () => {
+  const { hazeDistance, visibilityFactor } = await import('../src/render/environment.js');
+  const clear = weatherParams({ condition: 'clear' }), fog = weatherParams({ condition: 'fog' }), storm = weatherParams({ condition: 'storm' });
+  assert.equal(hazeDistance(clear), 5200);
+  assert.ok(hazeDistance(fog) < hazeDistance(weatherParams({ condition: 'overcast' })));
+  assert.ok(hazeDistance(storm) >= 1400);
+  for (const w of [clear, fog, storm]) {
+    assert.equal(visibilityFactor(w, 0), 0);
+    assert.ok(visibilityFactor(w, 500) < visibilityFactor(w, 2000));
+    assert.ok(Math.abs(visibilityFactor(w, hazeDistance(w)) - (1 - Math.exp(-1))) < 1e-9);
+  }
+  // A 1.2 km skyline clue stays clearly visible on a clear day and fades more in fog (most fog is valley mist).
+  assert.ok(visibilityFactor(clear, 1200) < .15);
+  assert.ok(visibilityFactor(fog, 1200) > visibilityFactor(clear, 1200) * 1.5);
+});
+
+test('closed-deck conditions set a stratus deck; broken-cloud ones do not', () => {
+  for (const id of ['overcast', 'drizzle', 'rain', 'storm', 'snow']) assert.ok(weatherParams({ condition: id }).deck > .5, id);
+  for (const id of ['clear', 'clouds', 'sunset']) assert.equal(weatherParams({ condition: id }).deck, 0, id);
+  assert.equal(weatherParams({ condition: 'fog' }).mist, 1);
+  assert.ok(weatherParams({ condition: 'storm' }).deckTone < weatherParams({ condition: 'overcast' }).deckTone);
+});

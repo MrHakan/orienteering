@@ -29,7 +29,7 @@ One-time setup: **Settings → Pages → Build and deployment → Source: GitHub
 
 - **Formats:** Reels/Story 9:16 (1080×1920) and Post 4:5 (1080×1350).
 - **Question image / Answer image (PNG):** for a carousel post, or a question plus answer pair.
-- **15 s video:** animated weather, any combination of **wind** (bands of grass sweeping downwind, faster clouds), **rain** (falling streaks, wet overcast light), **clouds** (a moving cloud deck and cloud shadows drifting over the terrain) and **fog** (visibility down to ~1.5 km). A countdown bar runs under the scene; optionally the last 3 s reveal the answer and the view wedge on the map.
+- **15 s video:** animated weather. **Passing clouds** are rounded cumulus lit from the sun's side, with their shadows drifting over the terrain; **overcast**, **drizzle**, **rain**, **storm** and **snow** close the sky with a stratus deck (soft, shadowless light; darker rolls and rain curtains in rain). Rain falls in four depth layers that lean with the wind and wets the ground, snow lies on gentle slopes while steep ones stay bare, **morning mist** pools in the valleys and leaves ridges and the skyline sharp, and **wind** sweeps bands through the grass. `hazeDistance()` / `visibilityFactor()` in `src/render/environment.js` give the haze the terrain shader uses, so tools can check that a clue stays visible. A countdown bar runs under the scene; optionally the last 3 s reveal the answer and the view wedge on the map.
 - **Frame:** handle/footer text, caption ("You are at A, B or C, facing north."), bearing tape.
 
 Weather is purely visual and never changes the terrain. Position puzzles keep their fixed viewpoint, friend videos follow the zoom sequence, and Bunny-hop trails follows the same terrain-selected run as the page.
