@@ -6,7 +6,7 @@ import { personVertices } from './personMesh.js';
 import { RifleViewModel } from './rifleViewModel.js';
 import { KnifeViewModel } from './knifeViewModel.js';
 import { FriendSprite } from './friendSprite.js';
-import { windGust, densityProfile } from './environment.js';
+import { windGust, densityProfile, hazeDistance } from './environment.js';
 import { EnvironmentTextures, terrainHeightPixels, TERRAIN_MATERIAL_GLSL } from './terrainDetail.js';
 import { buildNatureMeshes, buildGroundCover, NATURE_STRIDE, NATURE_VERT, NATURE_FRAG } from './natureMesh.js';
 import { WatchViewModel } from './watchViewModel.js';
@@ -68,6 +68,7 @@ uniform vec2 uWind;     // wind vector, m/s (east, north)
 uniform vec2 uCloudWind;
 uniform float uWet;     // 0..1 rain darkening
 uniform float uHD, uSnow, uDusk, uGust;
+uniform float uDeck, uMist; // closed cloud deck (flat light), valley mist
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p) {
@@ -101,7 +102,12 @@ void main() {
               + (vnoise(ground / 75.0) - 0.5) * 0.25;
     col *= 1.0 + tex;
   }
-  col = mix(col, uHD > .5 ? pow(vec3(.78, .83, .83), vec3(2.2)) : vec3(.78, .83, .83), uSnow * smoothstep(.35, .92, n.y) * .72);
+  // Snow lies on gentle ground; steep slopes and some tussocks stay bare.
+  float snowCover = uSnow * smoothstep(.5, .9, n.y + (vnoise(vec2(vWorld.x, -vWorld.z) / 13.0) - .5) * .32);
+  vec3 snowCol = vec3(.74, .78, .84); // leaves headroom so the light still models the slopes
+  col = mix(col, uHD > .5 ? pow(snowCol, vec3(2.2)) : snowCol, clamp(snowCover * 1.15, 0.0, .96));
+  // Under a closed deck colours lose some saturation.
+  col = mix(col, vec3(dot(col, vec3(.299, .587, .114))), .16 * uDeck * (1.0 - snowCover));
 
   // Wind: bands of bent grass sweeping downwind.
   float windSpeed = length(uWind);
@@ -121,13 +127,14 @@ void main() {
   if (uCloud > 0.0) {
     vec2 cp = (vec2(vWorld.x, -vWorld.z) - uCloudWind * uTime * 6.0) / 520.0;
     float c = vnoise(cp) * 0.6 + vnoise(cp * 2.3) * 0.3 + vnoise(cp * 5.1) * 0.1;
-    shadow = smoothstep(0.62 - 0.35 * uCloud, 0.8 - 0.3 * uCloud, c) * uCloud;
+    shadow = smoothstep(0.62 - 0.35 * uCloud, 0.8 - 0.3 * uCloud, c) * uCloud * (1.0 - uDeck);
   }
-  float sun = 0.95 * (1.0 - 0.35 * uWet) * (1.0 - 0.6 * shadow);
-  vec3 lit = col * ((0.42 + 0.12 * uWet) * hemi + sun * diff);
+  // A closed deck hides the sun: soft, nearly shadowless light from the whole sky.
+  float sun = 0.95 * (1.0 - 0.35 * uWet) * (1.0 - 0.6 * shadow) * (1.0 - 0.82 * uDeck * (1.0 - .45 * uSnow));
+  vec3 lit = col * ((0.42 + 0.12 * uWet + 0.34 * uDeck) * hemi + sun * diff);
   if (uHD > .5) {
     float visibility = terrainSunVisibility(vWorld, uSunDir);
-    vec3 skyLight = vec3(.32, .39, .47) * (.78 + .22 * lightNormal.y) * mix(.62, 1.0, material.ao);
+    vec3 skyLight = mix(vec3(.32, .39, .47), vec3(.50, .53, .56), uDeck) * (.78 + .22 * lightNormal.y) * mix(.62, 1.0, material.ao);
     vec3 direct = mix(vec3(1.10, 1.01, .87), vec3(1.25, .76, .44), uDusk) * sun * diff * visibility;
     vec3 halfVector = normalize(uSunDir + normalize(uEye - vWorld));
     float rough = clamp(material.roughness * (1.0 - .32 * uWet), .18, 1.0);
@@ -136,8 +143,17 @@ void main() {
     lit = pow(lit / (vec3(1.0) + lit * .38), vec3(1.0 / 2.2));
   } else lit *= mix(vec3(1.0), vec3(1.14, .9, .71), uDusk);
 
+  // Wet ground reflects the sky at grazing angles.
+  float graze = pow(1.0 - max(dot(n, normalize(uEye - vWorld)), 0.0), 4.0);
+  lit = mix(lit, uFogColor, graze * uWet * .28);
   float fog = 1.0 - exp(-pow(d * uFogDensity, 1.35));
-  gl_FragColor = vec4(mix(lit, uFogColor, clamp(fog, 0.0, 1.0)), 1.0);
+  vec3 outCol = mix(lit, uFogColor, clamp(fog, 0.0, 1.0));
+  // Valley mist: pools in low ground and thins with height, so ridges and the skyline stay sharp.
+  float above = max(0.0, vWorld.y - uHeightRange.x);
+  float mistDepth = 8.0 + .45 * (uHeightRange.y - uHeightRange.x);
+  float mist = uMist * (exp(-above / mistDepth) * .9 + .12) * (1.0 - exp(-d / 260.0));
+  outCol = mix(outCol, mix(uFogColor, vec3(.84, .86, .87), .5), clamp(mist, 0.0, .88));
+  gl_FragColor = vec4(outCol, 1.0);
 }`;
 
 const SKY_VERT = `
@@ -161,6 +177,8 @@ uniform float uWet;
 uniform float uNature, uBirdHeading;
 uniform float uSolar;
 uniform vec3 uSolarSun;
+uniform vec3 uSunDir;                       // world (x east, y up, z = -north)
+uniform float uDeck, uDeckTone, uDusk, uFog, uStorm;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 float vnoise(vec2 p) {
@@ -173,6 +191,11 @@ float fbm(vec2 p) {
   for (int i = 0; i < 5; i++) { s += a * vnoise(p); p *= 2.03; a *= 0.5; }
   return s;
 }
+float fbm4(vec2 p) {
+  float s = 0.0, a = 0.5;
+  for (int i = 0; i < 4; i++) { s += a * vnoise(p); p *= 2.07; a *= 0.5; }
+  return s;
+}
 
 void main() {
   vec3 fwd = vec3(sin(uHeading) * cos(uPitch), sin(uPitch), -cos(uHeading) * cos(uPitch));
@@ -182,17 +205,48 @@ void main() {
   float elev = uPitch + atan(vNdc.y * uTanHalfV);
   if (uSolar > .5) elev = asin(clamp(ray.y, -1.0, 1.0));
   float t = smoothstep(-0.02, 0.6, elev);
-  vec3 c = mix(uHorizon, uZenith, pow(t, 0.8));
+  vec3 c = mix(uHorizon, uZenith, pow(t, 0.65));
+  vec3 sunDir = normalize(uSunDir);
+  float sunDot = max(dot(ray, sunDir), 0.0);
+  vec3 sunCol = mix(vec3(1.0, .96, .88), vec3(1.0, .62, .32), uDusk);
+  float open = 1.0 - uDeck;
+  // Forward scattering towards the sun, and a pale band of haze just above the horizon.
+  c += sunCol * (pow(sunDot, 3.0) * (.08 + .14 * uDusk) + pow(sunDot, 24.0) * .16) * open;
+  c = mix(c, mix(uHorizon, vec3(.86, .88, .9), .3 * open), exp(-max(elev, 0.0) * 16.0) * .45);
+  float az = uHeading + atan(vNdc.x * uTanHalfH);
+  vec2 dir = vec2(sin(az), cos(az));
+  float dist = 1.0 / max(sin(max(elev, 0.0)), 0.025);   // distance along the cloud layer, in deck heights
+  vec2 drift = uWind * uTime * 0.012;
+  float farFade = exp(-dist * 0.035);
   if (uCloud > 0.0 && elev > 0.0) {
-    // Project the view ray onto a cloud deck and scroll it with the wind.
-    float az = uHeading + atan(vNdc.x * uTanHalfH);
-    vec2 dir = vec2(sin(az), cos(az));
-    float dist = 1.0 / max(sin(elev), 0.03);
-    vec2 p = dir * dist * 0.9 - uWind * uTime * 0.012;
-    float n = fbm(p);
-    float cover = smoothstep(0.62 - 0.4 * uCloud, 0.9 - 0.3 * uCloud, n);
-    vec3 cloudCol = mix(vec3(0.86, 0.87, 0.88), vec3(0.52, 0.55, 0.58), uWet * 0.8 + 0.25 * (1.0 - n));
-    c = mix(c, cloudCol, cover * smoothstep(0.0, 0.08, elev) * 0.95);
+    // Cumulus: domain-warped noise gives rounded, clumped shapes instead of streaks.
+    vec2 p = dir * dist * 0.8 - drift;
+    vec2 w = vec2(fbm4(p * .5 + 3.1), fbm4(p * .5 - 1.7));
+    float n = fbm(p + w * .8);
+    float cover = smoothstep(0.6 - 0.3 * uCloud, 0.72 - 0.24 * uCloud, n);
+    // Self-shadowing: where the cloud is denser towards the sun, this side is in shade.
+    vec2 sd = normalize(vec2(sunDir.x, -sunDir.z) + vec2(1e-4));
+    float n2 = fbm(p + w * .8 + sd * 0.3);
+    float lit = clamp(0.58 + (n - n2) * 3.6, 0.0, 1.0);
+    float thick = smoothstep(.55, 1.0, n);
+    vec3 shade = mix(vec3(.52, .56, .62), vec3(.34, .37, .42), clamp(uWet + uStorm * .5, 0.0, 1.0));
+    vec3 bright = mix(vec3(.98, .98, .97), sunCol, .3 + .45 * uDusk) * (1.0 - .3 * uWet);
+    vec3 cloudCol = mix(shade, bright, lit * (1.0 - .4 * thick));
+    cloudCol = mix(c, cloudCol, farFade * .85 + .15);   // distant clouds dissolve into the haze
+    c = mix(c, cloudCol, cover * smoothstep(0.0, 0.05, elev) * .97);
+  }
+  if (uDeck > 0.0) {
+    // Stratus deck: a closed, softly modulated layer with darker rolls in rain.
+    vec2 q = dir * dist * 0.5 - drift * .5;
+    float s = fbm(q);
+    float rolls = fbm4(q * vec2(3.2, 1.4) + 7.0);
+    float tone = uDeckTone * (0.74 + 0.42 * s - (0.10 + 0.18 * clamp(uWet + uStorm, 0.0, 1.0)) * rolls);
+    vec3 deck = vec3(tone) * vec3(.97, 1.0, 1.04);
+    deck = mix(deck, uHorizon, 1.0 - exp(-dist * .05));
+    // Rain curtains hanging from the deck near the horizon.
+    float shaft = smoothstep(.42, .78, fbm4(vec2(az * 9.0 + uTime * .01, .5))) * (1.0 - smoothstep(0.0, 0.10, elev));
+    deck = mix(deck, deck * .8, shaft * clamp(uWet - .3, 0.0, 1.0) * .9);
+    c = mix(c, deck, uDeck * smoothstep(-0.01, 0.03, elev));
   }
   if (uSolar > .5 && elev > 0.0) {
     float angle = acos(clamp(dot(ray, normalize(uSolarSun)), -1.0, 1.0));
@@ -203,7 +257,6 @@ void main() {
   }
   // A small flock in the world sky, never over the ground or map.
   if (uNature > 0.0 && elev > .03) {
-    float az = uHeading + atan(vNdc.x * uTanHalfH);
     for (int i = 0; i < 8; i++) {
       float fi = float(i);
       if (fi >= uNature) continue;
@@ -215,6 +268,7 @@ void main() {
       c = mix(c, vec3(.17, .2, .22), bird * .6);
     }
   }
+  c = mix(c, uHorizon, uFog * .5);   // fog washes the sky out
   gl_FragColor = vec4(c, 1.0);
 }`;
 
@@ -224,39 +278,46 @@ const WEATHER_FRAG = `
 precision highp float;
 varying vec2 vNdc;
 uniform vec2 uResolution;
-uniform float uTime, uRain, uSnow, uAcross, uGust, uMist;
+uniform float uTime, uRain, uSnow, uAcross, uGust;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 void main() {
   vec2 uv = vNdc * .5 + .5;
   vec2 screen = vec2(uv.x * uResolution.x / uResolution.y, uv.y);
   float rain = 0.0, snow = 0.0;
-  for (int i = 0; i < 3; i++) {
-    float layer = float(i), scale = 22.0 + layer * 12.0;
-    float speed = .65 + layer * .35;
-    float slant = uAcross * .025 * uGust;
-    vec2 p = vec2(screen.x + screen.y * slant, screen.y + uTime * speed);
-    vec2 id = floor(p * vec2(scale, scale * .6));
-    vec2 cell = fract(p * vec2(scale, scale * .6));
+  for (int i = 0; i < 4; i++) {
+    float layer = float(i);                          // 0 = far, 3 = near
+    // Rain: far drops are fine and dense, near ones longer (motion blur), wider and faster; all lean with the wind.
+    float scale = 46.0 - layer * 9.0;
+    float speed = 1.6 + layer * .9;
+    float slant = clamp(uAcross * (.018 + layer * .012) * uGust, -.6, .6);
+    vec2 p = vec2(screen.x + screen.y * slant + layer * .37, screen.y + uTime * speed);
+    vec2 id = floor(p * vec2(scale, scale * .35));
+    vec2 cell = fract(p * vec2(scale, scale * .35));
     float seed = hash(id + layer * 73.0);
-    float cx = .2 + .6 * hash(id + 11.7), cy = .1 + .65 * hash(id + 29.3);
-    float streak = (1.0 - smoothstep(.012, .038, abs(cell.x - cx)))
-                 * (1.0 - smoothstep(.09, .3, abs(cell.y - cy)));
-    rain += streak * step(seed, uRain * .38) * (.16 + .08 * layer);
+    float cx = .15 + .7 * hash(id + 11.7);
+    float len = .25 + .08 * layer;
+    float cy = .05 + (.9 - len) * hash(id + 29.3);
+    float w = .010 + .009 * layer;
+    float streak = (1.0 - smoothstep(w * .35, w, abs(cell.x - cx)))
+                 * smoothstep(cy, cy + .06, cell.y) * (1.0 - smoothstep(cy + len - .1, cy + len, cell.y));
+    rain += streak * step(seed, uRain * (.30 + .08 * (3.0 - layer))) * (.07 + .05 * layer);
 
+    // Snow: soft flakes, larger and faster when near, swaying as they fall.
+    float sscale = 30.0 - layer * 5.5;
     vec2 sp = screen;
-    sp.x -= uAcross * uTime * .012;
-    sp.x += sin(uTime * .65 + screen.y * 5.0 + layer) * .025 * (1.0 + abs(uAcross) * .06);
-    sp.y += uTime * (.09 + layer * .075);
-    vec2 sid = floor(sp * scale), sc = fract(sp * scale);
+    sp.x -= uAcross * uTime * (.008 + layer * .006);
+    sp.x += sin(uTime * (.5 + layer * .15) + screen.y * 5.0 + layer * 1.7) * (.012 + layer * .006);
+    sp.y += uTime * (.06 + layer * .05);
+    vec2 sid = floor(sp * sscale), sc = fract(sp * sscale);
     vec2 center = vec2(.25 + .5 * hash(sid + 13.0), .25 + .5 * hash(sid + 31.0));
-    float radius = .025 + .045 * hash(sid + 17.0);
-    snow += (1.0 - smoothstep(radius, radius + .026, length(sc - center)))
-          * step(hash(sid + layer * 57.0), .34 * uSnow) * (.4 + .16 * layer);
+    float radius = (.025 + .03 * hash(sid + 17.0)) * (.6 + layer * .25);
+    float soft = .02 + layer * .03;
+    snow += (1.0 - smoothstep(radius - soft, radius + soft, length(sc - center)))
+          * step(hash(sid + layer * 57.0), .22 * uSnow) * (.22 + .12 * layer);
   }
-  float mist = uMist * .045 * (1.0 - uv.y)
-    * (.5 + .5 * sin(screen.x * 4.0 + sin(screen.y * 8.0 + uTime * .13) + uTime * .07));
-  float alpha = clamp(rain + snow + mist, 0.0, .75);
-  gl_FragColor = vec4(mix(vec3(.73, .8, .85), vec3(.94, .97, 1.0), min(1.0, snow * 3.0)), alpha);
+  float veil = uRain * .05;                          // rain softens contrast a little
+  float alpha = clamp(rain + snow + veil, 0.0, .7);
+  gl_FragColor = vec4(mix(vec3(.80, .84, .88), vec3(.96, .97, 1.0), min(1.0, snow * 3.0)), alpha);
 }`;
 
 /** [near, far] view-depth ranges, drawn in order (see render()). */
@@ -519,8 +580,8 @@ export class TerrainRenderer {
   }
 
   drawWeather(weather, camera, time, gust) {
-    const rain = weather.precipitation ?? (weather.rain ? .72 : 0), snow = weather.snow || 0, mist = weather.fog || 0;
-    if (!rain && !snow && !mist) return;
+    const rain = weather.precipitation ?? (weather.rain ? .72 : 0), snow = weather.snow || 0;
+    if (!rain && !snow) return;
     const gl = this.gl, p = this.weatherProg;
     gl.disable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE);
     gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
@@ -529,7 +590,7 @@ export class TerrainRenderer {
     gl.uniform2f(gl.getUniformLocation(p, 'uResolution'), this.canvas.width, this.canvas.height);
     const hd = camera.heading * Math.PI / 180, wind = weather.wind || [0, 0];
     const across = wind[0] * Math.cos(hd) - wind[1] * Math.sin(hd);
-    for (const [key, value] of Object.entries({ uTime: time, uRain: rain, uSnow: snow, uAcross: across, uGust: gust, uMist: mist })) gl.uniform1f(gl.getUniformLocation(p, key), value);
+    for (const [key, value] of Object.entries({ uTime: time, uRain: rain, uSnow: snow, uAcross: across, uGust: gust })) gl.uniform1f(gl.getUniformLocation(p, key), value);
     gl.drawArrays(gl.TRIANGLES, 0, 3); gl.disableVertexAttribArray(a); gl.disable(gl.BLEND);
   }
 
@@ -620,17 +681,22 @@ export class TerrainRenderer {
     const eye = [camera.x, camera.z, -camera.y];
     const fwd = [Math.sin(hd) * Math.cos(pt), Math.sin(pt), -Math.cos(hd) * Math.cos(pt)];
     const { cloud = 0, wind = [0, 0], wet = 0, fog = 0 } = weather;
-    const { snow = 0, dusk = 0 } = weather;
+    const { snow = 0, dusk = 0, deck = 0, mist = 0 } = weather;
+    const deckTone = weather.deckTone ?? .7;
     const gust = weather.gusts ? windGust(environmentTime, Math.hypot(...wind) > 5) : 1;
     const grey = [0.52, 0.55, 0.58];
     const mixc = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
-    let horizon = [0.36, 0.43, 0.5], zenith = [0.23, 0.34, 0.47];
-    const overcast = Math.max(wet * 0.9, cloud * 0.35);
+    let horizon = [0.56, 0.64, 0.73], zenith = [0.25, 0.41, 0.63];
+    const overcast = Math.max(deck * 0.85, wet * 0.9, cloud * 0.35);
     horizon = mixc(horizon, grey, overcast); zenith = mixc(zenith, [0.38, 0.42, 0.46], overcast);
     if (fog > 0) { horizon = mixc(horizon, [0.66, 0.69, 0.71], fog); zenith = mixc(zenith, [0.55, 0.59, 0.62], fog * 0.8); }
     if (dusk) { horizon = mixc(horizon, [.78, .53, .34], dusk * .8); zenith = mixc(zenith, [.29, .34, .47], dusk); }
     if (fogDistance) { horizon = [0.68, 0.7, 0.71]; zenith = [0.62, 0.65, 0.67]; } // milky whiteout
     if (weather.storm) { horizon = mixc(horizon, [.31, .36, .4], .6); zenith = mixc(zenith, [.23, .28, .33], .65); }
+
+    // Low sun from the side of the view direction: cross-lighting reveals slopes.
+    const sunAz = ((sunHeading + 125) * Math.PI) / 180, sunEl = ((27 - dusk * 17) * Math.PI) / 180;
+    const sun = solar?.direction || [Math.sin(sunAz) * Math.cos(sunEl), Math.sin(sunEl), -Math.cos(sunAz) * Math.cos(sunEl)];
 
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.BLEND);
@@ -653,6 +719,9 @@ export class TerrainRenderer {
     gl.uniform1f(gl.getUniformLocation(this.sky, 'uBirdHeading'), (weather.skyHeading ?? sunHeading) * Math.PI / 180);
     gl.uniform1f(gl.getUniformLocation(this.sky, 'uSolar'), solar ? 1 : 0);
     gl.uniform3fv(gl.getUniformLocation(this.sky, 'uSolarSun'), solar?.direction || [0, 1, 0]);
+    gl.uniform3fv(gl.getUniformLocation(this.sky, 'uSunDir'), sun);
+    for (const [key, value] of Object.entries({ uDeck: fogDistance ? 0 : deck, uDeckTone: deckTone, uDusk: dusk, uFog: fogDistance ? 1 : fog, uStorm: weather.storm ? 1 : 0 }))
+      gl.uniform1f(gl.getUniformLocation(this.sky, key), value);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.disableVertexAttribArray(sp);
 
@@ -665,15 +734,13 @@ export class TerrainRenderer {
     const view = lookDir(eye, fwd);
     gl.uniformMatrix4fv(gl.getUniformLocation(p, 'uView'), false, view);
     gl.uniform3fv(gl.getUniformLocation(p, 'uEye'), eye);
-    // Low sun from the side of the view direction: cross-lighting reveals slopes.
-    const sunAz = ((sunHeading + 125) * Math.PI) / 180, sunEl = ((27 - dusk * 17) * Math.PI) / 180;
-    const sun = solar?.direction || [Math.sin(sunAz) * Math.cos(sunEl), Math.sin(sunEl), -Math.cos(sunAz) * Math.cos(sunEl)];
     gl.uniform3fv(gl.getUniformLocation(p, 'uSunDir'), sun);
     gl.uniform2fv(gl.getUniformLocation(p, 'uHeightRange'), [m.min, m.max]);
     gl.uniform3fv(gl.getUniformLocation(p, 'uFogColor'), horizon);
     // Fog shortens visibility to ~1.5 km but keeps the near and middle distance readable.
     // fogDistance (fog navigation) forces a whiteout: ~63% fog at that range, nearly opaque at twice it.
-    const fogDensity = fogDistance ? 1 / fogDistance : 1 / Math.max(1400, 5200 - 3700 * fog - 1200 * wet);
+    // Daily weather fog: environment.js hazeDistance(), shared with visibilityFactor() so tools can keep clues in sight.
+    const fogDensity = fogDistance ? 1 / fogDistance : 1 / hazeDistance(weather);
     gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), fogDensity);
     gl.uniform1f(gl.getUniformLocation(p, 'uTime'), environmentTime);
     gl.uniform1f(gl.getUniformLocation(p, 'uCloud'), Math.max(cloud, wet * 0.6));
@@ -690,6 +757,8 @@ export class TerrainRenderer {
     gl.uniform1f(gl.getUniformLocation(p, 'uMapSize'), m.size);
     gl.uniform1f(gl.getUniformLocation(p, 'uSnow'), snow);
     gl.uniform1f(gl.getUniformLocation(p, 'uDusk'), dusk);
+    gl.uniform1f(gl.getUniformLocation(p, 'uDeck'), fogDistance ? 0 : deck);
+    gl.uniform1f(gl.getUniformLocation(p, 'uMist'), fogDistance ? 0 : mist);
     gl.uniform1f(gl.getUniformLocation(p, 'uGust'), gust);
     gl.uniform1i(gl.getUniformLocation(p, 'uAlbedo'), 0);
     gl.uniform1i(gl.getUniformLocation(p, 'uNormalMap'), 1);

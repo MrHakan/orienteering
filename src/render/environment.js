@@ -41,13 +41,21 @@ export function environmentFromWeather(selected = []) {
 
 export function weatherParams(selected, heading = 0) {
   const env = Array.isArray(selected) ? environmentFromWeather(selected) : normaliseEnvironment(selected);
+  // cloud: broken cumulus cover; wet: rain-soaked ground; fog: distance haze; precipitation; snow cover;
+  // deck: a closed stratus layer (flat, shadowless light) and deckTone its brightness; mist: valley fog.
   const presets = {
-    clear: [0, 0, 0, 0, 0], clouds: [.65, 0, 0, 0, 0], overcast: [1, 0, .12, 0, 0],
-    drizzle: [.82, .35, .18, .28, 0], rain: [.95, 1, .22, .72, 0],
-    storm: [1, 1, .55, 1, 0], fog: [.2, 0, .85, 0, 0], snow: [.85, 0, .28, 0, 1],
-    sunset: [.2, 0, 0, 0, 0],
+    //         cloud wet  fog  precip snow deck tone mist
+    clear:    [0,    0,   0,   0,     0,   0,   .7,  0],
+    clouds:   [.65,  0,   0,   0,     0,   0,   .7,  0],
+    overcast: [.35,  0,   .12, 0,     0,   1,   .70, .1],
+    drizzle:  [.5,   .35, .18, .28,   0,   .95, .62, .3],
+    rain:     [.5,   1,   .22, .72,   0,   1,   .55, .35],
+    storm:    [.6,   1,   .55, 1,     0,   1,   .40, .45],
+    fog:      [.2,   0,   .85, 0,     0,   .75, .78, 1],
+    snow:     [.3,   0,   .12, 0,     1,   .85, .66, .15],
+    sunset:   [.35,  0,   0,   0,     0,   0,   .7,  0],
   };
-  const [cloud, wet, fog, precipitation, snow] = presets[env.condition];
+  const [cloud, wet, fog, precipitation, snow, deck, deckTone, mist] = presets[env.condition];
   let speed = env.wind === 'strong' ? 11 : env.wind === 'breeze' ? 2.8 : 0;
   if (env.condition === 'storm') speed = Math.max(speed, 9);
   // Even calm cloudy skies drift slowly; vegetation only sways when there is wind.
@@ -55,9 +63,19 @@ export function weatherParams(selected, heading = 0) {
   const dir = ((Number.isFinite(heading) ? heading : 0) + 75) * Math.PI / 180;
   const vector = s => [Math.sin(dir) * s, Math.cos(dir) * s];
   return { cloud, wet, fog: Array.isArray(selected) && selected.includes('fog') ? 1 : fog, wind: vector(speed), cloudWind: vector(cloudSpeed),
-    rain: precipitation > 0, precipitation, snow, dusk: env.condition === 'sunset' ? 1 : 0,
+    rain: precipitation > 0, precipitation, snow, deck, deckTone, mist, dusk: env.condition === 'sunset' ? 1 : 0,
     skyHeading: Number.isFinite(heading) ? heading : 0,
     gusts: speed > 0, storm: env.condition === 'storm' };
+}
+
+/** Distance (m) at which the haze reaches ~63 %: the renderer's fog scale for this weather. */
+export function hazeDistance(w = {}) {
+  return Math.max(1400, 5200 - 2200 * (w.fog || 0) - 1200 * (w.wet || 0) - 400 * (w.deck || 0));
+}
+
+/** Share (0..1) of a terrain feature `metres` away that is lost in the haze: same curve as the terrain shader. */
+export function visibilityFactor(w, metres) {
+  return 1 - Math.exp(-Math.pow(Math.max(0, metres) / hazeDistance(w), 1.35));
 }
 
 /** Smooth, bounded gusts: no random frame-to-frame changes or export clock dependencies. */
