@@ -32,7 +32,7 @@ import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
 import { relativeBearing } from '../render/relativeBearing.js';
 import { drawSkylineOverlay } from '../render/skylineOverlay.js';
-import { ExportComposer, exportDuration } from '../export/composer.js';
+import { ExportComposer, exportDuration, exportObserver } from '../export/composer.js';
 import { planForChoice, describePlan, EASTER_CHOICES } from '../easter/index.js';
 import { EXPORT_FPS, encodeCanvasVideo, pickVideoPath } from '../export/recorder.js';
 
@@ -519,7 +519,7 @@ function show(quiz) {
     landmarks: quiz.landmarks,
     grid: grid ? { ...quiz.grid, correctLabel: quiz.correctLabel } : null,
     extent: quiz.mapExtent || null, trails: quiz.mode === 'trail', trailDuration: quiz.trail?.duration,
-    observer: isMapMode(quiz) ? quiz.map.observer || null : friendObserver(quiz), friendMode: quiz.mode === 'friend' || quiz.mode === 'sniper' || !!quiz.map?.revealYou,
+    observer: exportObserver(quiz), friendMode: quiz.mode === 'friend' || quiz.mode === 'sniper' || !!quiz.map?.revealYou,
     target: quiz.mode === 'sniper' ? quiz.sniper.target : null,
     extras: quiz.map?.extras, revealExtras: quiz.map?.revealExtras, lineOptions: quiz.map?.lineOptions,
   });

@@ -21,6 +21,11 @@ import { drawSniperOverlay } from '../render/sniperOverlay.js';
 import { isMapMode } from '../engine/mapModes.js';
 import { modeTitle, modeSubtitle, modeCaption, modeFrame, drawModeOverlay } from '../render/mapModesView.js';
 
+/** The YOU marker on exported maps: the same rule as the live page (map modes use quiz.map.observer). */
+export function exportObserver(q) {
+  return isMapMode(q) ? q.map?.observer || null : friendObserver(q);
+}
+
 export const FORMATS = {
   reels: { label: 'Reels / Story 9:16', width: 1080, height: 1920 },
   post: { label: 'Post 4:5', width: 1080, height: 1350 },
@@ -150,7 +155,7 @@ export class ExportComposer {
       const mr = new MapRenderer(c, { fixedSize: { width: s / 2, height: s / 2, dpr: 2 } });
       mr.setData({ model: this.model, interval: q.terrain.contourInterval, options: quizMarkers(q), rotation: this.options.northUp ? 0 : q.mapRotation, landmarks: q.landmarks,
         grid: q.grid ? { ...q.grid, correctLabel: q.correctLabel } : null,
-        extent: q.mapExtent || null, routes: q.trail?.routes, trails: q.mode === 'trail', trailDuration: q.trail?.duration, observer: friendObserver(q),
+        extent: q.mapExtent || null, routes: q.trail?.routes, trails: q.mode === 'trail', trailDuration: q.trail?.duration, observer: exportObserver(q),
         friendMode: q.mode === 'friend' || q.mode === 'sniper' || !!q.map?.revealYou, target: q.mode === 'sniper' ? q.sniper.target : null,
         extras: q.map?.extras, revealExtras: q.map?.revealExtras, lineOptions: q.map?.lineOptions });
       if (q.mode === 'trail') {
