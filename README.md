@@ -72,7 +72,7 @@ Open **Export for Instagram**; the dialog previews the 15 s loop with the event.
 
 ## Friend location mode
 
-**Where is your friend?** shows a small 3D person from your own viewpoint. Choose **Point — A / B / C** or **Grid — cell reference** to answer. Grid supports 4 × 4, 6 × 6, 8 × 8 and 16 × 16: tap or type the friend's cell, then check; the answer shows his exact position and your observation point. Easy marks where you stand as YOU. Medium and above hide the observer and give each A/B/C target a plausible observation point with the same range, bearing and apparent body size. Match the skyline and intervening slopes to locate him. Expert and Master also use similar target landforms; **Depth trap** tightens the elevation-angle match. **Zoom 3×** helps inspect the sighting. After answering, YOU is revealed and Point comparisons show each possible observer view. See [the friend mode guide](docs/friend-mode.md).
+**Where is your friend?** shows a small 3D person from your own viewpoint. Choose **Point — A / B / C** or **Grid — cell reference** to answer. Grid supports 4 × 4, 6 × 6, 8 × 8 and 16 × 16: tap or type the friend's cell, then check; your friend always stands on a cell centre, and the answer shows his position and your observation point. Easy marks where you stand as YOU. Medium and above hide the observer and give each A/B/C target a plausible observation point with the same range, bearing and apparent body size. Match the skyline and intervening slopes to locate him. Expert and Master also use similar target landforms; **Depth trap** tightens the elevation-angle match. **Zoom 3×** helps inspect the sighting. After answering, YOU is revealed and Point comparisons show each possible observer view. See [the friend mode guide](docs/friend-mode.md).
 
 In Friend mode, **Friend character → Conquest** adds a slow-motion arrival using the supplied transparent artwork. After the first 3 seconds and the normal zoom, Conquest descends from above while the view follows him, then returns for the answer. Selection works with Point, Grid, replay links (`fs=conquest`) and PNG/video exports. **Replay arrival** repeats the scene.
 
@@ -317,7 +317,7 @@ submitted cell if it is different, and lets you compare their views. Lost-compas
 comparisons use each wrong cell's closest-looking heading. Sun & watch explanations
 also check the direction inferred from solar time and the observed turn to the sun.
 Friend explanations compare the person from the observer's viewpoint; friend-grid
-comparisons use qualified person positions inside cells, rather than cell centres.
+answers put the person on the cell centre; comparisons use qualified person positions in the other cells.
 Trail explanations identify a replay time and skyline difference, or an invalid run.
 
 Every generated quiz includes an `explanation` object, so CLI JSON and worker/API

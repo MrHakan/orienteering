@@ -6,16 +6,36 @@ import { MapRenderer, quizMarkers } from '../src/render/mapRenderer.js';
 import { ExportComposer, captionText } from '../src/export/composer.js';
 import { scrambleLabels } from '../src/engine/scramble.js';
 
-for (const difficulty of ['easy', 'medium']) for (const gridSize of [4, 6, 8, 16]) {
-  test(`${difficulty} friend grid ${gridSize} scores the person's cell and preserves the qualified sighting`, async () => {
+import { cellBorderMargin, centredFriendExtent, personSight } from '../src/engine/friendQuiz.js';
+import { TerrainModel } from '../src/engine/terrainModel.js';
+
+for (const difficulty of ['easy', 'medium', 'master']) for (const gridSize of [4, 6, 8, 16]) {
+  test(`${difficulty} friend grid ${gridSize} puts the friend on a cell centre with a qualified sighting`, async () => {
     const opts = { seed: 'friend-demo', mode: 'friend', difficulty };
-    const point = await generate(opts);
     const q = await generate({ ...opts, friendAnswer: 'grid', gridSize });
-    assert.deepEqual(q.camera, point.camera);
-    assert.deepEqual(q.terrain.heights, point.terrain.heights);
-    assert.deepEqual(q.friend.matches, point.options);
-    for (const key of ['x', 'y', 'z', 'height', 'observerHidden']) assert.equal(q.friend[key], point.friend[key]);
     assert.equal(q.correctLabel, cellAtExtent(q.friend.x, q.friend.y, q.mapExtent, gridSize));
+    // Exactly the centre: half a cell of range/bearing error keeps the same answer.
+    assert.ok(Math.abs(cellBorderMargin(q.friend.x, q.friend.y, q.mapExtent, gridSize) - 0.5) < 1e-6);
+    const centre = q.options.find(o => o.correct);
+    assert.ok(Math.hypot(centre.x - q.friend.x, centre.y - q.friend.y) < 1e-6);
+    assert.equal(q.grid.origin, 'friend-cell-centre');
+    const correct = q.friend.matches.filter(m => m.correct);
+    assert.equal(correct.length, 1);
+    assert.equal(correct[0].x, q.friend.x); assert.equal(correct[0].y, q.friend.y);
+    // The sighting is real and every look-alike keeps the same range and apparent size.
+    const model = new TerrainModel({ ...q.terrain, seed: q.terrain.modelSeed });
+    const sight = personSight(model, q.camera, q.friend);
+    assert.ok(sight.visible);
+    assert.ok(Math.abs(sight.distance - correct[0].distance) < 1e-6);
+    // Medium and up: every look-alike has the same range and apparent size (Easy uses three depths).
+    if (difficulty !== 'easy') for (const m of q.friend.matches) {
+      assert.ok(Math.abs(m.distance - correct[0].distance) < 1e-6);
+      assert.ok(Math.abs(m.angularHeight - correct[0].angularHeight) <= 0.015 + 1e-9);
+    }
+    assert.ok(Math.abs(((sight.bearing - q.camera.heading + 540) % 360) - 180) <= 3.5, 'friend near the middle of the view');
+    for (const p of [q.camera, ...q.friend.matches]) {
+      assert.ok(Math.abs(p.x - q.mapExtent.x) <= q.mapExtent.size / 2 && Math.abs(p.y - q.mapExtent.y) <= q.mapExtent.size / 2);
+    }
     assert.equal(q.options.length, gridSize ** 2);
     assert.equal(q.options.filter(o => o.correct).length, 1);
     assert.equal(q.grid.cellMetres, q.mapExtent.size / gridSize);
@@ -24,9 +44,31 @@ for (const difficulty of ['easy', 'medium']) for (const gridSize of [4, 6, 8, 16
     assert.equal(scrambleLabels(q, 3), q);
     assert.match(captionText(q), /^Find your friend's cell: A1–/);
     assert.ok(captionText(q).length < 60);
+    assert.match(q.explanation.correct.evidence.find(e => e.type === 'person-cell').text, new RegExp(`centre of ${q.correctLabel}`));
     if (difficulty === 'easy') assert.notEqual(q.correctLabel, cellAtExtent(q.camera.x, q.camera.y, q.mapExtent, gridSize));
   });
 }
+
+test('point answers keep the original A/B/C friend sighting', async () => {
+  for (const difficulty of ['easy', 'master']) {
+    const a = await generate({ seed: 'friend-demo', mode: 'friend', difficulty });
+    const b = await generate({ seed: 'friend-demo', mode: 'friend', difficulty, gridSize: 8 });
+    assert.deepEqual(a.friend, b.friend); assert.deepEqual(a.camera, b.camera); assert.equal(a.correctLabel, b.correctLabel);
+    assert.equal(a.grid, undefined);
+  }
+});
+
+test('local friend crops slide onto a cell centre only when everything stays inside', () => {
+  const model = { size: 2000 };
+  const extent = { x: 700, y: 1200, size: 400 };
+  const out = centredFriendExtent(model, extent, { x: 713, y: 1187 }, 4, [{ x: 600, y: 1100 }]);
+  assert.ok(Math.abs(cellBorderMargin(713, 1187, out, 4) - 0.5) < 1e-9);
+  assert.equal(out.size, 400);
+  assert.ok(Math.abs(out.x - extent.x) <= 50 && Math.abs(out.y - extent.y) <= 50);
+  assert.equal(centredFriendExtent(model, extent, { x: 713, y: 1187 }, 4, [{ x: 880, y: 1100 }]), null, 'candidate pushed out of the crop');
+  assert.equal(centredFriendExtent(model, { x: 200, y: 200, size: 400 }, { x: 240, y: 240 }, 4, []), null, 'crop would leave the terrain');
+  assert.equal(cellBorderMargin(0, 0, { x: 200, y: 200, size: 400 }, 4), 0);
+});
 
 test('friend grid replays depth trap and new positions on the same terrain', async () => {
   const opts = { seed: 'friend-replay', mode: 'friend', difficulty: 'master', friendChallenge: 'depth-trap', friendAnswer: 'grid', gridSize: 16 };
