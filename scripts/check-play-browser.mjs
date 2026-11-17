@@ -21,6 +21,15 @@ const browser = await chromium.launch({ ...(process.env.CHROME_EXECUTABLE ? { ex
   args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
 const url = `http://localhost:${server.address().port}`, errors = [];
 const ready = (page, test) => page.waitForFunction(test, null, { timeout: 120000 });
+// Answer whatever the current question offers: A/B/C buttons, or a grid cell (every cell is a valid answer).
+const answerAny = async (page) => {
+  if (await page.locator('#grid-cell').isVisible()) {
+    await page.locator('#grid-cell').fill('A1');
+    await page.locator('#grid-submit').click();
+  } else {
+    await page.locator('#answers .answer').first().click();
+  }
+};
 try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } });
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: url });
@@ -70,15 +79,26 @@ try {
   assert.equal(reply.name, 'Hakan'); assert.equal(reply.correct, true);
 
   // Run: ten questions; points and progress in the banner; N moves on.
+  // The run seed is random in the app. Pin it to one whose first question is a grid question
+  // (cell input, no A/B/C buttons): that case used to time out in ~1 of 12 CI runs.
+  const runSeed = 'ukns-y6cj';
+  assert.equal(runPlan(runSeed)[0].mode, 'grid');
+  await page.evaluate(() => {
+    const real = crypto.getRandomValues.bind(crypto);
+    crypto.getRandomValues = (array) => { crypto.getRandomValues = real; array.set([17, 9, 11, 15, 21, 27, 2, 8]); return array; };
+  });
   await page.locator('#run-start').click();
   await ready(page, () => document.getElementById('loading').classList.contains('hidden') && document.getElementById('play-banner').textContent.startsWith('RUN 1/10'));
-  const label = await page.locator('#answers .answer').first().getAttribute('data-label');
-  await page.locator(`#answers [data-label="${label}"]`).click();
+  await answerAny(page);
   await page.waitForSelector('#play-extra');
   assert.match(await page.locator('#play-extra').innerText(), /\+\d+ pts · \d+ total/);
   await page.keyboard.press('n');
   await ready(page, () => document.getElementById('loading').classList.contains('hidden') && document.getElementById('play-banner').textContent.startsWith('RUN 2/10'));
-  void runPlan;
+  // The second question uses the other answer UI, so both are exercised.
+  assert.notEqual(runPlan(runSeed)[1].mode, 'grid');
+  await answerAny(page);
+  await page.waitForSelector('#play-extra');
+  assert.match(await page.locator('#play-banner').textContent(), /^RUN 2\/10/);
   assert.deepEqual(errors, []);
   console.log('Play browser checks passed: daily challenge (banner, one attempt, share card, replay), friend challenge links (result only, comparison, send back) and 10-question runs.');
 } finally {
