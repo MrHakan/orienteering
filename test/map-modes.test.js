@@ -130,3 +130,13 @@ test('drone camera stays above the ground and orbits during the clip', async () 
   assert.ok(Math.abs(((b.heading - a.heading + 540) % 360) - 180 - 24) < 1e-6);
   for (const c of [a, b]) assert.ok(c.z > surfaceElevation(model, c.x, c.y) + 100 && c.pitch < 0);
 });
+
+test('exported maps mark YOU in map modes the same way as the live page', async () => {
+  const { exportObserver } = await import('../src/export/composer.js');
+  const { generate } = await import('../src/engine/quiz.js');
+  const q = await generate({ seed: 'export-you', difficulty: 'master', mode: 'visibility' });
+  assert.ok(q.map.observer, 'visibility quiz has an observer');
+  assert.deepEqual(exportObserver(q), q.map.observer);
+  assert.equal(exportObserver({ mode: 'route', map: {} }), null);
+  assert.equal(exportObserver({ mode: 'where-am-i' }), null);
+});
