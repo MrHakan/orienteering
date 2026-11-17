@@ -82,11 +82,18 @@ try {
   await seek(page,6);
   await page.locator('#scene').screenshot();
   const beforeInspect=await page.locator('#scene').evaluate(c=>c.toDataURL());
-  await page.locator('#quiz-title').click();await page.keyboard.press('f');
-  // Inspect seeks an MP4 asynchronously; decoding can exceed 400 ms in CI.
-  // Require a visible frame change while the movement clock stays paused.
-  await page.waitForFunction(before=>document.getElementById('scene').toDataURL()!==before,
-    beforeInspect,{timeout:10000,polling:50});
+  // Inspect plays the knife clip for 2.8 s and then returns to the paused frame. It seeks an MP4
+  // asynchronously, and on a slow software-GL runner the first decode can miss that whole window
+  // (the frame is then unchanged again, so waiting longer cannot help). Look for the change inside
+  // each window and press F again if a window passed without one; the clock must stay paused.
+  let inspected=false;
+  for(let press=0;press<4&&!inspected;press++) {
+    await page.locator('#quiz-title').click();await page.keyboard.press('f');
+    inspected=await page.waitForFunction(before=>document.getElementById('scene').toDataURL()!==before,
+      beforeInspect,{timeout:2600,polling:50}).then(()=>true,()=>false);
+    if(!inspected)await page.waitForTimeout(400);
+  }
+  assert.ok(inspected,'F (inspect) never changed the frame in 4 tries');
   assert.equal(await page.locator('#trail-scrub').inputValue(),'6');
   await page.locator('.trail-customise summary').click();
   const mapAtSix=await page.locator('#map').evaluate(c=>c.toDataURL());
