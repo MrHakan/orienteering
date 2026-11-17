@@ -56,6 +56,34 @@ export function friendOptionCamera(quiz, option) {
   return quiz.friend.observerHidden ? option.observer : quiz.camera;
 }
 
+/**
+ * Grid answers put the friend exactly on a cell centre, so a small range or
+ * bearing error never flips the answer to a neighbouring cell.
+ */
+export const friendOnCellCentre = (opts) => normaliseFriendAnswer(opts.friendAnswer) === 'grid';
+
+/** Distance (fraction of a cell, 0.5 = centre) from a point to the nearest border of its cell. */
+export function cellBorderMargin(x, y, extent, divisions) {
+  const step = extent.size / normaliseGridSize(divisions);
+  const lx = x - (extent.x - extent.size / 2), ly = y - (extent.y - extent.size / 2);
+  const m = (v) => { const r = ((v % step) + step) % step; return Math.min(r, step - r); };
+  return Math.min(m(lx), m(ly)) / step;
+}
+
+/**
+ * Easy friend maps are local crops. Slide the crop (same size) so the friend
+ * lands on a cell centre while every candidate and the observer stay well
+ * inside it; null when that is impossible.
+ */
+export function centredFriendExtent(model, extent, friend, divisions, points, pad = 30) {
+  const step = extent.size / normaliseGridSize(divisions), half = extent.size / 2;
+  const shift = (v, origin) => { const local = v - (origin - half); return local - (Math.floor(local / step) + 0.5) * step; };
+  const out = { ...extent, x: extent.x + shift(friend.x, extent.x), y: extent.y + shift(friend.y, extent.y) };
+  if (out.x < half || out.y < half || out.x > model.size - half || out.y > model.size - half) return null;
+  const inside = (p) => Math.abs(p.x - out.x) <= half - pad && Math.abs(p.y - out.y) <= half - pad;
+  return points.every(inside) ? out : null;
+}
+
 export function generateFriendQuiz(opts) {
   const quiz = opts.difficulty === 'easy' ? generateKnownFriendQuiz(opts) : generateTerrainFriendQuiz(opts);
   return withAnswerExplanation(finishFriendQuiz(quiz, opts));
@@ -67,10 +95,10 @@ export function finishFriendQuiz(quiz, opts) {
   if (quiz.friend.answerMode !== 'grid') return quiz;
   const size = normaliseGridSize(opts.gridSize), extent = quiz.mapExtent;
   const correctLabel = cellAtExtent(quiz.friend.x, quiz.friend.y, extent, size);
-  // Keep the qualified sighting and its terrain matches intact. Grid answers
-  // locate the actual person, who need not stand at a cell centre.
+  // Keep the qualified sighting and its terrain matches intact. The generators
+  // already placed the friend on a cell centre of this extent (friendOnCellCentre).
   quiz.friend.matches = quiz.options;
-  quiz.grid = { size, origin: 'friend-position', cellMetres: extent.size / size,
+  quiz.grid = { size, origin: 'friend-cell-centre', cellMetres: extent.size / size,
     target: { x: quiz.friend.x, y: quiz.friend.y } };
   quiz.options = gridCells(extent.size, size).map(p => ({ ...p,
     x: p.x + extent.x - extent.size / 2, y: p.y + extent.y - extent.size / 2,
@@ -83,7 +111,8 @@ export function finishFriendQuiz(quiz, opts) {
 // bearing. Full-body visibility and matched apparent height prevent distance
 // alone from eliminating a letter. Only one observer's terrain view matches.
 function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medium', variant = 0, headingMode = null,
-  friendChallenge = 'standard', tuning = null, size, n, maxTerrainAttempts = 4, onProgress = () => {} }) {
+  friendChallenge = 'standard', friendAnswer = 'point', gridSize = 4, tuning = null, size, n, maxTerrainAttempts = 4, onProgress = () => {} }) {
+  const centred = friendOnCellCentre({ friendAnswer }), divisions = normaliseGridSize(gridSize);
   const t0 = now(), challenge = normaliseFriendChallenge(friendChallenge);
   const base = applyTuning(getDifficulty(difficulty), tuning), band = FRIEND_BANDS[difficulty] || FRIEND_BANDS.medium;
   const heading = ['exact', 'cardinal', 'intercardinal'].includes(headingMode) ? headingMode : base.heading;
@@ -107,14 +136,34 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
     }
     const valid = [];
     let considered = 0;
+    // Grid answers: the friend stands on a cell centre of the full-map grid.
+    const centres = centred ? gridCells(model.size, divisions).filter((c) => model.inside(c.x, c.y, margin) && model.getSlope(c.x, c.y) <= 26) : null;
     for (const [t, vp] of picked.entries()) {
       if (vp.quality.total < base.minQuality) continue;
       const camera = { x: vp.x, y: vp.y, z: surfaceElevation(model, vp.x, vp.y) + eyeHeight,
         eyeHeight, heading: vp.heading, fov, pitch: 0, roll: 0 };
-      for (let line = 0; line < 4; line++) {
-        const distance = rng.range(130, 210), bearing = wrap360(vp.heading + rng.range(-3, 3));
-        const dx = Math.sin(bearing * DEG) * distance, dy = Math.cos(bearing * DEG) * distance;
-        const target = { x: camera.x + dx, y: camera.y + dy };
+      // Centres in range near the scored view direction; the camera turns to face the chosen one.
+      // Coarse grids (few centres in range) may turn up to 70°, still checked below with the turned view.
+      let lines = null;
+      if (centred) {
+        const near = centres.map((c) => ({ c, d: Math.hypot(c.x - camera.x, c.y - camera.y), b: wrap360(Math.atan2(c.x - camera.x, c.y - camera.y) / DEG) }))
+          .filter((o) => o.d >= 125 && o.d <= 215);
+        const crng = rng.fork(`centres-${t}`);
+        lines = crng.shuffle(near.filter((o) => angleDiff(o.b, vp.heading) <= 35));
+        if (!lines.length) lines = crng.shuffle(near.filter((o) => angleDiff(o.b, vp.heading) <= 70));
+        lines = lines.slice(0, 4);
+      }
+      for (let line = 0; line < (centred ? lines.length : 4); line++) {
+        let distance, bearing;
+        if (centred) {
+          ({ d: distance, b: bearing } = lines[line]);
+          camera.heading = wrap360(Math.round(bearing + rng.range(-3, 3)));
+        } else {
+          distance = rng.range(130, 210); bearing = wrap360(vp.heading + rng.range(-3, 3));
+        }
+        const dx = centred ? lines[line].c.x - camera.x : Math.sin(bearing * DEG) * distance;
+        const dy = centred ? lines[line].c.y - camera.y : Math.cos(bearing * DEG) * distance;
+        const target = centred ? { x: lines[line].c.x, y: lines[line].c.y } : { x: camera.x + dx, y: camera.y + dy };
         if (!model.inside(target.x, target.y, margin) || model.getSlope(target.x, target.y) > 26) continue;
         const chosen = { ...target, ...personSight(model, camera, target) };
         if (!chosen.visible || Math.abs(chosen.elevation) > 16 || chosen.angularHeight < 0.45) continue;
@@ -194,7 +243,8 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
         valid.push(q);
         break;
       }
-      if (valid.length && t + 1 >= band.search) break;
+      // Centred targets constrain the geometry, so compare more views before settling.
+      if (valid.length && t + 1 >= band.search * (centred ? 2 : 1)) break;
       if (t % 4 === 3) onProgress(`Checking terrain matches (${t + 1}/${picked.length})`);
     }
     if (valid.length) {
@@ -210,7 +260,8 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
 }
 
 function generateKnownFriendQuiz({ seed, world = 'classic', difficulty = 'medium', variant = 0, headingMode = null,
-  friendChallenge = 'standard', tuning = null, size, n, maxTerrainAttempts = 4, onProgress = () => {} }) {
+  friendChallenge = 'standard', friendAnswer = 'point', gridSize = 4, tuning = null, size, n, maxTerrainAttempts = 4, onProgress = () => {} }) {
+  const centred = friendOnCellCentre({ friendAnswer });
   const t0 = now(), challenge = normaliseFriendChallenge(friendChallenge);
   const base = applyTuning(getDifficulty(difficulty), tuning);
   const heading = ['exact', 'cardinal', 'intercardinal'].includes(headingMode) ? headingMode : base.heading;
@@ -256,12 +307,17 @@ function generateKnownFriendQuiz({ seed, world = 'classic', difficulty = 'medium
         const correctLabel = options.find((p) => p.correct).label;
         const confidence = saturate(0.55 + 0.25 * Math.min(1, minDifference / 0.6) + 0.2 * vp.quality.total);
         if (confidence < base.minConfidence) continue;
+        let mapExtent = friendMapExtent(model, camera, options);
+        if (centred) {
+          mapExtent = centredFriendExtent(model, mapExtent, chosen, gridSize, [camera, ...options]);
+          if (!mapExtent) continue;
+        }
         log.push({ attempt, stage: 'question', try: t, ok: true, confidence: +confidence.toFixed(3), issues: [] });
         return {
           version: 1, mode: 'friend', seed, difficulty, variant, lowConfidence: false,
           terrain: terrainSummary(model, interval, terrainCheck), camera,
           friend: { x: chosen.x, y: chosen.y, z: chosen.z, height: FRIEND_HEIGHT, heading: wrap360(chosen.bearing + 180), challenge, observerHidden: false },
-          mapExtent: friendMapExtent(model, camera, options),
+          mapExtent,
           heading: { degrees: camera.heading, ...formatHeading(camera.heading, heading), mode: heading },
           mapRotation: base.mapRotation ? rng.fork('rotation').pick([0, 90, 180, 270]) : 0,
           options, correctLabel, landmarks: landmarkSummary(model),

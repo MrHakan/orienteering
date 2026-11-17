@@ -1147,6 +1147,11 @@ function renderFacts() {
 function setLoading(on, text) {
   state.loading = on;
   $('loading').classList.toggle('hidden', !on);
+  // Export needs a finished quiz and its scene: keep the button inert (and say why) until then.
+  const ready = !on && !!state.quiz && !!renderer;
+  $('open-export').disabled = !ready;
+  $('open-export').title = ready ? '' : 'Available once the quiz has loaded';
+  document.body.dataset.quizReady = ready ? state.quiz.seed : '';
   if (text) $('loading-text').textContent = text;
 }
 

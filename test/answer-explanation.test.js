@@ -96,12 +96,13 @@ test('sun/watch explanations reject headings which disagree with the measured so
   }
 });
 
-test('friend-grid reasoning uses qualified positions inside cells, including non-centre targets', async () => {
+test('friend-grid reasoning puts the person on the answer cell centre and compares qualified positions', async () => {
   const q = await generate({ seed: 'friend-demo', difficulty: 'easy', mode: 'friend', friendAnswer: 'grid', gridSize: 6 });
   assert.equal(q.explanation.kind, 'person-cell');
   const target = q.explanation.correct.evidence.find(e => e.type === 'person-cell').data.target;
   assert.equal(cellAtExtent(target.x, target.y, q.mapExtent, q.grid.size), q.correctLabel);
-  assert.notDeepEqual(target, { x: q.options.find(o => o.correct).x, y: q.options.find(o => o.correct).y });
+  const centre = q.options.find(o => o.correct);
+  assert.ok(Math.hypot(target.x - centre.x, target.y - centre.y) < 1e-6, 'the friend stands on the answer cell centre');
   const qualified = q.explanation.alternatives.filter(o => o.scope === 'qualified-point');
   assert.ok(qualified.length > 0);
   for (const other of qualified) {

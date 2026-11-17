@@ -123,8 +123,8 @@ function correctEvidence(q, model, shown, correct) {
         : 'The bearing, apparent size and surrounding contours must agree together.'),
     { rangeMetres: round(target.distance), bearing: round(target.bearing), apparentHeightDegrees: round(target.angularHeight),
       observerHidden: q.friend.observerHidden }));
-    if (q.grid) result.push(evidence('person-cell', `After locating the person, his exact position falls inside ${q.correctLabel}. `
-      + 'He need not stand at the cell centre; use the displayed map extent and its grid boundaries.',
+    if (q.grid) result.push(evidence('person-cell', `After locating the person, he stands at the centre of ${q.correctLabel}`
+      + `${q.grid.origin === 'friend-cell-centre' ? '' : ' (or inside it)'}: a range or bearing error of up to half a cell (${Math.round(q.grid.cellMetres / 2)} m) still gives the same cell.`,
     { label: q.correctLabel, target: q.grid.target, extent: extentOf(q), divisions: q.grid.size }));
   }
   if (shown) {
