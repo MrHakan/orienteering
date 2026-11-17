@@ -31,7 +31,11 @@ try {
   // Daily: same question for everyone; one attempt; share card; reopening shows the result.
   const plan = dailyPlan('2026-10-05'), dq = await generate({ seed: plan.seed, mode: plan.mode, difficulty: plan.difficulty, world: plan.world });
   await page.goto(`${url}/#daily=2026-10-05`, { waitUntil: 'domcontentloaded' });
+  // Export stays inert until the quiz and its scene exist, then reports which quiz is ready.
+  assert.equal(await page.locator('#open-export').isDisabled(), true);
   await ready(page, () => document.getElementById('loading').classList.contains('hidden') && document.getElementById('play-banner').textContent.startsWith('DAILY'));
+  assert.equal(await page.locator('#open-export').isEnabled(), true);
+  assert.equal(await page.evaluate(() => document.body.dataset.quizReady), plan.seed);
   assert.equal(await page.locator('#play-banner').textContent(), `DAILY #${plan.number} · 2026-10-05 · ${plan.difficulty.toUpperCase()} · ONE ATTEMPT`);
   assert.equal(new URL(page.url()).hash, '#daily=2026-10-05');
   assert.deepEqual(await page.locator('#answers .answer').evaluateAll(b => b.map(x => x.dataset.label)), dq.options.map(o => o.label));
