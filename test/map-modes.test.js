@@ -7,6 +7,7 @@ import { toblerSpeed, routeStats } from '../src/engine/routeQuiz.js';
 import { sightline } from '../src/engine/visibilityQuiz.js';
 import { cellAt } from '../src/engine/gridQuiz.js';
 import { surfaceElevation } from '../src/engine/terrainSurface.js';
+import { RESECTION_BANDS, fixSlack } from '../src/engine/resectionQuiz.js';
 
 const modelOf = (q) => new TerrainModel({ ...q.terrain, seed: q.terrain.modelSeed });
 const one = (q) => { assert.equal(q.options.filter((o) => o.correct).length, 1); assert.equal(q.options.find((o) => o.correct).label, q.correctLabel); };
@@ -65,7 +66,9 @@ test('resection with hidden peaks: answers spread over the map, each a look-alik
 test('resection by grid: the bearings cross in exactly one cell', async () => {
   for (const [difficulty, size] of [['easy', 4], ['medium', 8], ['master', 16]]) {
     const q = await generate({ seed: 'res-g', difficulty, mode: 'resection', resectionAnswer: 'grid', gridSize: size }); one(q); shape(q);
-    const L = modelOf(q).size, slack = q.resection.rounding / 2 + 0.6;
+    const L = modelOf(q).size, slack = fixSlack(RESECTION_BANDS[difficulty], size);
+    assert.equal(slack, q.resection.rounding / 2 + 0.6 + (difficulty !== 'easy' && size <= 8 ? 2 : 0));
+    if (difficulty !== 'easy') assert.ok(q.validation.fixTolerance >= slack, `fix tolerance ${q.validation.fixTolerance}`);
     assert.equal(q.grid.size, size); assert.equal(q.options.length, size * size);
     assert.equal(cellAt(q.grid.target.x, q.grid.target.y, L, size), q.correctLabel);
     assert.equal(q.resection.points.length, 4, 'the point traps stay for the explanation');
