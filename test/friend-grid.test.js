@@ -6,8 +6,12 @@ import { MapRenderer, quizMarkers } from '../src/render/mapRenderer.js';
 import { ExportComposer, captionText } from '../src/export/composer.js';
 import { scrambleLabels } from '../src/engine/scramble.js';
 
-import { cellBorderMargin, centredFriendExtent, personSight } from '../src/engine/friendQuiz.js';
+import { cellBorderMargin, centredFriendExtent, personSight, hypothesisLattice, friendGridScore, friendShortlist } from '../src/engine/friendQuiz.js';
 import { TerrainModel } from '../src/engine/terrainModel.js';
+import { cellAt, gridCells } from '../src/engine/gridQuiz.js';
+import { descriptorDistance } from '../src/engine/skyline.js';
+import { surfaceElevation } from '../src/engine/terrainSurface.js';
+import { SeedManager } from '../src/engine/rng.js';
 
 for (const difficulty of ['easy', 'medium', 'master']) for (const gridSize of [4, 6, 8, 16]) {
   test(`${difficulty} friend grid ${gridSize} puts the friend on a cell centre with a qualified sighting`, async () => {
@@ -124,4 +128,72 @@ test('question maps hide FRIEND and hidden YOU; answer maps reveal the exact sub
       assert.ok(c.mapRevealCanvas.arcs.some(([x, y, radius]) => x === 82 && y === 82 && radius === 4));
     }
   } finally { globalThis.document = previous; }
+});
+
+// Master friend grids: the same sighting from another cell must not give the same view.
+const FRIEND_SEEDS = ['fg-0', 'fg-1', 'fg-2', 'fg-3', 'fg-4', 'fg-5'];
+let masterFriends;
+const masterFriend = () => masterFriends ??= Promise.all(FRIEND_SEEDS.map((seed) => generate({ seed, mode: 'friend', difficulty: 'master', friendAnswer: 'grid', gridSize: 8 })));
+
+/** Independent re-computation: view distances of every consistent sighting whose friend stands on one of `points`. */
+function sightings(q, points, { far = 0 } = {}) {
+  const model = new TerrainModel({ ...q.terrain, meta: { world: q.terrain.world }, seed: q.terrain.modelSeed }), L = model.size, cam = q.camera;
+  const dx = q.friend.x - cam.x, dy = q.friend.y - cam.y, range = Math.hypot(dx, dy), seen = personSight(model, cam, q.friend);
+  const view = (o) => model.skyline.viewDescriptor(o.x, o.y, cam.heading, cam.fov, { eyeHeight: cam.eyeHeight, columns: 33 });
+  const base = view(cam), out = [];
+  for (const point of points) {
+    if (cellAt(point.x, point.y, L, q.grid.size) === q.correctLabel || Math.hypot(point.x - q.friend.x, point.y - q.friend.y) < far) continue;
+    const o = { x: point.x - dx, y: point.y - dy };
+    if (!model.inside(o.x, o.y, 0) || !model.inside(point.x, point.y, 0) || model.getSlope(o.x, o.y) > 26 || model.getSlope(point.x, point.y) > 26) continue;
+    const observer = { x: o.x, y: o.y, z: surfaceElevation(model, o.x, o.y) + cam.eyeHeight };
+    const sight = personSight(model, observer, point);
+    if (!sight.visible || Math.abs(sight.distance - range) > 1e-6 || Math.abs(sight.elevation - seen.elevation) > q.validation.elevationTolerance) continue;
+    out.push(descriptorDistance(base, view(observer)));
+  }
+  return { model, out };
+}
+const engineLattice = (q, model) => hypothesisLattice(model, new SeedManager(`${q.seed}#${q.difficulty}`)
+  .stream('friend-terrain', q.stats.terrainAttempt, q.friend.challenge, q.heading.mode, q.variant).fork('hypotheses'))
+  .map((p) => ({ x: p.x + q.friend.x - q.camera.x, y: p.y + q.friend.y - q.camera.y }));
+
+test('master friend grid: no other cell centre gives the same sighting and view', async () => {
+  for (const q of await masterFriend()) {
+    const { out } = sightings(q, gridCells(q.terrain.size, 8));
+    for (const D of out) assert.ok(D >= q.validation.minRequiredDistance, `${q.seed}: another cell looks the same (${D.toFixed(2)})`);
+    assert.equal(typeof q.validation.lookalikeElsewhere, 'boolean');
+    assert.ok(q.validation.rivalCells >= 2 && Number.isFinite(q.validation.weakestCue));
+  }
+});
+
+test('friend grid flag: clean quizzes have no look-alike on the lattice; flagged ones say so', async () => {
+  const flagged = await generate({ seed: 'qq-16', world: 'auto', mode: 'friend', difficulty: 'master', friendAnswer: 'grid', gridSize: 8 });
+  assert.equal(flagged.validation.lookalikeElsewhere, true, 'qq-16 has no clean candidate');
+  for (const q of [...await masterFriend(), flagged]) {
+    const { model } = sightings(q, []), { out } = sightings(q, engineLattice(q, model), { far: 240 });
+    const twin = out.some((D) => D < q.validation.minRequiredDistance);
+    assert.equal(q.validation.lookalikeElsewhere, twin, `${q.seed}: flag matches the lattice scan`);
+    if (twin) assert.ok(q.validation.confidence <= 0.4, `${q.seed}: flagged confidence ${q.validation.confidence}`);
+  }
+});
+
+test('friend grid score and shortlist floor', () => {
+  const band = { min: 0.8, max: 3.2 }, base = { closestD: 1.5, rivals: 3, weakestCue: 1.5, band, quality: 0.7, blockedFrac: 0, edgeFrac: 0 };
+  const s = friendGridScore(base);
+  for (const v of [s.hardness, s.confidence]) assert.ok(v >= 0 && v <= 1);
+  assert.ok(friendGridScore({ ...base, closestD: 1 }).hardness > s.hardness);
+  assert.ok(friendGridScore({ ...base, rivals: 8 }).hardness > s.hardness);
+  assert.ok(friendGridScore({ ...base, weakestCue: 1 }).confidence < s.confidence);
+  assert.equal(friendGridScore({ ...base, closestD: 1 }).confidence, s.confidence, 'closeness alone does not move confidence');
+  const sorted = [{ hardness: 0.9 }, { hardness: 0.8 }, { hardness: 0.5 }, { hardness: 0.4 }];
+  assert.deepEqual(friendShortlist(sorted).map((q) => q.hardness), [0.9, 0.8]);
+  assert.deepEqual(friendShortlist(sorted.slice(2)).map((q) => q.hardness), [0.5, 0.4]);
+});
+
+test('friend: point answers and Easy grids are unchanged; master grids repeat exactly', async () => {
+  const pick = (q) => [q.correctLabel, +q.camera.x.toFixed(2), +q.camera.y.toFixed(2), q.camera.heading, +q.hardness.toFixed(4), +q.validation.confidence.toFixed(4)];
+  assert.deepEqual(pick(await generate({ seed: 'friend-demo', mode: 'friend', difficulty: 'master' })), ['C', 1032.18, 601.48, 269, 0.6829, 0.9446]);
+  assert.deepEqual(pick(await generate({ seed: 'friend-demo', mode: 'friend', difficulty: 'easy', friendAnswer: 'grid', gridSize: 8 })), ['E5', 1174.73, 1632.46, 180, 0.0833, 0.9506]);
+  const [a] = await masterFriend(), b = await generate({ seed: FRIEND_SEEDS[0], mode: 'friend', difficulty: 'master', friendAnswer: 'grid', gridSize: 8 });
+  assert.deepEqual(b.camera, a.camera); assert.deepEqual(b.friend, a.friend);
+  assert.deepEqual([b.correctLabel, b.hardness, b.validation], [a.correctLabel, a.hardness, a.validation]);
 });

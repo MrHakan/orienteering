@@ -9,7 +9,7 @@ import { surfaceElevation, surfaceLineOfSight } from './terrainSurface.js';
 import { descriptorDistance } from './skyline.js';
 import { distinguishingCue } from './quizCandidates.js';
 import { DEG, saturate, angleDiff, wrap360 } from './grid.js';
-import { normaliseGridSize, gridCells, cellAtExtent } from './gridQuiz.js';
+import { normaliseGridSize, gridCells, cellAt, cellAtExtent } from './gridQuiz.js';
 import { normaliseFriendSkin } from './friendAppearance.js';
 import { withAnswerExplanation } from './answerExplanation.js';
 
@@ -84,6 +84,32 @@ export function centredFriendExtent(model, extent, friend, divisions, points, pa
   return points.every(inside) ? out : null;
 }
 
+/** Hypothetical observers: a shared jittered lattice, independent of the correct target. */
+export function hypothesisLattice(model, grng, spacing = 48, margin = 70) {
+  const grid = [];
+  for (let y = margin; y < model.size - margin; y += spacing) for (let x = margin; x < model.size - margin; x += spacing) {
+    const p = { x: x + grng.range(-15, 15), y: y + grng.range(-15, 15) };
+    if (model.getSlope(p.x, p.y) <= 26) grid.push(p);
+  }
+  return grid;
+}
+
+/**
+ * Grid answers (friend in a cell centre), from the look-alike sightings the viewer could confuse:
+ * closestD (nearest view distance), rivals (sightings within band.max) and weakestCue (smallest
+ * skyline cue among the near ones). hardness: how close and how many; confidence: how visible the
+ * weakest cue is and how clear the view is.
+ */
+export function friendGridScore({ closestD, rivals, weakestCue, band, quality, blockedFrac, edgeFrac }) {
+  return {
+    hardness: saturate(0.65 * saturate(1 - (closestD - band.min) / (band.max - band.min)) + 0.35 * (1 - Math.exp(-(rivals - 1) / 4))),
+    confidence: saturate(0.45 * saturate((weakestCue - 0.6) / 1.8) + 0.4 * saturate(quality / 0.8) + 0.15 * saturate(1 - 2 * blockedFrac - 2 * edgeFrac)),
+  };
+}
+
+/** The best three candidates, minus any much easier than the best (no 'too easy' day by chance). */
+export const friendShortlist = (sorted, floor = 0.15) => sorted.slice(0, 3).filter((q) => q.hardness >= sorted[0].hardness - floor);
+
 export function generateFriendQuiz(opts) {
   const quiz = opts.difficulty === 'easy' ? generateKnownFriendQuiz(opts) : generateTerrainFriendQuiz(opts);
   return withAnswerExplanation(finishFriendQuiz(quiz, opts));
@@ -128,16 +154,12 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
     });
     onProgress('Matching ranges and searching terrain look-alikes');
     const { picked, evaluated } = vg.generate();
-    // A shared jittered lattice is independent of the correct target.
-    const grid = [], grng = rng.fork('hypotheses'), spacing = 48, margin = 70;
-    for (let y = margin; y < model.size - margin; y += spacing) for (let x = margin; x < model.size - margin; x += spacing) {
-      const p = { x: x + grng.range(-15, 15), y: y + grng.range(-15, 15) };
-      if (model.getSlope(p.x, p.y) <= 26) grid.push(p);
-    }
-    const valid = [];
+    const margin = 70, grid = hypothesisLattice(model, rng.fork('hypotheses'), 48, margin);
+    const valid = [], farScans = new Map();
     let considered = 0;
     // Grid answers: the friend stands on a cell centre of the full-map grid.
-    const centres = centred ? gridCells(model.size, divisions).filter((c) => model.inside(c.x, c.y, margin) && model.getSlope(c.x, c.y) <= 26) : null;
+    const cells = centred ? gridCells(model.size, divisions) : null;
+    const centres = centred ? cells.filter((c) => model.inside(c.x, c.y, margin) && model.getSlope(c.x, c.y) <= 26) : null;
     for (const [t, vp] of picked.entries()) {
       if (vp.quality.total < base.minQuality) continue;
       const camera = { x: vp.x, y: vp.y, z: surfaceElevation(model, vp.x, vp.y) + eyeHeight,
@@ -178,7 +200,11 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
         // Terrain above the friend must actually be in the wide frame.
         const inFrame = Array.from(correctDesc.horizon).filter((h) => Math.abs(h - camera.pitch) < 14).length;
         if (inFrame < 20 || correctDesc.edgeFrac > 0.3 || correctDesc.blockedFrac > 0.5) continue;
-        const pool = [];
+        const pool = [], targetCell = centred ? cellAt(target.x, target.y, model.size, divisions) : null;
+        // Another place for the friend, seen at the same range, bearing and eye-level angle from `observer`.
+        const consistent = (observer, point) => Math.abs(Math.atan2(surfaceElevation(model, point.x, point.y) + FRIEND_HEIGHT / 2 - observer.z, distance) / DEG
+          - chosen.elevation) <= elevationTolerance && personSight(model, observer, point).visible;
+        let ambiguous = false;
         for (const p of grid) {
           if (Math.hypot(p.x - camera.x, p.y - camera.y) < 280) continue;
           const point = { x: p.x + dx, y: p.y + dy };
@@ -194,6 +220,8 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
           if (!sight.visible || Math.abs(sight.angularHeight - chosen.angularHeight) > 0.015) continue;
           considered++;
           const desc = describe(observer), D = descriptorDistance(correctDesc, desc);
+          // Grid answers: the same sighting from a spot whose friend lies in another cell is a second answer.
+          if (centred && D < band.min && cellAt(point.x, point.y, model.size, divisions) !== targetCell) { ambiguous = true; break; }
           if (desc.edgeFrac > 0.3 || desc.blockedFrac > 0.5 || D < band.min || D > band.max) continue;
           const cue = distinguishingCue(correctDesc, desc);
           const cueOffset = wrap360(cue.bearing - camera.heading + 180) - 180;
@@ -201,6 +229,7 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
           if (cue.magnitude < band.cue || Math.abs(correctDesc.horizon[cueColumn] - camera.pitch) > 14) continue;
           pool.push({ ...point, ...sight, observer, D, cue, desc });
         }
+        if (ambiguous) continue;
         // Prefer similar terrain; do not stop at the first legal pair.
         pool.sort((a, b) => a.D - b.D);
         let pair = null, cost = Infinity;
@@ -215,7 +244,28 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
         const minDifference = Math.min(...pair.map((p) => p.D));
         const confidence = saturate(0.5 + 0.25 * Math.min(1, minDifference / band.min - 0.5) + 0.25 * vp.quality.total);
         if (confidence < base.minConfidence) continue;
-        const hardness = saturate(1 - ((pair[0].D + pair[1].D) / 2 - band.min) / (band.max - band.min));
+        let hardness = saturate(1 - ((pair[0].D + pair[1].D) / 2 - band.min) / (band.max - band.min)), reported = confidence, gridChecks = {};
+        if (centred) {
+          // Every other cell centre that gives the same sighting: none may look the same.
+          const alts = pair.map((p) => ({ D: p.D, cue: p.cue.magnitude }));
+          let twin = false;
+          for (const c of cells) {
+            if (c.label === targetCell) continue;
+            const p = { x: c.x - dx, y: c.y - dy };
+            if (!model.inside(p.x, p.y, 0) || model.getSlope(p.x, p.y) > 26 || model.getSlope(c.x, c.y) > 26) continue;
+            const observer = { ...camera, ...p, z: surfaceElevation(model, p.x, p.y) + eyeHeight };
+            if (!consistent(observer, c)) continue;
+            const desc = describe(observer), D = descriptorDistance(correctDesc, desc);
+            if (D < band.min) { twin = true; break; }
+            if (D <= band.max) alts.push({ D, cue: distinguishingCue(correctDesc, desc).magnitude });
+          }
+          if (twin) continue;
+          const nearest = alts.reduce((a, b) => b.D < a.D ? b : a), near = alts.filter((a) => a.D < 2 * band.min);
+          const summary = { closestD: nearest.D, rivals: alts.length, weakestCue: Math.min(...(near.length ? near : [nearest]).map((a) => a.cue)) };
+          ({ hardness, confidence: reported } = friendGridScore({ ...summary, band, quality: vp.quality.total,
+            blockedFrac: correctDesc.blockedFrac, edgeFrac: correctDesc.edgeFrac }));
+          gridChecks = { rivalCells: summary.rivals, weakestCue: +summary.weakestCue.toFixed(2), lookalikeElsewhere: false };
+        }
         const options = rng.fork(`labels-${t}-${line}`).shuffle(points).map((p, i) => ({
           ...p, label: ['A', 'B', 'C'][i], correct: p.D === 0, landform: model.analyzer.classify(p.x, p.y),
         }));
@@ -232,15 +282,33 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
           options, correctLabel: options.find((p) => p.correct).label, landmarks: landmarkSummary(model),
           quality: { total: vp.quality.total, ...vp.quality.components, blockedFrac: correctDesc.blockedFrac,
             edgeFrac: correctDesc.edgeFrac, landmarksInView: vp.quality.landmarksInView },
-          validation: { ok: true, issues: [], confidence, uniqueness: saturate(minDifference / (band.min * 2)),
+          validation: { ok: true, issues: [], confidence: reported, uniqueness: saturate(minDifference / (band.min * 2)),
             minDistance: minDifference, minRequiredDistance: band.min, minSeparation: separation,
             rangeSpread: Math.max(...options.map((p) => p.distance)) - Math.min(...options.map((p) => p.distance)),
             maxApparentHeightDifference: Math.max(...options.map((p) => Math.abs(p.angularHeight - chosen.angularHeight))),
-            elevationTolerance, minCue: band.cue },
+            elevationTolerance, minCue: band.cue, ...gridChecks },
           hardness,
           stats: { viewpointsEvaluated: evaluated, terrainAttempt: attempt, viewTry: t }, log,
         };
         valid.push(q);
+        if (centred) {
+          // Lazy, for the final pick only: the same sighting from any lattice spot whose friend is in
+          // another cell and at least 240 m away. Returns the smallest view distance (stops below band.min).
+          const cam = { ...camera };
+          farScans.set(q, () => {
+            let min = Infinity;
+            for (const p of grid) {
+              const point = { x: p.x + dx, y: p.y + dy };
+              if (Math.hypot(point.x - target.x, point.y - target.y) < 240 || !model.inside(point.x, point.y, 0) || model.getSlope(point.x, point.y) > 26
+                || cellAt(point.x, point.y, model.size, divisions) === targetCell) continue;
+              const observer = { ...cam, ...p, z: surfaceElevation(model, p.x, p.y) + eyeHeight };
+              if (!consistent(observer, point)) continue;
+              min = Math.min(min, descriptorDistance(correctDesc, describe(observer)));
+              if (min < band.min) break;
+            }
+            return min;
+          });
+        }
         break;
       }
       // Centred targets constrain the geometry, so compare more views before settling.
@@ -249,7 +317,18 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
     }
     if (valid.length) {
       valid.sort((a, b) => b.hardness - a.hardness);
-      const q = rng.fork('shortlist').pick(valid.slice(0, 3));
+      let q;
+      if (centred) {
+        // A clean shortlist candidate; else the hardest clean one; else the least ambiguous, flagged.
+        const far = new Map(), farD = (v) => { if (!far.has(v)) far.set(v, farScans.get(v)()); return far.get(v); };
+        const clean = friendShortlist(valid).filter((v) => farD(v) >= band.min);
+        q = clean.length ? rng.fork('shortlist').pick(clean) : valid.find((v) => farD(v) >= band.min);
+        if (!q) {
+          q = valid.reduce((a, v) => farD(v) > farD(a) ? v : a);
+          q.validation.lookalikeElsewhere = true;
+          q.validation.confidence = Math.min(q.validation.confidence, 0.4);
+        }
+      } else q = rng.fork('shortlist').pick(valid.slice(0, 3));
       q.stats = { ...q.stats, questionsCompared: valid.length, distractorCandidates: considered, ms: Math.round(now() - t0) };
       log.push({ attempt, stage: 'question', try: q.stats.viewTry, ok: true, confidence: +q.validation.confidence.toFixed(3), issues: [] });
       return q;
