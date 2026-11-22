@@ -7,6 +7,7 @@ import { cellAtExtent, parseCell } from '../src/engine/gridQuiz.js';
 import { scrambleLabels } from '../src/engine/scramble.js';
 import { modeResultHTML } from '../src/render/mapModesView.js';
 import { COMPASS_WORDS, SHORT_MAX, renderExplanation, resectionFacts, roundDistance, distanceText } from '../src/engine/explanationFacts.js';
+import { surfaceElevation } from '../src/engine/terrainSurface.js';
 
 const MODES = {
   grid: { mode: 'grid', gridSize: 8 },
@@ -22,10 +23,46 @@ for (const [id, opts] of Object.entries(MODES)) {
     try { quizzes[id].push(await generate({ seed, difficulty: 'master', ...opts })); } catch { /* counted below */ }
   }
 }
+// Seeds that carry the rarer look-alike reasons (hidden, range, skyline, same-side eye level, a hill
+// mistaken for P2, two hills of the same height) and a friend next to a landmark, so every claim is re-checked below.
+const EXTRA = [['grid', 'classic', 'rv-2'], ['grid', 'classic', 'rv-13'], ['grid', 'classic', 'rv-1'], ['friend', 'classic', 'rv-10'], ['friend', 'karst', 'rv-2'], ['friend', 'classic', 'rv-2'],
+  ['resection', 'karst', 'rv-6'], ['resection', 'alpine', 'rv-1'], ['resection', 'dunes', 'rv-3'], ['resection', 'classic', 'rv-4']];
+for (const [id, world, seed] of EXTRA) quizzes[id].push(await generate({ seed, world, difficulty: 'master', ...MODES[id] }));
 const all = () => Object.values(quizzes).flat();
 
 // Independent helpers (deliberately not the engine's own code).
 const DEG = Math.PI / 180;
+/** The published rounding: 10 m steps below 250 m, 50 m below 1 km, then 0.1 km (pinned by a table below). */
+const roundM = (m) => m < 250 ? Math.max(10, Math.round(m / 10) * 10) : m < 1000 ? Math.round(m / 50) * 50 : Math.round(m / 100) * 100;
+const textM = (m) => roundM(m) >= 1000 ? `${(roundM(m) / 1000).toFixed(1)} km` : `${roundM(m)} m`;
+const offsetOf = (cam, p) => ((bearing(cam, p) - cam.heading + 540) % 360) - 180;
+/** Worst height (m) of ground above the line from `cam` to (x, y, z), fifth-cell steps, the last min(150 m, 30 %) not counted. */
+function groundAbove(model, cam, x, y, z) {
+  const d = Math.hypot(x - cam.x, y - cam.y), steps = Math.ceil(d / (model.cell / 5)), skip = Math.min(150, d * 0.3);
+  let worst = -Infinity;
+  for (let s = 1; s < steps; s++) {
+    const t = s / steps;
+    if (d * (1 - t) < skip) break;
+    worst = Math.max(worst, model.getElevation(cam.x + (x - cam.x) * t, cam.y + (y - cam.y) * t) - (cam.z + (z - cam.z) * t));
+  }
+  return worst;
+}
+/** Highest skyline point across the frame by an own ray march: { angle, offset }. */
+function ownSkylineTop(model, cam) {
+  let best = null;
+  for (let off = -cam.fov / 2; off <= cam.fov / 2 + 1e-9; off += 0.5) {
+    const az = (cam.heading + off) * DEG;
+    let top = -90;
+    for (let d = 30; d <= 5000; d += model.cell / 2) {
+      const x = cam.x + Math.sin(az) * d, y = cam.y + Math.cos(az) * d;
+      if (!model.inside(x, y)) break;
+      top = Math.max(top, Math.atan2(model.getElevation(x, y) - cam.z, d) / DEG);
+    }
+    if (!best || top > best.angle) best = { angle: top, offset: off };
+  }
+  return best;
+}
+const reliefOf = (lm) => lm.kind === 'summit' || lm.kind === 'knoll' ? lm.prominence : lm.kind === 'saddle' ? 12 : lm.depth;
 const bearing = (a, b) => ((Math.atan2(b.x - a.x, b.y - a.y) / DEG) % 360 + 360) % 360;
 const compass = (deg) => COMPASS_WORDS[Math.round(deg / 45) % 8];
 const extentOf = (q) => q.mapExtent || { x: q.terrain.size / 2, y: q.terrain.size / 2, size: q.terrain.size };
@@ -75,7 +112,7 @@ test('facts: generated for every master quiz of the four modes, answer and publi
     if (q.grid) cells.push(f.answer.label, ...(f.lookalike ? [f.lookalike.label] : []));
     for (const cell of cells) assert.equal(parseCell(cell, q.grid.size), cell, `${tag}: ${cell}`);
     for (const [, word] of json.matchAll(/"(?:compass|facing|backCompass)":"([^"]+)"/g)) assert.ok(COMPASS_WORDS.includes(word), `${tag}: ${word}`);
-    for (const ft of f.features) assert.equal(ft.distanceText, distanceText(ft.distanceMetres), tag);
+    for (const ft of f.features) assert.equal(ft.distanceText, ft.distanceMetres >= 1000 ? `${(ft.distanceMetres / 1000).toFixed(1)} km` : `${ft.distanceMetres} m`, tag);
     const technical = [q.explanation.correct.summary, ...q.explanation.correct.evidence.map((x) => x.text)].join(' ');
     assert.doesNotMatch(technical, /also fit|apparent height of|terrain agree/, `${tag}: ${technical}`);
   }
@@ -97,9 +134,12 @@ test('facts: grid and friend landmarks are real, in the frame and in sight, re-c
       const lm = model.analyzer.landmarks.find((l) => l.kind === ft.kind && Math.round(l.z) === ft.heightMetres && cellOf(q, l) === ft.cell);
       assert.ok(lm, `${q.seed}: ${ft.name} in ${ft.cell} exists`);
       const az = bearing(cam, lm), off = ((az - cam.heading + 540) % 360) - 180, d = Math.hypot(lm.x - cam.x, lm.y - cam.y);
-      assert.ok(Math.abs(off) < cam.fov / 2, `${q.seed}: ${ft.name} in the frame`);
+      assert.ok(Math.abs(off) <= cam.fov / 2 - 2, `${q.seed}: ${ft.name} in the frame, 2° from its edge`);
       assert.ok(clearSight(model, cam, { x: lm.x, y: lm.y, z: model.getElevation(lm.x, lm.y) + 1.5 }), `${q.seed}: ${ft.name} in sight`);
-      assert.equal(ft.compass, compass(az)); assert.equal(ft.distanceMetres, roundDistance(d));
+      assert.ok(groundAbove(model, cam, lm.x, lm.y, model.getElevation(lm.x, lm.y)) <= 0, `${q.seed}: no ground in front hides the top of ${ft.name}`);
+      assert.ok(d >= 80 && d <= 1700, `${q.seed}: ${ft.name} at ${d} m`);
+      assert.ok(Math.atan(reliefOf(lm) / d) / DEG >= 0.5, `${q.seed}: ${ft.name} at least 0.5° tall`);
+      assert.equal(ft.compass, compass(az)); assert.equal(ft.distanceMetres, roundM(d)); assert.equal(ft.distanceText, textM(d));
       assert.equal(ft.side, off < -cam.fov / 6 ? 'left' : off > cam.fov / 6 ? 'right' : 'centre');
       checked++;
     }
@@ -125,7 +165,7 @@ test('facts: resection peaks, back-bearings and the trap cell match the bearing 
       assert.equal(ft.backBearing, (p.shown + 180) % 360);
       assert.equal(ft.backCompass, compass((p.shown + 180) % 360));
       assert.equal(ft.compass, compass(bearing(o, p)));
-      assert.equal(ft.distanceMetres, roundDistance(Math.hypot(p.x - o.x, p.y - o.y)));
+      assert.equal(ft.distanceMetres, roundM(Math.hypot(p.x - o.x, p.y - o.y)));
     });
     const l = f.lookalike;
     assert.ok(l, q.seed);
@@ -158,7 +198,7 @@ test('facts: look-alikes are wrong cells with a reason from the defined set, lan
     const off = ((bearing(alt, lm) - alt.heading + 540) % 360) - 180;
     if (l.reason.type === 'landmark-out-of-frame') assert.ok(Math.abs(off) > alt.fov / 2 - 2.5, `${q.seed}: ${off}`);
     if (l.reason.type === 'landmark-side') assert.equal(l.reason.side, off < -alt.fov / 6 ? 'left' : off > alt.fov / 6 ? 'right' : 'centre');
-    if (l.reason.type === 'landmark-range') assert.equal(l.reason.distanceMetres, roundDistance(Math.hypot(lm.x - alt.x, lm.y - alt.y)));
+    if (l.reason.type === 'landmark-range') assert.equal(l.reason.distanceMetres, roundM(Math.hypot(lm.x - alt.x, lm.y - alt.y)));
   }
 });
 
@@ -320,3 +360,154 @@ test('template: a long caption drops the ground ahead, side details, the second 
   assert.ok(firstLost(0) === 0 && firstLost(1) > 0 && firstLost(1) < firstLost(2) && firstLost(2) < firstLost(3), JSON.stringify([0, 1, 2, 3].map(firstLost)));
   assert.ok(at(59).length <= SHORT_MAX);
 });
+
+// ------------------------------------------------------------ review 1: claims re-checked independently (M1, M3, M4, M5)
+
+test('distances: published steps (10 m < 250 m, 50 m < 1 km, then 0.1 km)', () => {
+  const table = [[5, 10, '10 m'], [44, 40, '40 m'], [244, 240, '240 m'], [246, 250, '250 m'], [262, 250, '250 m'], [276, 300, '300 m'],
+    [974, 950, '950 m'], [976, 1000, '1.0 km'], [1049, 1000, '1.0 km'], [1051, 1100, '1.1 km'], [1649, 1600, '1.6 km']];
+  for (const [m, r, t] of table) assert.deepEqual([roundDistance(m), distanceText(m), roundM(m), textM(m)], [r, t, r, t], String(m));
+});
+
+test('facts: grid observer — facing and the ground 120 m ahead (rises / falls / level at ±3 m)', () => {
+  const seen = new Set();
+  for (const q of quizzes.grid) {
+    const model = modelOf(q), cam = q.camera, a = cam.heading * DEG;
+    const x = cam.x + Math.sin(a) * 120, y = cam.y + Math.cos(a) * 120;
+    if (!model.inside(x, y)) { assert.equal(q.explanation.facts.observer.ahead, null); continue; }
+    const change = model.getElevation(x, y) - model.getElevation(cam.x, cam.y);
+    const want = change >= 3 ? 'rises' : change <= -3 ? 'falls' : 'level';
+    assert.equal(q.explanation.facts.observer.ahead, want, `${q.seed}: ${change.toFixed(1)} m`);
+    if (Math.abs(change) >= 3 && Math.abs(change) < 30) seen.add(want);
+  }
+  assert.ok(seen.size >= 1, 'a modest rise or fall is in the sample');
+});
+
+test('facts: chosen landmarks are ≥ 8° apart; a named skyline top is at the highest skyline point', () => {
+  let tops = 0;
+  for (const q of [...quizzes.grid, ...quizzes.friend]) {
+    const model = modelOf(q), cam = q.camera, f = q.explanation.facts;
+    // The chosen landmarks keep 8° apart; the skyline top is named as such even next to one of them.
+    const named = f.features.filter((x) => x.role === 'landmark' && ['summit', 'knoll', 'saddle', 'depression'].includes(x.kind))
+      .map((ft) => model.analyzer.landmarks.find((l) => l.kind === ft.kind && Math.round(l.z) === ft.heightMetres && cellOf(q, l) === ft.cell));
+    for (let i = 0; i < named.length; i++) for (let j = i + 1; j < named.length; j++) {
+      const gap = Math.abs(((bearing(cam, named[i]) - bearing(cam, named[j]) + 540) % 360) - 180);
+      assert.ok(gap >= 8, `${q.mode} ${q.seed}: ${gap.toFixed(1)}° apart`);
+    }
+    const top = f.features.find((x) => x.role === 'skyline-top' && ['summit', 'knoll'].includes(x.kind));
+    if (!top) continue;
+    const lm = model.analyzer.landmarks.find((l) => l.kind === top.kind && Math.round(l.z) === top.heightMetres && cellOf(q, l) === top.cell);
+    const sky = ownSkylineTop(model, cam);
+    assert.ok(Math.abs(offsetOf(cam, lm) - sky.offset) <= 5, `${q.mode} ${q.seed}: ${top.name} at ${offsetOf(cam, lm).toFixed(1)}°, skyline top at ${sky.offset}°`);
+    tops++;
+  }
+  assert.ok(tops >= 5, `${tops} named skyline tops checked`);
+});
+
+test('facts: friend — the landmark "near" him is within 150 m and the closest; the look-alike is the closest wrong sighting', () => {
+  let nears = 0;
+  for (const q of quizzes.friend) {
+    const model = modelOf(q), f = q.explanation.facts, t = f.target;
+    const byDistance = model.analyzer.landmarks.map((l) => ({ l, d: Math.hypot(l.x - q.friend.x, l.y - q.friend.y) })).sort((a, b) => a.d - b.d);
+    if (byDistance[0].d <= 150) {
+      nears++;
+      assert.equal(t.near.cell, cellOf(q, byDistance[0].l), q.seed);
+      assert.match(t.near.name, new RegExp(byDistance[0].l.kind === 'depression' ? 'depression' : `${Math.round(byDistance[0].l.z)} m ${byDistance[0].l.kind}`));
+    } else assert.equal(t.near, null, `${q.seed}: nothing within 150 m`);
+    const wrong = q.friend.matches.filter((m) => !m.correct && cellOf(q, m) && cellOf(q, m) !== q.correctLabel);
+    if (!wrong.length) { assert.equal(f.lookalike, null); continue; }
+    const minD = Math.min(...wrong.map((m) => m.D));
+    assert.ok(wrong.some((m) => m.D === minD && cellOf(q, m) === f.lookalike.label), `${q.seed}: ${f.lookalike.label} is the closest wrong sighting`);
+  }
+  assert.ok(nears >= 1, 'a friend near a landmark is in the sample');
+});
+
+test('facts: landmark look-alike reasons hold from the look-alike camera (clearly out, clearly hidden, ≥ 10° shift, range)', () => {
+  const types = new Set();
+  for (const q of [...quizzes.grid, ...quizzes.friend]) {
+    const f = q.explanation.facts, r = f.lookalike?.reason;
+    if (!r?.type.startsWith('landmark-')) continue;
+    types.add(r.type);
+    const model = modelOf(q), ft = f.features[r.feature], cam = q.camera;
+    const lm = model.analyzer.landmarks.find((x) => x.kind === ft.kind && Math.round(x.z) === ft.heightMetres && cellOf(q, x) === ft.cell);
+    const alt = q.mode === 'grid' ? (() => { const o = q.options.find((x) => x.label === f.lookalike.label);
+      return { ...cam, x: o.x, y: o.y, z: model.getElevation(o.x, o.y) + cam.eyeHeight, heading: o.heading ?? cam.heading }; })()
+      : q.friend.matches.filter((m) => !m.correct && cellOf(q, m) === f.lookalike.label).sort((a, b) => a.D - b.D)[0].observer;
+    const oa = offsetOf(alt, lm), os = offsetOf(cam, lm), z = model.getElevation(lm.x, lm.y), tag = `${q.mode} ${q.seed} ${r.type}`;
+    const da = Math.hypot(lm.x - alt.x, lm.y - alt.y), ds = Math.hypot(lm.x - cam.x, lm.y - cam.y);
+    if (r.type === 'landmark-out-of-frame') {
+      assert.ok(Math.abs(oa) >= alt.fov / 2 + 3, `${tag}: ${oa.toFixed(1)}° vs ±${alt.fov / 2}°`);
+      assert.equal(r.direction, oa < 0 ? 'left' : 'right', tag);
+    } else {
+      assert.ok(Math.abs(oa) <= alt.fov / 2, `${tag}: in the picture`);
+      if (r.type === 'landmark-hidden') assert.ok(groundAbove(model, alt, lm.x, lm.y, z + 2) > 0, `${tag}: ground hides even 2 m above the top`);
+      else assert.ok(groundAbove(model, alt, lm.x, lm.y, z) <= 0, `${tag}: in sight`);
+      if (r.type === 'landmark-side') {
+        assert.ok(Math.abs(oa - os) >= 10, `${tag}: shift ${Math.abs(oa - os).toFixed(1)}°`);
+        assert.equal(r.side, oa < -alt.fov / 6 ? 'left' : oa > alt.fov / 6 ? 'right' : 'centre', tag);
+      }
+      if (r.type === 'landmark-range') {
+        assert.ok(da / ds >= 1.5 || da / ds <= 0.67, tag);
+        assert.equal(r.looks, da > ds ? 'smaller' : 'larger', tag);
+        assert.equal(r.distanceText, textM(da), tag);
+      }
+    }
+  }
+  assert.deepEqual([...types].sort(), ['landmark-hidden', 'landmark-out-of-frame', 'landmark-range', 'landmark-side']);
+});
+
+test('facts: a skyline look-alike reason says higher / lower as an own skyline ray march sees it', () => {
+  const horizonAt = (model, cam, off) => {
+    const az = (cam.heading + off) * DEG;
+    let top = -90;
+    for (let d = 30; d <= 5000; d += model.cell / 2) {
+      const x = cam.x + Math.sin(az) * d, y = cam.y + Math.cos(az) * d;
+      if (!model.inside(x, y)) break;
+      top = Math.max(top, Math.atan2(model.getElevation(x, y) - cam.z, d) / DEG);
+    }
+    return top;
+  };
+  let checked = 0;
+  for (const q of [...quizzes.grid, ...quizzes.friend]) {
+    const f = q.explanation.facts, r = f.lookalike?.reason;
+    if (r?.type !== 'skyline-higher' && r?.type !== 'skyline-lower') continue;
+    const alt = q.explanation.alternatives.find((a) => a.label === f.lookalike.label);
+    const v = alt.reasons.find((x) => x.type === 'view-mismatch' && x.data.feature === 'skyline' && Math.abs(x.data.deltaDegrees) >= 1);
+    assert.equal(r.side, v.data.screenSide);
+    const model = modelOf(q), cam = q.camera;
+    const altCam = q.mode === 'grid' ? (() => { const o = q.options.find((x) => x.label === f.lookalike.label);
+      return { ...cam, x: o.x, y: o.y, z: o.z + cam.eyeHeight, heading: o.heading ?? cam.heading }; })()
+      : q.friend.matches.filter((m) => !m.correct && cellOf(q, m) === f.lookalike.label).sort((a, b) => a.D - b.D)[0].observer;
+    const delta = horizonAt(model, altCam, v.data.screenOffset) - horizonAt(model, cam, v.data.screenOffset);
+    assert.equal(r.type, delta > 0 ? 'skyline-higher' : 'skyline-lower', `${q.mode} ${q.seed}: own delta ${delta.toFixed(2)}°`);
+    checked++;
+  }
+  assert.ok(checked >= 2, `${checked} skyline reasons checked`);
+});
+
+test('facts: intervisibility numbers re-computed from the terrain (distance, compass, hidden foot, closest hidden flag)', () => {
+  const needed = (model, eye, p) => { // lowest visible height above the flag's foot, own sampling
+    const d = Math.hypot(p.x - eye.x, p.y - eye.y), steps = Math.ceil(d / 1.5), zT = surfaceElevation(model, p.x, p.y);
+    let worst = -Infinity, at = 0;
+    for (let i = 1; i < steps - 1; i++) {
+      const t = i / steps, need = (surfaceElevation(model, eye.x + (p.x - eye.x) * t, eye.y + (p.y - eye.y) * t) - eye.z) / t;
+      if (need > worst) { worst = need; at = d * t; }
+    }
+    return { height: worst + eye.z - zT, at };
+  };
+  for (const q of quizzes.visibility) {
+    const model = modelOf(q), f = q.explanation.facts, o = q.map.observer, eye = { ...o, z: surfaceElevation(model, o.x, o.y) + 1.7 };
+    const flag = (label) => q.options.find((x) => x.label === label);
+    const answer = flag(f.answer.label), own = needed(model, eye, answer), d = Math.hypot(answer.x - o.x, answer.y - o.y);
+    assert.equal(f.target.distanceText, textM(d), q.seed);
+    assert.equal(f.target.compass, compass(bearing(o, answer)), q.seed);
+    assert.ok(Math.abs(f.target.hiddenLowestMetres - Math.max(0, own.height)) <= 0.2, `${q.seed}: hidden ${f.target.hiddenLowestMetres} vs ${own.height.toFixed(2)}`);
+    const hidden = q.options.filter((x) => !x.correct).map((x) => ({ x, own: needed(model, eye, x) })).sort((a, b) => a.own.height - b.own.height);
+    const near = hidden.find((h) => h.x.label === f.lookalike.label);
+    assert.ok(near.own.height <= hidden[0].own.height + 0.2, `${q.seed}: ${f.lookalike.label} is the hidden flag closest to showing`);
+    assert.ok(Math.abs(f.lookalike.reason.neededMetres - near.own.height) <= 0.2, `${q.seed}: needs ${f.lookalike.reason.neededMetres} vs ${near.own.height.toFixed(2)}`);
+    assert.ok(Math.abs(f.lookalike.reason.blockDistanceMetres - near.own.at) <= Math.max(30, 0.06 * near.own.at), `${q.seed}: block at ${near.own.at.toFixed(0)}`);
+    assert.ok(f.lookalike.reason.neededMetres > f.target.flagMetres, `${q.seed}: the look-alike is really hidden`);
+  }
+});
+

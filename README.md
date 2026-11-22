@@ -340,6 +340,11 @@ view; the friend's direction, distance and landform from YOU; resection peaks wi
 their back-bearings; and the closest look-alike with a concrete reason (a landmark
 out of the picture, hidden, on the other side or at another distance; a skyline
 higher or lower; a trap hill too near, hidden or on the wrong side of eye level).
+Claims are made only when they are clear: a named landmark is at least 2° inside
+the frame and no ground in front of it (beyond its own last 150 m) rises above the
+line to its top; "out of the picture" means at least 3° beyond the frame edge;
+"hidden" means ground hides even a point 2 m above the top; "on the other side"
+needs a shift of at least 10°. Borderline cases fall through to the next reason.
 No internal measures (view distances, apparent sizes in degrees) appear in it.
 `steps` (2–4 sentences, shown first after answering) and `short` (≤ 280
 characters, used for social captions) are built from `facts` alone; a long `short`

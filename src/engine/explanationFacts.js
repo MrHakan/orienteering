@@ -21,6 +21,10 @@ export function distanceText(m) {
 
 const LANDMARK_KINDS = new Set(['summit', 'knoll', 'saddle', 'depression']);
 const MIN_RANGE = 80, MIN_SIZE = 0.5, MIN_SEPARATION = 8, TOP_MATCH_DEGREES = 3, TOP_MATCH_METRES = 150, NEAR_TARGET = 150;
+// A claim is made only when it is clear: named landmarks are in the frame with ground-free sight to
+// their top; "out of the picture" means beyond the frame edge by OUT_MARGIN (horizontally); "hidden"
+// means ground hides even a point HIDDEN_LIFT above the top; a side change needs a shift of SIDE_SHIFT.
+const FRAME_MARGIN = 2, OUT_MARGIN = 3, HIDDEN_LIFT = 2, SIDE_SHIFT = 10, SHOULDER = 150;
 const signed = (a, b) => wrap360(a - b + 180) - 180;
 const sideAt = (offset, fov) => offset < -fov / 6 ? 'left' : offset > fov / 6 ? 'right' : 'centre';
 const extentOf = (q) => q.mapExtent || { x: q.terrain.size / 2, y: q.terrain.size / 2, size: q.terrain.size };
@@ -33,14 +37,35 @@ const adjacentCells = (a, b) => {
   return Math.max(Math.abs(ra - rb), Math.abs(ca - cb)) === 1;
 };
 
-/** How a landmark appears from a camera: bearing, screen side, inside the frame, clear line of sight. */
+/**
+ * How far ground in front of a target point rises above the line from the camera to it (metres;
+ * > 0 blocked). Quarter-cell steps, no slack; the target's own shoulder (the last
+ * min(150 m, 30 %) of the line) is not counted.
+ */
+export function sightBlock(model, cam, x, y, z) {
+  const d = Math.hypot(x - cam.x, y - cam.y), steps = Math.ceil(d / (model.cell / 4)), shoulder = Math.min(SHOULDER, d * 0.3);
+  let worst = -Infinity;
+  for (let s = 1; s < steps; s++) {
+    const t = s / steps;
+    if (d * (1 - t) < shoulder) break;
+    worst = Math.max(worst, model.getElevation(cam.x + (x - cam.x) * t, cam.y + (y - cam.y) * t) - (cam.z + (z - cam.z) * t));
+  }
+  return worst;
+}
+
+/**
+ * How a landmark appears from a camera: bearing, screen side, inside the frame (with a margin),
+ * clearly outside it (horizontally), and clear sight: the viewpoint line of sight to just above its
+ * top and, beyond its own shoulder, no ground at all above the line to the top itself.
+ */
 export function landmarkView(model, cam, lm) {
   const dx = lm.x - cam.x, dy = lm.y - cam.y, d = Math.hypot(dx, dy);
   const az = wrap360(Math.atan2(dx, dy) / DEG), offset = signed(az, cam.heading);
   const z = model.getElevation(lm.x, lm.y), elevation = Math.atan2(z - cam.z, d) / DEG;
-  const inFrame = Math.abs(offset) <= cam.fov / 2 - 2 && Math.abs(elevation - cam.pitch) <= Math.max(12, cam.fov * 0.3);
-  const clear = inFrame && lineOfSight(model, cam.x, cam.y, cam.z, lm.x, lm.y, z + 1.5);
-  return { d, az, offset, inFrame, clear, side: sideAt(offset, cam.fov) };
+  const inFrame = Math.abs(offset) <= cam.fov / 2 - FRAME_MARGIN && Math.abs(elevation - cam.pitch) <= Math.max(12, cam.fov * 0.3);
+  const outOfFrame = Math.abs(offset) >= cam.fov / 2 + OUT_MARGIN;
+  const clear = inFrame && lineOfSight(model, cam.x, cam.y, cam.z, lm.x, lm.y, z + 1.5) && sightBlock(model, cam, lm.x, lm.y, z) <= 0;
+  return { d, az, z, offset, inFrame, outOfFrame, clear, side: sideAt(offset, cam.fov) };
 }
 
 /** Landmarks in the frame with a clear line of sight, most conspicuous (weight × apparent size) first. */
@@ -110,14 +135,22 @@ function observerFacts(model, cam, cell) {
     ahead: change === null ? null : change >= 3 ? 'rises' : change <= -3 ? 'falls' : 'level' };
 }
 
-/** Why a look-alike camera does not give the same view, from the first landmark feature that differs. */
+/**
+ * Why a look-alike camera does not give the same view, from the first landmark feature where the
+ * difference is clear: out of the picture, hidden, on another side (shift ≥ SIDE_SHIFT), or much
+ * nearer / farther. Borderline cases (near the frame edge, partly hidden, small shifts) say nothing.
+ */
 function landmarkReason(model, items, cam, altCam) {
   for (const [index, { lm, feature }] of items.entries()) {
     if (!lm) continue;
     const seen = landmarkView(model, cam, lm), alt = landmarkView(model, altCam, lm);
-    if (!alt.inFrame) return { type: 'landmark-out-of-frame', feature: index, direction: alt.offset < 0 ? 'left' : 'right' };
-    if (!alt.clear) return { type: 'landmark-hidden', feature: index };
-    if (alt.side !== seen.side) return { type: 'landmark-side', feature: index, side: alt.side };
+    if (alt.outOfFrame) return { type: 'landmark-out-of-frame', feature: index, direction: alt.offset < 0 ? 'left' : 'right' };
+    if (!alt.inFrame) continue;
+    if (!alt.clear) {
+      if (sightBlock(model, altCam, lm.x, lm.y, alt.z + HIDDEN_LIFT) > 0) return { type: 'landmark-hidden', feature: index };
+      continue;
+    }
+    if (alt.side !== seen.side && Math.abs(alt.offset - seen.offset) >= SIDE_SHIFT) return { type: 'landmark-side', feature: index, side: alt.side };
     const ratio = alt.d / seen.d;
     if ((ratio >= 1.5 || ratio <= 0.67) && distanceText(alt.d) !== feature.distanceText) {
       return { type: 'landmark-range', feature: index, distanceMetres: roundDistance(alt.d), distanceText: distanceText(alt.d), looks: ratio > 1 ? 'smaller' : 'larger' };
