@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { measure, markdown, stats, correlation, byWorld } from '../scripts/quality-report.mjs';
+import { measure, markdown, stats, correlation, byWorld, summarise } from '../scripts/quality-report.mjs';
 
 const KEYS = {
   grid: ['weakCue', 'lookalikes', 'closestD', 'adjacent', 'edge'],
@@ -26,19 +26,22 @@ test('quality report measures every main mode with finite numbers and repeats ex
     assert.equal(Object.values(m.worlds).reduce((s, w) => s + w.n, 0), 2, `${mode}: per-world rows cover every seed`);
   }
   const text = markdown(first);
-  for (const mode of Object.keys(KEYS)) assert.match(text, new RegExp(`\\| ${mode} \\| 2/2 \\|`));
+  for (const mode of Object.keys(KEYS)) assert.match(text, new RegExp(`\\| ${mode} \\| 2/2 \\(\\d\\) \\|`));
   assert.doesNotMatch(text, /\[deep\]/);
-  assert.match(text, /\| mode \| world \| valid \|/);
+  assert.match(text, /\| mode \| world \| generated \|/);
 });
 
 test('quality report per-world breakdown counts and times failed generations', () => {
   const rows = [{ world: 'dunes', ok: true, hardness: 0.5, confidence: 0.9, ms: 100, flagged: 1 },
     { world: 'classic', ok: true, hardness: 0.7, confidence: 0.8, ms: 200 }];
-  const failed = [{ world: 'dunes', error: 'No clear friend sighting found.', ms: 700 }];
+  const failed = [{ seed: 'dn-9', world: 'dunes', error: 'No clear friend sighting found.', ms: 700 }];
   const w = byWorld(rows, failed);
   assert.deepEqual(Object.keys(w), ['dunes', 'classic']);
-  assert.deepEqual(w.dunes, { n: 2, valid: 1, msMean: 400, hardnessP50: 0.5, confidenceP50: 0.9, flagged: 1 });
-  assert.equal(w.classic.valid, 1);
+  assert.deepEqual(w.dunes, { n: 2, generated: 1, msMean: 400, hardnessP50: 0.5, confidenceP50: 0.9, flagged: 1 });
+  assert.equal(w.classic.generated, 1);
+  const m = summarise(rows, failed);
+  assert.deepEqual([m.generated, m.valid, m.flagged, m.stats.ms.n, m.stats.ms.max, m.stats.hardness.n], [2, 2, 1, 3, 700, 2], 'failures are timed, not scored');
+  assert.match(markdown({ friend: { n: 3, ...m } }), /FAILED dn-9 \(dunes, 700 ms\)/);
 });
 
 test('quality report statistics', () => {

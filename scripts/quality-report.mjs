@@ -25,7 +25,9 @@ export const MODES = {
   resection: { mode: 'resection', resectionAnswer: 'grid', gridSize: 8 },
   friend: { mode: 'friend', friendAnswer: 'grid', gridSize: 8 },
 };
-const SIZE = 8, FAR = 240, LATTICE = 48;
+// LIMIT: a friend sighting from another cell closer than this is a second answer (the Master floor;
+// fixed here so every engine version and level is judged alike).
+const SIZE = 8, FAR = 240, LATTICE = 48, LIMIT = 0.8;
 
 const modelOf = (quiz) => new TerrainModel({ ...quiz.terrain, meta: { world: quiz.terrain.world }, seed: quiz.terrain.modelSeed });
 const rowCol = (label) => [label.charCodeAt(0) - 65, +label.slice(1) - 1];
@@ -49,7 +51,7 @@ const KPI = {
     const closest = wrong[0], gate = [closest, ...wrong.filter((o) => o.D < 2 * minD)];
     const row = { margin: cellBorderMargin(quiz.camera.x, quiz.camera.y, wholeMap(quiz.terrain.size), SIZE),
       closestD: closest.D, weakCue: Math.min(...gate.map((o) => o.cue.magnitude)), lookalikes: gate.length - 1,
-      adjacent: chebyshev(closest.label, quiz.correctLabel) === 1 ? 1 : 0, edge: edgeCell(quiz.correctLabel) };
+      adjacent: chebyshev(closest.label, quiz.correctLabel) === 1 ? 1 : 0, edge: edgeCell(quiz.correctLabel), faint: quiz.validation.faintCue ? 1 : 0 };
     if (deep) {
       // Off-centre spots in other cells, at least FAR m away, whose view is closer than the ambiguity limit.
       const model = modelOf(quiz), L = model.size, cam = quiz.camera;
@@ -108,7 +110,7 @@ const KPI = {
   friend(quiz, deep) {
     const model = modelOf(quiz), L = model.size, cam = quiz.camera, T = quiz.friend, dx = T.x - cam.x, dy = T.y - cam.y;
     const describe = (c) => model.skyline.viewDescriptor(c.x, c.y, c.heading, cam.fov, { eyeHeight: c.z - model.getElevation(c.x, c.y), columns: 33 });
-    const base = describe(cam), seen = personSight(model, cam, T), tol = quiz.validation.elevationTolerance, minD = quiz.validation.minRequiredDistance;
+    const base = describe(cam), seen = personSight(model, cam, T), tol = quiz.validation.elevationTolerance, minD = LIMIT;
     // Another place for the friend, seen at the same bearing, range and eye-level angle: its view distance.
     const scan = (points, { far = 0, inside = 70, cell = SIZE } = {}) => {
       let min = Infinity, ambiguous = 0;
@@ -152,16 +154,16 @@ export function correlation(x, y) {
   const sx = Math.sqrt(x.reduce((s, v) => s + (v - mx) ** 2, 0)), sy = Math.sqrt(y.reduce((s, v) => s + (v - my) ** 2, 0));
   return sx && sy ? c / (sx * sy) : NaN;
 }
-/** Per world: generated / failed, mean time (failures included), medians and flagged count. */
+/** Per world: generated / failed, mean time (failures included), medians and flagged (low-confidence) count. */
 export function byWorld(rows, failed) {
   const out = {};
   for (const r of [...rows, ...failed]) {
-    const w = out[r.world] ??= { n: 0, valid: 0, ms: [], hardness: [], confidence: [], flagged: 0 };
+    const w = out[r.world] ??= { n: 0, generated: 0, ms: [], hardness: [], confidence: [], flagged: 0 };
     w.n++; w.ms.push(r.ms);
     if (r.error) continue;
-    w.valid += r.ok ? 1 : 0; w.hardness.push(r.hardness); w.confidence.push(r.confidence); w.flagged += r.flagged || 0;
+    w.generated++; w.hardness.push(r.hardness); w.confidence.push(r.confidence); w.flagged += r.flagged || 0;
   }
-  return Object.fromEntries(Object.entries(out).sort((a, b) => b[1].n - a[1].n).map(([k, w]) => [k, { n: w.n, valid: w.valid,
+  return Object.fromEntries(Object.entries(out).sort((a, b) => b[1].n - a[1].n).map(([k, w]) => [k, { n: w.n, generated: w.generated,
     msMean: mean(w.ms), hardnessP50: quantile(w.hardness, 0.5), confidenceP50: quantile(w.confidence, 0.5), flagged: w.flagged }]));
 }
 
@@ -182,15 +184,20 @@ export async function measure({ n = 60, world = 'auto', prefix = 'qq', modes = O
       }
       const ms = performance.now() - t0;
       rows.push({ seed, world: quiz.terrain.world, label: quiz.correctLabel, ok: !!quiz.validation.ok, hardness: quiz.hardness,
-        confidence: quiz.validation.confidence, ms, ...KPI[name](quiz, deep) });
+        confidence: quiz.validation.confidence, ms, flagged: quiz.lowConfidence || !quiz.validation.ok ? 1 : 0, ...KPI[name](quiz, deep) });
     }
-    const numeric = rows.length ? Object.keys(rows[0]).filter((k) => typeof rows[0][k] === 'number') : [];
-    out[name] = { n, difficulty, valid: rows.filter((r) => r.ok).length, failed, rows,
-      stats: { ...Object.fromEntries(numeric.map((k) => [k, stats(rows.map((r) => r[k]))])), ms: stats([...rows, ...failed].map((r) => r.ms)) },
-      corr: correlation(rows.map((r) => r.hardness), rows.map((r) => r.confidence)),
-      worlds: byWorld(rows, failed), labels: new Set(rows.map((r) => r.label)).size };
+    out[name] = { n, difficulty, ...summarise(rows, failed) };
   }
   return out;
+}
+
+/** Statistics of one mode's rows; failed generations count in the time and per-world numbers. */
+export function summarise(rows, failed) {
+  const numeric = rows.length ? Object.keys(rows[0]).filter((k) => typeof rows[0][k] === 'number') : [];
+  return { generated: rows.length, valid: rows.filter((r) => r.ok).length, flagged: rows.filter((r) => r.flagged).length, failed, rows,
+    stats: { ...Object.fromEntries(numeric.map((k) => [k, stats(rows.map((r) => r[k]))])), ms: stats([...rows, ...failed].map((r) => r.ms)) },
+    corr: correlation(rows.map((r) => r.hardness), rows.map((r) => r.confidence)),
+    worlds: byWorld(rows, failed), labels: new Set(rows.map((r) => r.label)).size };
 }
 
 // Per-mode fairness lines: [label, how to show it].
@@ -198,7 +205,7 @@ const count = (key) => (m) => `${m.rows.filter((r) => r[key]).length}/${m.rows.l
 const dist = (key, d = 2) => (m) => m.stats[key] ? `min ${fmt(m.stats[key].min, d)} p10 ${fmt(m.stats[key].p10, d)} p50 ${fmt(m.stats[key].p50, d)}` : '—';
 const KPI_LINES = {
   grid: [['weakest look-alike cue (°)', dist('weakCue')], ['look-alike cells (D < 2·minD)', dist('lookalikes', 0)], ['closest cell D', dist('closestD')],
-    ['closest look-alike adjacent', count('adjacent')], ['answer on an edge cell', count('edge')], ['[deep] far off-centre look-alike', count('farLookalike')]],
+    ['closest look-alike adjacent', count('adjacent')], ['answer on an edge cell', count('edge')], ['faint-cue fallback (flagged)', count('faint')], ['[deep] far off-centre look-alike', count('farLookalike')]],
   resection: [['quiz with an unrefuted rival fix', count('anyUnrefuted')], ['unrefuted rival fixes', dist('unrefuted', 0)],
     ['fix tolerance T (°)', dist('fixTolerance')], ['smallest peak size (°)', dist('minPeakSize')], ['farthest peak (m)', dist('farPeak', 0)],
     ['answer on an edge cell', count('edge')]],
@@ -210,16 +217,16 @@ const fmt = (v, d = 2) => Number.isFinite(v) ? v.toFixed(d) : '—';
 const q3 = (s) => s ? `${fmt(s.p10)}/${fmt(s.p50)}/${fmt(s.p90)} (sd ${fmt(s.sd, 3)}, uniq ${s.uniq})` : '—';
 
 export function markdown(result, { deep = false } = {}) {
-  const lines = ['| mode | valid | hardness p10/p50/p90 | confidence p10/p50/p90 | corr(h,c) | margin min/p10/p50 | ms mean/p50/p90/max (all seeds) | labels |',
-    '|------|-------|----------------------|------------------------|-----------|--------------------|---------------------------------|--------|'];
+  const lines = ['| mode | generated (flagged) | hardness p10/p50/p90 | confidence p10/p50/p90 | corr(h,c) | margin min/p10/p50 | ms mean/p50/p90/max (all seeds) | labels |',
+    '|------|---------------------|----------------------|------------------------|-----------|--------------------|---------------------------------|--------|'];
   for (const [name, m] of Object.entries(result)) {
     const s = m.stats, ms = s.ms || {};
-    lines.push(`| ${name} | ${m.valid}/${m.n} | ${q3(s.hardness)} | ${q3(s.confidence)} | ${fmt(m.corr)} | ${s.margin ? `${fmt(s.margin.min)}/${fmt(s.margin.p10)}/${fmt(s.margin.p50)}` : '—'} `
+    lines.push(`| ${name} | ${m.generated}/${m.n} (${m.flagged}) | ${q3(s.hardness)} | ${q3(s.confidence)} | ${fmt(m.corr)} | ${s.margin ? `${fmt(s.margin.min)}/${fmt(s.margin.p10)}/${fmt(s.margin.p50)}` : '—'} `
       + `| ${fmt(ms.mean, 0)}/${fmt(ms.p50, 0)}/${fmt(ms.p90, 0)}/${fmt(ms.max, 0)} | ${m.labels} |`);
   }
-  lines.push('', '| mode | world | valid | ms mean (all seeds) | hardness p50 | confidence p50 | flagged |', '|------|-------|-------|---------------------|--------------|----------------|---------|');
+  lines.push('', '| mode | world | generated | ms mean (all seeds) | hardness p50 | confidence p50 | flagged |', '|------|-------|-------|---------------------|--------------|----------------|---------|');
   for (const [name, m] of Object.entries(result)) for (const [world, w] of Object.entries(m.worlds)) {
-    lines.push(`| ${name} | ${world} | ${w.valid}/${w.n} | ${fmt(w.msMean, 0)} | ${fmt(w.hardnessP50)} | ${fmt(w.confidenceP50)} | ${w.flagged} |`);
+    lines.push(`| ${name} | ${world} | ${w.generated}/${w.n} | ${fmt(w.msMean, 0)} | ${fmt(w.hardnessP50)} | ${fmt(w.confidenceP50)} | ${w.flagged} |`);
   }
   for (const [name, m] of Object.entries(result)) {
     lines.push('', `${name}:`);
