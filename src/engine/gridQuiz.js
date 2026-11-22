@@ -46,6 +46,20 @@ export function parseCell(value, divisions) {
   return `${match[1]}${Number(match[2])}`;
 }
 
+/**
+ * Grid question metrics. hardness: how close the nearest look-alike comes, how many cells look
+ * alike and how many of those are far from the answer (no neighbouring-cell shortcut).
+ * confidence: how visible the weakest look-alike's skyline cue is and how clear the view is —
+ * fairness, not closeness, so the two numbers rank different things.
+ */
+export function gridScore({ closestD, minD, lookalikes, remote, weakestCue, quality, blockedFrac, edgeFrac }) {
+  const closeness = Math.exp(-(closestD - minD) / 1.2);
+  return {
+    hardness: saturate(0.5 * closeness + 0.3 * (1 - Math.exp(-lookalikes / 5)) + 0.2 * (lookalikes ? remote / lookalikes : 0)),
+    confidence: saturate(0.45 * saturate((weakestCue - 0.8) / 1.6) + 0.4 * saturate(quality / 0.8) + 0.15 * saturate(1 - 2 * blockedFrac - 2 * edgeFrac)),
+  };
+}
+
 /** Every possible origin is a cell centre, so all answers can be checked.
  * Lost compass checks other cells in all eight directions, not only the
  * true heading. No unvalidated fallback question is returned.
@@ -98,16 +112,22 @@ export function generateGridQuiz({ seed, world = 'classic', difficulty = 'medium
         }
         return { ...p, ...best, correct: false };
       });
-      const closest = options.filter((o) => !o.correct).reduce((a, b) => b.D < a.D ? b : a);
+      const wrong = options.filter((o) => !o.correct), closest = wrong.reduce((a, b) => b.D < a.D ? b : a);
+      // Look-alike cells: the closest one and every cell within twice the ambiguity limit.
+      const near = wrong.filter((o) => o.D < 2 * minD), weakestCue = Math.min(...[closest, ...near].map((o) => o.cue.magnitude));
       const issues = [];
       if (closest.D < minD) issues.push(`cell ${closest.label} looks too similar (${closest.D.toFixed(2)}°)`);
+      // Master: each look-alike must differ by a skyline cue large enough to see in the frame.
+      if (base.search && weakestCue < base.search.cue) issues.push('look-alike cell without a visible cue');
       const uniqueness = saturate(closest.D / (minD * 2));
-      const confidence = saturate(0.6 * uniqueness + 0.4 * vp.quality.total);
-      if (confidence < base.minConfidence) issues.push('insufficient confidence');
+      const accept = saturate(0.6 * uniqueness + 0.4 * vp.quality.total); // acceptance rule, unchanged
+      if (accept < base.minConfidence) issues.push('insufficient confidence');
+      const remote = near.filter((o) => Math.max(Math.abs(o.row - origin.row), Math.abs(o.column - origin.column)) > 1).length;
+      const { hardness, confidence } = gridScore({ closestD: closest.D, minD, lookalikes: near.length, remote, weakestCue,
+        quality: vp.quality.total, blockedFrac: correct.blockedFrac, edgeFrac: correct.edgeFrac });
       log.push({ attempt, stage: 'question', try: t, ok: !issues.length, confidence: +confidence.toFixed(3), issues });
       if (issues.length) continue;
-      const hardness = saturate(Math.exp(-(closest.D - minD) / 1.2));
-      valid.push({ vp, correct, options, closest, confidence, uniqueness, hardness });
+      valid.push({ vp, correct, options, closest, confidence, uniqueness, hardness, weakestCue, lookalikes: near.length, remote });
       if (!base.search) break;
     }
     if (!valid.length) continue;
@@ -126,7 +146,8 @@ export function generateGridQuiz({ seed, world = 'classic', difficulty = 'medium
       options, correctLabel: cellAt(e.vp.x, e.vp.y, model.size, divisions), closestLabel: e.closest.label,
       quality: { total: e.vp.quality.total, ...e.vp.quality.components, blockedFrac: e.correct.blockedFrac,
         edgeFrac: e.correct.edgeFrac, landmarksInView: e.vp.quality.landmarksInView },
-      validation: { ok: true, issues: [], confidence: e.confidence, uniqueness: e.uniqueness, minDistance: e.closest.D, minRequiredDistance: minD },
+      validation: { ok: true, issues: [], confidence: e.confidence, uniqueness: e.uniqueness, minDistance: e.closest.D, minRequiredDistance: minD,
+        weakestCue: +e.weakestCue.toFixed(2), lookalikes: e.lookalikes, remoteLookalikes: e.remote },
       hardness: e.hardness, landmarks: landmarkSummary(model),
       stats: { viewpointsEvaluated: evaluated, cellsChecked: cells.length, directionsChecked: hidden ? 8 : 1,
         questionsCompared: valid.length, terrainAttempt: attempt, ms: Math.round(now() - t0) }, log,
