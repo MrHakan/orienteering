@@ -213,3 +213,27 @@ test('grid: below master only the reported numbers change; master repeats exactl
   assert.deepEqual(b.camera, a.camera);
   assert.deepEqual([b.correctLabel, b.hardness, b.validation], [a.correctLabel, a.hardness, a.validation]);
 });
+
+test('master grid: Master ranks by the reported hardness and picks from the three hardest', async () => {
+  for (const q of await masterGrid()) {
+    assert.equal(q.validation.faintCue, false, q.seed);
+    const ok = q.log.filter((l) => l.ok && l.attempt === q.stats.terrainAttempt).map((l) => l.hardness).sort((a, b) => b - a);
+    assert.equal(ok.length, q.stats.questionsCompared, q.seed);
+    assert.ok(+q.hardness.toFixed(4) >= ok[Math.min(2, ok.length - 1)], `${q.seed}: ${q.hardness} not among ${ok.slice(0, 3)}`);
+  }
+});
+
+test('master grid on dunes: when no look-alike shows a visible cue, the clearest one is kept and marked', async () => {
+  // These seeds found no candidate with a visible cue on two terrains (earlier they threw after four).
+  for (const seed of ['dn-16', 'dn-34']) {
+    const q = await generate({ seed, world: 'dunes', mode: 'grid', gridSize: 8, difficulty: 'master' });
+    assert.deepEqual([q.validation.faintCue, q.validation.ok, q.lowConfidence], [true, false, true], seed);
+    assert.ok(q.stats.terrainAttempt >= 1, `${seed}: one more terrain is tried first`);
+    assert.ok(q.validation.weakestCue < 1.6 && q.hardness <= 0.3 && q.validation.confidence <= 0.4, seed);
+    assert.deepEqual(q.validation.issues, ['look-alike cell without a visible cue']);
+    assert.match(q.explanation.caution, /uncertain/);
+    const faint = q.log.filter((l) => l.attempt === q.stats.terrainAttempt && l.issues.length === 1 && l.issues[0] === 'look-alike cell without a visible cue');
+    assert.ok(faint.length >= 1 && !q.log.some((l) => l.attempt === q.stats.terrainAttempt && l.ok), seed);
+    assert.equal(q.validation.weakestCue, Math.max(...faint.map((l) => l.weakestCue)), `${seed}: the clearest cue is kept`);
+  }
+});

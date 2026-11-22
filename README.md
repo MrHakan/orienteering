@@ -344,7 +344,10 @@ fair the question is (visible cue, reading tolerance); `npm run quality` reports
 their spread together with independent fairness checks. Changed outputs in this
 version: `m=grid&d=master` (questions and numbers), `m=grid` below Master (numbers
 only), `m=resection&ra=grid` and `m=friend&fa=grid` from Medium up (questions and
-numbers). Easy grids, point answers and every other mode are unchanged.
+numbers). Easy grids, point answers and every other mode are unchanged. When a
+Master grid or a friend grid has no question that passes its look-alike rule
+(mostly on dunes), the least ambiguous one is returned with `lowConfidence: true`,
+`validation.ok: false`, hardness ≤ 0.3 and confidence ≤ 0.4 instead of an error.
 
 Explanations are shown only after answering. They describe the generated terrain
 and sightlines; an inconclusive comparison or low-confidence question is marked
