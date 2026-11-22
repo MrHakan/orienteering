@@ -1,9 +1,11 @@
 // Question-quality report for the three main TopoGuess modes (Instagram series):
 // grid, resection grid and friend grid at d=master.
 //
-//   node scripts/quality-report.mjs [--n 60] [--world auto] [--prefix qq] [--modes grid,resection,friend] [--deep] [--json]
+//   node scripts/quality-report.mjs [--n 60] [--world auto] [--prefix qq] [--modes grid,resection,friend]
+//                                   [--difficulty master] [--deep] [--json]
 //
-// Seeds are `${prefix}-0` … `${prefix}-${n - 1}`. Every fairness KPI is computed
+// Seeds are `${prefix}-0` … `${prefix}-${n - 1}`. Times include failed generations, and a per-world
+// table shows where failures and slow seeds come from (e.g. repetitive dunes). Every fairness KPI is computed
 // here, independently of the engine's own metrics, so the same report runs on
 // older commits and before/after tables stay comparable. `--deep` adds the slow
 // lattice scans (look-alike spots away from cell centres).
@@ -15,6 +17,7 @@ import { gridCells, cellAt } from '../src/engine/gridQuiz.js';
 import { surfaceElevation } from '../src/engine/terrainSurface.js';
 import { DEG, angleDiff } from '../src/engine/grid.js';
 import { bearingTo } from '../src/engine/mapModes.js';
+import { resolveWorld } from '../src/engine/worlds.js';
 import { pathToFileURL } from 'node:url';
 
 export const MODES = {
@@ -149,10 +152,24 @@ export function correlation(x, y) {
   const sx = Math.sqrt(x.reduce((s, v) => s + (v - mx) ** 2, 0)), sy = Math.sqrt(y.reduce((s, v) => s + (v - my) ** 2, 0));
   return sx && sy ? c / (sx * sy) : NaN;
 }
-const tally = (rows, key) => Object.entries(rows.reduce((m, r) => (m[r[key]] = (m[r[key]] || 0) + 1, m), {})).sort((a, b) => b[1] - a[1]);
+/** Per world: generated / failed, mean time (failures included), medians and flagged count. */
+export function byWorld(rows, failed) {
+  const out = {};
+  for (const r of [...rows, ...failed]) {
+    const w = out[r.world] ??= { n: 0, valid: 0, ms: [], hardness: [], confidence: [], flagged: 0 };
+    w.n++; w.ms.push(r.ms);
+    if (r.error) continue;
+    w.valid += r.ok ? 1 : 0; w.hardness.push(r.hardness); w.confidence.push(r.confidence); w.flagged += r.flagged || 0;
+  }
+  return Object.fromEntries(Object.entries(out).sort((a, b) => b[1].n - a[1].n).map(([k, w]) => [k, { n: w.n, valid: w.valid,
+    msMean: mean(w.ms), hardnessP50: quantile(w.hardness, 0.5), confidenceP50: quantile(w.confidence, 0.5), flagged: w.flagged }]));
+}
 
-/** Generate `n` quizzes per mode at d=master and summarise them. */
-export async function measure({ n = 60, world = 'auto', prefix = 'qq', modes = Object.keys(MODES), deep = false } = {}) {
+/**
+ * Generate `n` quizzes per mode (d=master unless `difficulty` says otherwise) and summarise them.
+ * Failed generations are timed too: `stats.ms` covers every seed.
+ */
+export async function measure({ n = 60, world = 'auto', prefix = 'qq', modes = Object.keys(MODES), deep = false, difficulty = 'master' } = {}) {
   const out = {};
   for (const name of modes) {
     if (!MODES[name]) throw new Error(`Unknown mode ${name}`);
@@ -160,16 +177,18 @@ export async function measure({ n = 60, world = 'auto', prefix = 'qq', modes = O
     for (let i = 0; i < n; i++) {
       const seed = `${prefix}-${i}`, t0 = performance.now();
       let quiz;
-      try { quiz = await generate({ seed, world, difficulty: 'master', ...MODES[name] }); } catch (e) { failed.push({ seed, error: e.message }); continue; }
+      try { quiz = await generate({ seed, world, difficulty, ...MODES[name] }); } catch (e) {
+        failed.push({ seed, world: resolveWorld(world, seed), error: e.message, ms: performance.now() - t0 }); continue;
+      }
       const ms = performance.now() - t0;
       rows.push({ seed, world: quiz.terrain.world, label: quiz.correctLabel, ok: !!quiz.validation.ok, hardness: quiz.hardness,
         confidence: quiz.validation.confidence, ms, ...KPI[name](quiz, deep) });
     }
     const numeric = rows.length ? Object.keys(rows[0]).filter((k) => typeof rows[0][k] === 'number') : [];
-    out[name] = { n, valid: rows.filter((r) => r.ok).length, failed, rows,
-      stats: Object.fromEntries(numeric.map((k) => [k, stats(rows.map((r) => r[k]))])),
+    out[name] = { n, difficulty, valid: rows.filter((r) => r.ok).length, failed, rows,
+      stats: { ...Object.fromEntries(numeric.map((k) => [k, stats(rows.map((r) => r[k]))])), ms: stats([...rows, ...failed].map((r) => r.ms)) },
       corr: correlation(rows.map((r) => r.hardness), rows.map((r) => r.confidence)),
-      worlds: Object.fromEntries(tally(rows, 'world')), labels: new Set(rows.map((r) => r.label)).size };
+      worlds: byWorld(rows, failed), labels: new Set(rows.map((r) => r.label)).size };
   }
   return out;
 }
@@ -191,25 +210,30 @@ const fmt = (v, d = 2) => Number.isFinite(v) ? v.toFixed(d) : '—';
 const q3 = (s) => s ? `${fmt(s.p10)}/${fmt(s.p50)}/${fmt(s.p90)} (sd ${fmt(s.sd, 3)}, uniq ${s.uniq})` : '—';
 
 export function markdown(result, { deep = false } = {}) {
-  const lines = ['| mode | valid | hardness p10/p50/p90 | confidence p10/p50/p90 | corr(h,c) | margin min/p10/p50 | ms mean/p50/p90/max | worlds | labels |',
-    '|------|-------|----------------------|------------------------|-----------|--------------------|---------------------|--------|--------|'];
+  const lines = ['| mode | valid | hardness p10/p50/p90 | confidence p10/p50/p90 | corr(h,c) | margin min/p10/p50 | ms mean/p50/p90/max (all seeds) | labels |',
+    '|------|-------|----------------------|------------------------|-----------|--------------------|---------------------------------|--------|'];
   for (const [name, m] of Object.entries(result)) {
     const s = m.stats, ms = s.ms || {};
     lines.push(`| ${name} | ${m.valid}/${m.n} | ${q3(s.hardness)} | ${q3(s.confidence)} | ${fmt(m.corr)} | ${s.margin ? `${fmt(s.margin.min)}/${fmt(s.margin.p10)}/${fmt(s.margin.p50)}` : '—'} `
-      + `| ${fmt(ms.mean, 0)}/${fmt(ms.p50, 0)}/${fmt(ms.p90, 0)}/${fmt(ms.max, 0)} | ${Object.entries(m.worlds).map(([w, k]) => `${w}:${k}`).join(' ')} | ${m.labels} |`);
+      + `| ${fmt(ms.mean, 0)}/${fmt(ms.p50, 0)}/${fmt(ms.p90, 0)}/${fmt(ms.max, 0)} | ${m.labels} |`);
+  }
+  lines.push('', '| mode | world | valid | ms mean (all seeds) | hardness p50 | confidence p50 | flagged |', '|------|-------|-------|---------------------|--------------|----------------|---------|');
+  for (const [name, m] of Object.entries(result)) for (const [world, w] of Object.entries(m.worlds)) {
+    lines.push(`| ${name} | ${world} | ${w.valid}/${w.n} | ${fmt(w.msMean, 0)} | ${fmt(w.hardnessP50)} | ${fmt(w.confidenceP50)} | ${w.flagged} |`);
   }
   for (const [name, m] of Object.entries(result)) {
     lines.push('', `${name}:`);
     for (const [label, show] of KPI_LINES[name]) if (deep || !label.startsWith('[deep]')) lines.push(`  ${label.padEnd(36)} ${show(m)}`);
-    for (const f of m.failed) lines.push(`  FAILED ${f.seed}: ${f.error}`);
+    for (const f of m.failed) lines.push(`  FAILED ${f.seed} (${f.world}, ${fmt(f.ms, 0)} ms): ${f.error}`);
   }
   return lines.join('\n');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const args = process.argv.slice(2), arg = (name, fallback) => { const i = args.indexOf(`--${name}`); return i >= 0 ? args[i + 1] : fallback; };
-  const opts = { n: +arg('n', 60), world: arg('world', 'auto'), prefix: arg('prefix', 'qq'), modes: arg('modes', Object.keys(MODES).join(',')).split(','), deep: args.includes('--deep') };
+  const opts = { n: +arg('n', 60), world: arg('world', 'auto'), prefix: arg('prefix', 'qq'), modes: arg('modes', Object.keys(MODES).join(',')).split(','),
+    deep: args.includes('--deep'), difficulty: arg('difficulty', 'master') };
   const result = await measure(opts);
   if (args.includes('--json')) console.log(JSON.stringify({ options: opts, result }, (k, v) => typeof v === 'number' && !Number.isFinite(v) ? null : v, 1));
-  else console.log(`Quality report: d=master, g=${SIZE}, world=${opts.world}, seeds ${opts.prefix}-0…${opts.prefix}-${opts.n - 1}${opts.deep ? ', deep' : ''}\n\n${markdown(result, opts)}`);
+  else console.log(`Quality report: d=${opts.difficulty}, g=${SIZE}, world=${opts.world}, seeds ${opts.prefix}-0…${opts.prefix}-${opts.n - 1}${opts.deep ? ', deep' : ''}\n\n${markdown(result, opts)}`);
 }
