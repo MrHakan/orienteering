@@ -15,6 +15,7 @@ npm start            # http://localhost:8080
 npm test             # engine tests (node:test)
 node scripts/generate.mjs <seed> [easy|medium|hard|expert]   # dump one quiz as JSON
 node scripts/batch.mjs 10                                     # pass-rate / timing stats
+npm run quality -- --n 60 --deep                              # master grid/resection/friend question-quality report
 ```
 
 ## GitHub Pages
