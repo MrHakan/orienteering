@@ -232,11 +232,17 @@ export function resectionFacts(quiz, trapLabel) {
     const cues = trap.cues || [], cue = ['distance', 'hidden', 'elevation'].map((t) => cues.find((c) => c.type === t)).find(Boolean);
     let reason = null;
     if (cue) {
+      // The cue is about the hill on bearing cue.peak: the true peak (named by its label) or a
+      // mistaken hill (named, with its cell, by the mistaken entry of that same bearing).
       const peak = peaks[cue.peak].label, hill = trap.lines[cue.peak].hill, subject = hill.peak === cue.peak ? peak : hillName(hill);
       if (cue.type === 'distance') reason = { type: 'peak-range', peak, subject, distanceMetres: roundDistance(cue.metres),
         distanceText: distanceText(cue.metres), seenText: distanceText(cue.seen), looks: cue.metres > cue.seen ? 'smaller' : 'larger' };
       else if (cue.type === 'hidden') reason = { type: 'peak-hidden', peak, subject };
-      else reason = { type: 'peak-eye-level', peak, subject, from: cue.degrees < 0 ? 'below' : 'above', seen: cue.seen < 0 ? 'below' : 'above' };
+      else {
+        const from = cue.degrees < 0 ? 'below' : 'above', seen = cue.seen < 0 ? 'below' : 'above';
+        // Same side of eye level (the cue fired on a ≥ 4° difference): say higher / lower instead.
+        reason = { type: 'peak-eye-level', peak, subject, from, seen, ...(from === seen ? { relative: cue.degrees > cue.seen ? 'higher' : 'lower' } : {}) };
+      }
     } else if (trap.lines) {
       const miss = trap.lines.findIndex((l) => l.error > onHill);
       if (miss >= 0) reason = { type: 'bearing-meets-no-hill', peak: peaks[miss].label };
@@ -314,12 +320,16 @@ function viewReason(r, features, omit) {
   }
 }
 
-function resectionReason(r, mistakenName) {
-  const subject = r.subject === mistakenName ? 'that hill' : r.subject;
+/** Why the trap cell fails, about `subject` ("that hill" for the mistaken hill already named, or a peak label). */
+function resectionReason(r, subject, compact) {
   switch (r.type) {
-    case 'peak-range': return `${subject} would be ${r.distanceText} away, but ${r.peak} in the view is ${r.seenText} away`;
-    case 'peak-hidden': return `${subject} would be hidden behind higher ground, yet ${r.peak} is in view`;
-    case 'peak-eye-level': return `you would look ${r.from === 'below' ? 'down' : 'up'} at ${subject}, but ${r.peak} in the view is ${r.seen} eye level`;
+    case 'peak-range': return compact ? `${subject} would be ${r.distanceText} away, not ${r.seenText}`
+      : `${subject} would be ${r.distanceText} away, but ${r.peak} in the view is ${r.seenText} away`;
+    case 'peak-hidden': return compact ? `${subject} would be hidden` : `${subject} would be hidden behind higher ground, yet ${r.peak} is in view`;
+    case 'peak-eye-level':
+      if (r.relative) return `${subject} would sit much ${r.relative} than ${subject === r.peak ? '' : `${r.peak} `}in the view`;
+      return compact ? `you would look ${r.from === 'below' ? 'down' : 'up'} at ${subject}, not ${r.seen === 'below' ? 'down' : 'up'}`
+        : `you would look ${r.from === 'below' ? 'down' : 'up'} at ${subject}, but ${r.peak} in the view is ${r.seen} eye level`;
     case 'bearing-meets-no-hill': return `the ${r.peak} bearing meets no hill`;
     case 'bearing-off': return `${r.peak} would be ${r.degrees}° off its bearing`;
     default: return null;
@@ -361,18 +371,30 @@ function friendSteps(facts, omit) {
   return steps;
 }
 
+/**
+ * "Not C2: it needs the 132 m knoll in B3 to be P1; from there P2 would be 200 m away, …". The
+ * reason is about the hill on one bearing: that bearing's mistaken hill ("that hill", introduced
+ * with its cell) or, when the bearing still meets its true peak, the peak label.
+ */
+function resectionLookalike(l, omit) {
+  const r = l.reason, compact = omit.has('compact');
+  const own = r?.subject !== undefined && r.subject !== r.peak ? l.mistaken?.find((m) => m.peak === r.peak) : null;
+  const m = own || l.mistaken?.[0];
+  const about = !r ? null : r.subject === undefined || r.subject === r.peak ? r.subject ?? r.peak : own ? 'that hill' : null;
+  const reason = r && about !== null ? resectionReason(r, about, compact) : null;
+  if (m && reason) return compact ? `that takes ${m.name} in ${m.cell} for ${m.peak}, and ${reason}` : `it needs ${m.name} in ${m.cell} to be ${m.peak}; from there ${reason}`;
+  if (m) return `it only works if you take ${m.name} in ${m.cell} for ${m.peak}`;
+  return reason ? `from there ${reason}` : null;
+}
+
 function resectionSteps(facts, omit) {
   const { answer: { label }, features: peaks, lookalike: l } = facts, steps = [];
   steps.push(`${peaks[0].label} is ${peaks[0].name} in ${peaks[0].cell}`
     + `${peaks.length > 1 ? `, ${join(peaks.slice(1).map((p) => `${p.label} ${p.name} in ${p.cell}`))}` : ''}.`);
   steps.push(`Draw the back-bearings: ${join(peaks.map((p) => `${bearing3(p.backBearing)} (${p.backCompass}) from ${p.label}`))}.`);
   steps.push(`They cross in ${label}.`);
-  if (l && !omit.has('lookalike')) {
-    const m = l.mistaken?.[0], reason = l.reason && resectionReason(l.reason, m?.name);
-    const text = m && reason ? `it needs ${m.name} in ${m.cell} to be ${m.peak}; from there ${reason}`
-      : m ? `it only works if you take ${m.name} in ${m.cell} for ${m.peak}` : reason ? `from there ${reason}` : null;
-    if (text) steps.push(`Not ${l.label}: ${text}.`);
-  }
+  const text = l && !omit.has('lookalike') ? resectionLookalike(l, omit) : null;
+  if (text) steps.push(`Not ${l.label}: ${text}.`);
   return steps;
 }
 

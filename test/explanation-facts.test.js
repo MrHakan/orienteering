@@ -511,3 +511,55 @@ test('facts: intervisibility numbers re-computed from the terrain (distance, com
   }
 });
 
+test('facts: resection trap reasons re-computed from the trap point (range, eye level, the hill they are about)', () => {
+  const types = new Set();
+  for (const q of quizzes.resection) {
+    const f = q.explanation.facts, l = f.lookalike, r = l?.reason, model = modelOf(q), tag = `${q.seed} ${r?.type}`;
+    const { peaks, points } = q.resection, correct = points.find((p) => p.correct);
+    const trap = points.find((p) => !p.correct && cellOf(q, p) === l.label);
+    for (const m of l.mistaken) {
+      const i = peaks.findIndex((p) => p.label === m.peak);
+      assert.ok(!(cellOf(q, peaks[i]) === m.cell && f.features[i].name === m.name), `${q.seed}: ${m.peak} is not mistaken for itself`);
+    }
+    if (!r || !['peak-range', 'peak-eye-level', 'peak-hidden'].includes(r.type)) continue;
+    types.add(r.relative ? 'peak-eye-level (same side)' : r.type);
+    const i = peaks.findIndex((p) => p.label === r.peak), hill = trap.lines[i].hill, peak = peaks[i];
+    const own = l.mistaken.find((m) => m.peak === r.peak);
+    if (r.subject === r.peak) assert.ok(Math.hypot(hill.x - peak.x, hill.y - peak.y) < 5, `${tag}: the bearing still meets ${r.peak}`);
+    else assert.equal(own?.cell, cellOf(q, hill), `${tag}: "that hill" is the hill on the ${r.peak} bearing`);
+    const dTrap = Math.hypot(hill.x - trap.x, hill.y - trap.y), dSeen = Math.hypot(peak.x - correct.x, peak.y - correct.y);
+    if (r.type === 'peak-range') {
+      assert.ok(Math.abs(r.distanceMetres - dTrap) <= Math.max(30, 0.06 * dTrap), `${tag}: ${r.distanceMetres} vs ${dTrap.toFixed(0)}`);
+      assert.equal(r.seenText, textM(dSeen), tag);
+      assert.equal(r.looks, dTrap > dSeen ? 'smaller' : 'larger', tag);
+    }
+    if (r.type === 'peak-eye-level') {
+      const eyeT = surfaceElevation(model, trap.x, trap.y) + 1.7, eyeC = surfaceElevation(model, correct.x, correct.y) + 1.7;
+      const eT = Math.atan2(hill.height + 2 - eyeT, dTrap) / DEG, eC = Math.atan2(peak.z - eyeC, dSeen) / DEG;
+      if (Math.abs(eT) > 0.5) assert.equal(r.from, eT < 0 ? 'below' : 'above', `${tag}: from ${eT.toFixed(1)}°`);
+      if (Math.abs(eC) > 0.5) assert.equal(r.seen, eC < 0 ? 'below' : 'above', `${tag}: seen ${eC.toFixed(1)}°`);
+      if (r.from === r.seen) assert.equal(r.relative, eT > eC ? 'higher' : 'lower', tag);
+      else assert.equal(r.relative, undefined, tag);
+    }
+  }
+  assert.deepEqual([...types].sort(), ['peak-eye-level', 'peak-eye-level (same side)', 'peak-hidden', 'peak-range']);
+});
+
+test('template: the resection reason is about the hill on its own bearing; same-side eye level says higher / lower', () => {
+  const two = [{ peak: 'P1', name: 'the 136 m knoll', cell: 'B6' }, { peak: 'P2', name: 'the 93 m knoll', cell: 'E2' }];
+  const look = (reason, mistaken) => renderExplanation(resection(reason, mistaken)).steps.at(-1);
+  assert.equal(look({ type: 'peak-range', peak: 'P2', subject: 'the 93 m knoll', distanceMetres: 1600, distanceText: '1.6 km', seenText: '600 m', looks: 'smaller' }, two),
+    'Not C2: it needs the 93 m knoll in E2 to be P2; from there that hill would be 1.6 km away, but P2 in the view is 600 m away.');
+  // two hills of the same name: the one on the reason's bearing is meant
+  const twins = [{ peak: 'P1', name: 'the 114 m knoll', cell: 'D1' }, { peak: 'P2', name: 'the 114 m knoll', cell: 'E1' }];
+  assert.match(look({ type: 'peak-range', peak: 'P2', subject: 'the 114 m knoll', distanceMetres: 400, distanceText: '400 m', seenText: '1.5 km', looks: 'larger' }, twins),
+    /needs the 114 m knoll in E1 to be P2; from there that hill/);
+  assert.equal(look({ type: 'peak-eye-level', peak: 'P2', subject: 'the 124 m hill', from: 'above', seen: 'above', relative: 'lower' }, [{ peak: 'P2', name: 'the 124 m hill', cell: 'G2' }]),
+    'Not C2: it needs the 124 m hill in G2 to be P2; from there that hill would sit much lower than P2 in the view.');
+  assert.equal(look({ type: 'peak-eye-level', peak: 'P2', subject: 'P2', from: 'below', seen: 'below', relative: 'higher' }, [{ peak: 'P1', name: 'the 132 m knoll', cell: 'B3' }]),
+    'Not C2: it needs the 132 m knoll in B3 to be P1; from there P2 would sit much higher than in the view.');
+  // a reason about a hill with no mistaken entry of its own is not stated (nothing would place that hill)
+  assert.equal(look({ type: 'peak-hidden', peak: 'P2', subject: 'the 70 m knoll' }, [{ peak: 'P1', name: 'the 132 m knoll', cell: 'B3' }]),
+    'Not C2: it only works if you take the 132 m knoll in B3 for P1.');
+});
+

@@ -345,7 +345,9 @@ the frame and no ground in front of it (beyond its own last 150 m) rises above t
 line to its top; "out of the picture" means at least 3° beyond the frame edge;
 "hidden" means ground hides even a point 2 m above the top; "on the other side"
 needs a shift of at least 10°. Borderline cases fall through to the next reason.
-No internal measures (view distances, apparent sizes in degrees) appear in it.
+A resection reason is about the hill on its own bearing: the mistaken hill (named
+with its cell) or the true peak; on the same side of eye level it says "much
+higher / lower" instead of "look up / down". No internal measures (view distances, apparent sizes in degrees) appear in it.
 `steps` (2–4 sentences, shown first after answering) and `short` (≤ 280
 characters, used for social captions) are built from `facts` alone; a long `short`
 leaves out the ground ahead, then side details, then the second feature, then the
