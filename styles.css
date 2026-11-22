@@ -143,6 +143,8 @@ body {
 .answer-explanation h3:not(:first-child) { margin-top: 18px; }
 .answer-evidence { margin: 8px 0 12px; padding-left: 20px; font-size: 14px; line-height: 1.5; color: #cfd3d6; }
 .answer-evidence li + li { margin-top: 8px; }
+.answer-steps { margin: 8px 0 12px; padding-left: 22px; text-align: left; font-size: 15px; line-height: 1.5; }
+.answer-steps li + li { margin-top: 6px; }
 .answer-alternative { margin: 10px 0; padding: 10px 12px; background: var(--panel); border-left: 3px solid var(--line); border-radius: 4px; }
 .answer-alternative[data-chosen="true"] { border-left-color: var(--accent); }
 .answer-alternative h4 { margin: 0 0 6px; font-size: 14px; }

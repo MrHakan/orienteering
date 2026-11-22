@@ -329,6 +329,23 @@ Each evidence entry has a stable `type`, English `text`, and numeric `data`; sig
 differences mean **candidate minus the shown view**. Bearings are true north; map
 rotation does not change them. Scrambling remaps explanation labels with the points.
 
+Grid, Resection grid, Friend grid and Intervisibility explanations also carry
+`facts`, `steps` and `short` (`src/engine/explanationFacts.js`). `facts` holds only
+public, checkable values: the answer, the observer's cell, facing and landform, the
+one to three most conspicuous features **verified to be in the frame and in sight**
+(named summit, knoll, saddle or depression with its height, or the top of the
+skyline as ridge, spur or high ground), each with its cell, 8-point compass word,
+rounded distance (10 m below 250 m, 50 m below 1 km, then 0.1 km) and side of the
+view; the friend's direction, distance and landform from YOU; resection peaks with
+their back-bearings; and the closest look-alike with a concrete reason (a landmark
+out of the picture, hidden, on the other side or at another distance; a skyline
+higher or lower; a trap hill too near, hidden or on the wrong side of eye level).
+No internal measures (view distances, apparent sizes in degrees) appear in it.
+`steps` (2–4 sentences, shown first after answering) and `short` (≤ 280
+characters, used for social captions) are built from `facts` alone; a long `short`
+leaves out the ground ahead, then side details, then the second feature, then the
+look-alike. Low-confidence questions say "best" instead of "only".
+
 **Download explanation JSON** on the answer screen exports the seed, mode,
 difficulty, variant, scramble number, submitted answer and full explanation,
 including all grid alternatives. For example:

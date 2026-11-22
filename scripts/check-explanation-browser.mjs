@@ -54,6 +54,9 @@ try {
     assert.equal(await page.locator(`.answer-alternative[data-label="${chosen}"][data-chosen="true"]`).count(), 1);
     const text = await page.locator('.answer-explanation').textContent();
     for (const clue of q.explanation.correct.evidence) assert.ok(text.includes(clue.text));
+    // Grid and Friend grid: the reasoning steps come first, one list item per step.
+    assert.deepEqual(await page.locator('.answer-explanation .answer-steps li').allTextContents(), q.explanation.steps || []);
+    if (q.grid && ['grid', 'friend'].includes(q.mode)) assert.ok(q.explanation.steps.length >= 2 && q.explanation.short.length <= 280);
     for (const comparison of comparisons) for (const reason of comparison.reasons) assert.ok(text.includes(reason.text));
     const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#download-explanation').click()]);
     const report = JSON.parse(await readFile(await download.path(), 'utf8'));

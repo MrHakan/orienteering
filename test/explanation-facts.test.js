@@ -5,6 +5,7 @@ import { TerrainModel } from '../src/engine/terrainModel.js';
 import { buildAnswerExplanation } from '../src/engine/answerExplanation.js';
 import { cellAtExtent, parseCell } from '../src/engine/gridQuiz.js';
 import { scrambleLabels } from '../src/engine/scramble.js';
+import { modeResultHTML } from '../src/render/mapModesView.js';
 import { COMPASS_WORDS, SHORT_MAX, renderExplanation, resectionFacts, roundDistance, distanceText } from '../src/engine/explanationFacts.js';
 
 const MODES = {
@@ -208,6 +209,15 @@ test('template: scrambled intervisibility letters re-render the steps with the n
     assert.equal(e.facts.lookalike.label, moved.label);
     assert.match(e.steps[2], new RegExp(`^Not ${moved.label}:`));
     assert.deepEqual(renderExplanation(e.facts), { steps: e.steps, short: e.short });
+  }
+});
+
+test('map-mode result panel lists the reasoning steps first (Resection grid, Intervisibility)', () => {
+  for (const q of [quizzes.resection[0], quizzes.visibility[0]]) {
+    const html = modeResultHTML(q, q.correctLabel, true);
+    const list = html.match(/<ol class="answer-steps">(.*?)<\/ol>/)[1];
+    assert.deepEqual([...list.matchAll(/<li>(.*?)<\/li>/g)].map((m) => m[1]), q.explanation.steps);
+    assert.ok(html.indexOf('answer-steps') < html.indexOf(q.explanation.correct.summary));
   }
 });
 

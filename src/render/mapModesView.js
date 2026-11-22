@@ -158,7 +158,9 @@ export function modeResultHTML(q, label, right) {
   if (q.mode === 'profile') table = `<table><tr><th>Profile</th><th>What it is</th></tr>${q.options.map((o) => row(o, [o.what])).join('')}</table>`;
   if (q.mode === 'drainage') table = `<table><tr><th>Outlet</th><th>Water from the drop</th></tr>${q.options.map((o) => row(o, [o.correct ? `arrives after ${Math.round(q.drainage.length)} m` : 'no'])).join('')}</table>`;
   if (q.mode === 'fog') table = `<table><tr><th>Point</th><th>Near-view difference</th></tr>${q.options.map((o) => row(o, [o.correct ? 'what you saw' : `${o.D.toFixed(1)}°`])).join('')}</table>`;
-  return `${verdict}<p>${q.explanation?.correct.summary || ''}</p>${table}
+  const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const steps = q.explanation?.steps?.length ? `<ol class="answer-steps">${q.explanation.steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>` : '';
+  return `${verdict}${steps}<p>${q.explanation?.correct.summary || ''}</p>${table}
     <button type="button" class="btn ghost" id="mode-replay">Replay the view</button>
     <button type="button" class="btn primary" id="next">Next quiz (N)</button>`;
 }

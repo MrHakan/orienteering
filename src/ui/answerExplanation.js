@@ -14,7 +14,14 @@ export function appendAnswerExplanation(container, quiz, chosenLabel, model) {
   section.setAttribute('aria-labelledby', 'answer-explanation-title');
   const title = element('h3', `Why ${quiz.correctLabel} is the answer`);
   title.id = 'answer-explanation-title';
-  section.append(title, element('p', explanation.correct.summary));
+  section.append(title);
+  // Short reasoning path first (Grid, Friend grid); the measured evidence follows unchanged.
+  if (explanation.steps?.length) {
+    const steps = element('ol', undefined, 'answer-steps');
+    for (const step of explanation.steps) steps.append(element('li', step));
+    section.append(steps);
+  }
+  section.append(element('p', explanation.correct.summary));
   const clues = element('ul', undefined, 'answer-evidence');
   for (const clue of explanation.correct.evidence) clues.append(element('li', clue.text));
   section.append(clues);
