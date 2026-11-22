@@ -266,3 +266,17 @@ test('friend: point answers and Easy grids are unchanged; master grids repeat ex
   assert.deepEqual(b.camera, a.camera); assert.deepEqual(b.friend, a.friend);
   assert.deepEqual([b.correctLabel, b.hardness, b.validation], [a.correctLabel, a.hardness, a.validation]);
 });
+
+test('friend grid pick branches and reported numbers (golden values)', async () => {
+  const r = (x) => +x.toFixed(4);
+  // Hardest clean candidate (no clean shortlist entry): numbers come from friendGridScore.
+  for (const [seed, world, label, hardness, confidence] of [['w2-5', 'alpine', 'E6', 0.4712, 1], ['w2-25', 'karst', 'F4', 0.5914, 1], ['w2-8', 'canyon', 'D5', 0.6456, 0.8887]]) {
+    const q = await friendGrid(seed, 'master', world);
+    assert.deepEqual([q.correctLabel, q.stats.pick, r(q.hardness), r(q.validation.confidence), q.lowConfidence], [label, 'clean', hardness, confidence, false], seed);
+  }
+  // No clean candidate: the least ambiguous one is kept and flagged.
+  for (const [seed, label, heading] of [['w2-11', 'G5', 146], ['w2-24', 'F5', 119], ['w2-15', 'D3', 161]]) {
+    const q = await friendGrid(seed, 'master', 'dunes');
+    assert.deepEqual([q.correctLabel, q.camera.heading, q.stats.pick, q.lowConfidence], [label, heading, 'flagged', true], seed);
+  }
+});

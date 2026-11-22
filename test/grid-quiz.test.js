@@ -237,3 +237,12 @@ test('master grid on dunes: when no look-alike shows a visible cue, the clearest
     assert.equal(q.validation.weakestCue, Math.max(...faint.map((l) => l.weakestCue)), `${seed}: the clearest cue is kept`);
   }
 });
+
+test('master grid: the reported hardness and confidence come from gridScore (golden values)', async () => {
+  // Pins the public numbers the automation ranks on; a revert to the old closeness-only formulas changes them.
+  const r = (x) => +x.toFixed(4);
+  for (const [seed, label, hardness, confidence] of [['gq-1', 'H2', 0.6295, 0.8552], ['gq-2', 'F8', 0.7691, 0.9157]]) {
+    const q = await generate({ seed, mode: 'grid', gridSize: 8, difficulty: 'master' });
+    assert.deepEqual([q.correctLabel, r(q.hardness), r(q.validation.confidence)], [label, hardness, confidence], seed);
+  }
+});
