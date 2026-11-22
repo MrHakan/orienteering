@@ -4,6 +4,7 @@ import { generate } from '../src/engine/quiz.js';
 import { TerrainModel } from '../src/engine/terrainModel.js';
 import { cellAt } from '../src/engine/gridQuiz.js';
 import { cellBorderMargin } from '../src/engine/friendQuiz.js';
+import { MapRenderer } from '../src/render/mapRenderer.js';
 import { surfaceElevation } from '../src/engine/terrainSurface.js';
 import { DEG } from '../src/engine/grid.js';
 import { bearingTo } from '../src/engine/mapModes.js';
@@ -28,12 +29,30 @@ function sees(model, a, b) {
 test('resection grid with hidden peaks: you stand on the centre of your cell', async () => {
   const quizzes = [...await master(), ...await Promise.all(['rg-a', 'rg-b', 'rg-c'].flatMap((seed) => [resection(seed, 'hard', 4), resection(seed, 'expert', 16)]))];
   for (const q of quizzes) {
-    assert.equal(q.grid.origin, 'observer-cell-centre', q.seed);
+    assert.deepEqual([q.grid.origin, q.grid.onCellCentre], ['observer', true], q.seed);
     assert.equal(cellBorderMargin(q.camera.x, q.camera.y, wholeMap(q), q.grid.size), 0.5, `${q.seed} g${q.grid.size}`);
     assert.equal(cellAt(q.camera.x, q.camera.y, q.terrain.size, q.grid.size), q.correctLabel);
+    // No nearer the map edge than a free observer (12% of the map).
+    for (const v of [q.camera.x, q.camera.y]) assert.ok(v >= 0.12 * q.terrain.size && v <= 0.88 * q.terrain.size, `${q.seed} g${q.grid.size}: ${v}`);
   }
   const easy = await resection('res-g', 'easy', 4);
-  assert.equal(easy.grid.origin, 'observer', 'Easy marks the peaks and keeps its free observer');
+  assert.deepEqual([easy.grid.origin, easy.grid.onCellCentre], ['observer', false], 'Easy marks the peaks and keeps its free observer');
+});
+
+test('resection grid: snapping keeps the edge margin on every grid size', async () => {
+  // Seeds whose free observer would snap to an edge cell (187.5 m / 250 m from the map border).
+  for (const [seed, gridSize] of [['rg-0', 8], ['rg-0', 6], ['rg-2', 6]]) {
+    const q = await resection(seed, 'hard', gridSize);
+    for (const v of [q.camera.x, q.camera.y]) assert.ok(v >= 0.12 * q.terrain.size && v <= 0.88 * q.terrain.size, `${seed} g${gridSize}: ${v}`);
+  }
+});
+
+test('resection grid reveal shows YOU, never a target dot', async () => {
+  const arcs = [], ctx = new Proxy({ arc: (...args) => arcs.push(args) }, { get: (t, k) => t[k] ?? (() => {}), set: () => true });
+  const draw = (data) => { arcs.length = 0; const mr = Object.assign(Object.create(MapRenderer.prototype), { data, reveal: true, ctx, toCanvas: (x, y) => [x, y] }); mr.drawGridTarget(); return arcs.length; };
+  const [q] = await master();
+  assert.equal(draw(q), 0, 'resection grid');
+  assert.ok(draw({ ...q, grid: { ...q.grid, origin: 'friend-cell-centre' } }) > 0, 'friend grids still mark the target');
 });
 
 test('resection grid: the fix survives the guaranteed reading error, and the explanation states it', async () => {

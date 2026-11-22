@@ -48,11 +48,13 @@ export function generateResectionQuiz(opts) {
       .map((s) => ({ x: s.x, y: s.y, z: surfaceElevation(model, s.x, s.y) + PEAK_LIFT, prominence: s.prominence || 0, kind: s.kind }))
       .sort((a, b) => b.prominence - a.prominence).slice(0, 14);
     if (peaks.length < band.peaks) continue;
-    // Grid answers with hidden peaks: you stand on a cell centre, as far from every border as the grid allows.
+    // Grid answers with hidden peaks: you stand on a cell centre, as far from every border as the grid
+    // allows, and no nearer the map edge than a free observer (the centres between 12% and 88%).
     const centred = gridSize && band.hidden, step = L / (gridSize || 1);
+    const first = Math.ceil(0.12 * gridSize - 0.5), last = Math.floor(0.88 * gridSize - 0.5);
     for (let tries = 0; tries < 220; tries++) {
       const o = { x: rng.range(0.12, 0.88) * L, y: rng.range(0.12, 0.88) * L };
-      if (centred) for (const a of ['x', 'y']) o[a] = (Math.floor(o[a] / step) + 0.5) * step;
+      if (centred) for (const a of ['x', 'y']) o[a] = (Math.min(last, Math.max(first, Math.floor(o[a] / step))) + 0.5) * step;
       if (model.getSlope(o.x, o.y) > 22) continue;
       const eye = { ...o, z: surfaceElevation(model, o.x, o.y) + EYE };
       const visible = peaks.filter((p) => { const d = Math.hypot(p.x - o.x, p.y - o.y); return d > 250 && d < 1600 && sees(model, eye, p); });
@@ -108,7 +110,7 @@ export function generateResectionQuiz(opts) {
         revealYou: true, centre: { x: o.x, y: o.y },
       };
       quiz.explanation = resectionExplanation(quiz);
-      return gridSize ? toGridAnswer(quiz, o, L, gridSize, centred ? 'observer-cell-centre' : 'observer') : quiz;
+      return gridSize ? toGridAnswer(quiz, o, L, gridSize, !!centred) : quiz;
     }
   }
   throw new Error('No clear resection found for this seed. Try another seed.');
@@ -218,11 +220,11 @@ export function resectionGridScore({ base, weak, crossing, tolerance, minPeakSiz
  * Grid answer: the cell you stand in. The point answers stay as
  * `resection.points`; their cells explain the look-alike traps.
  */
-function toGridAnswer(quiz, o, L, size, origin) {
+function toGridAnswer(quiz, o, L, size, onCellCentre) {
   const correctLabel = cellAt(o.x, o.y, L, size), points = quiz.options;
   const options = gridCells(L, size).map((c) => ({ ...c, correct: c.label === correctLabel }));
   const out = { ...quiz, options, correctLabel, resection: { ...quiz.resection, answer: 'grid', points },
-    grid: { size, origin, cellMetres: L / size, target: { x: Math.round(o.x), y: Math.round(o.y) } } };
+    grid: { size, origin: 'observer', onCellCentre, cellMetres: L / size, target: { x: Math.round(o.x), y: Math.round(o.y) } } };
   out.explanation = gridExplanation(out, quiz.explanation);
   return out;
 }
