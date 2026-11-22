@@ -11,6 +11,7 @@ import { surfaceElevation } from './terrainSurface.js';
 import { DEG, angleDiff, wrap360 } from './grid.js';
 import { terrains, scaffold, bearingTo, bearingText, panCamera, CLIP_DURATION, normaliseResectionAnswer } from './mapModes.js';
 import { normaliseGridSize, gridCells, cellAt } from './gridQuiz.js';
+import { resectionFacts, renderExplanation } from './explanationFacts.js';
 
 // hidden: peaks unmarked, answers spread; lookalikes: answers whose every bearing meets a hill
 // (ruled out only by the view, needing `cues` differences).
@@ -251,13 +252,14 @@ function gridExplanation(quiz, pointExplanation) {
         data: { peak: p.label, errorDegrees: +errors[worst].toFixed(1) } }] };
   });
   const ranked = [...alternatives].sort((a, b) => (a.scope === 'trap-point' ? -1 : 0) - (b.scope === 'trap-point' ? -1 : 0) || a.difference - b.difference);
+  const facts = resectionFacts(quiz, ranked.find((a) => a.scope === 'trap-point')?.label);
   return { ...pointExplanation, kind: 'resection-cell',
     correct: { label: cell, summary: `Only ${cell} holds the point where every back-bearing crosses.`,
       evidence: [...pointExplanation.correct.evidence.filter((e) => e.type !== 'bearing-check')
         .map((e) => e.type === 'back-bearings' ? { ...e, text: e.text.replace(/The lines cross at \w+\.$/, `The lines cross where you stand, in ${cell}.`) } : e),
         { type: 'observer-cell', text: `The back-bearings cross inside ${cell} (${Math.round(quiz.grid.cellMetres)} m cells). Allowing ±${fixSlack({ ...BANDS[quiz.difficulty], round: rounding }, size).toFixed(1)}° of reading error on every bearing, all positions that fit stay in ${cell}.`,
           data: { label: cell, target: quiz.grid.target, divisions: size } }] },
-    closestLabels: ranked.slice(0, 3).map((a) => a.label), alternatives };
+    closestLabels: ranked.slice(0, 3).map((a) => a.label), alternatives, facts, ...renderExplanation(facts) };
 }
 
 /** What a bearing line from a point runs to: its nearest hill and the angle off it. */

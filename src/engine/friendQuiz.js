@@ -129,9 +129,12 @@ export function flagLookalike(q) {
 /** The best three candidates, minus any much easier than the best (no 'too easy' day by chance). */
 export const friendShortlist = (sorted, floor = 0.15) => sorted.slice(0, 3).filter((q) => q.hardness >= sorted[0].hardness - floor);
 
+/** The terrain model each generated friend question was built on, so the explanation does not rebuild it. */
+const generationModel = new WeakMap();
+
 export function generateFriendQuiz(opts) {
   const quiz = opts.difficulty === 'easy' ? generateKnownFriendQuiz(opts) : generateTerrainFriendQuiz(opts);
-  return withAnswerExplanation(finishFriendQuiz(quiz, opts));
+  return withAnswerExplanation(finishFriendQuiz(quiz, opts), generationModel.get(quiz));
 }
 
 export function finishFriendQuiz(quiz, opts) {
@@ -309,6 +312,7 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
           stats: { viewpointsEvaluated: evaluated, terrainAttempt: attempt, viewTry: t }, log,
         };
         valid.push(q);
+        generationModel.set(q, model);
         if (centred) log.push({ attempt, stage: 'candidate', try: t, line, ok: !(twin < twinD), confidence: +reported.toFixed(3),
           hardness: +hardness.toFixed(4), issues: twin < twinD ? ['look-alike sighting in another cell'] : [] });
         if (centred && twin < twinD) twins.set(q, twin);
@@ -416,7 +420,7 @@ function generateKnownFriendQuiz({ seed, world = 'classic', difficulty = 'medium
           if (!mapExtent) continue;
         }
         log.push({ attempt, stage: 'question', try: t, ok: true, confidence: +confidence.toFixed(3), issues: [] });
-        return {
+        const known = {
           version: 1, mode: 'friend', seed, difficulty, variant, lowConfidence: false,
           terrain: terrainSummary(model, interval, terrainCheck), camera,
           friend: { x: chosen.x, y: chosen.y, z: chosen.z, height: FRIEND_HEIGHT, heading: wrap360(chosen.bearing + 180), challenge, observerHidden: false },
@@ -431,6 +435,8 @@ function generateKnownFriendQuiz({ seed, world = 'classic', difficulty = 'medium
           hardness: saturate(1 - minDifference / 6),
           stats: { viewpointsEvaluated: evaluated, terrainAttempt: attempt, ms: Math.round(now() - t0) }, log,
         };
+        generationModel.set(known, model);
+        return known;
       }
     }
     log.push({ attempt, stage: 'question', try: picked.length, ok: false, confidence: 0, issues: ['no clear and distinguishable sighting'] });
