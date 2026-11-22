@@ -284,8 +284,13 @@ const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 const bearing3 = (deg) => `${String(deg).padStart(3, '0')}°`;
 const isLandmark = (f) => LANDMARK_KINDS.has(f.kind);
 const join = (list) => list.length < 2 ? list.join('') : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
-/** Parts the caption may leave out, least useful first: the ground ahead, side details, the second feature, the look-alike. */
-const OMIT_ORDER = [['ahead'], ['ahead', 'detail'], ['ahead', 'detail', 'feature2'], ['ahead', 'detail', 'feature2', 'lookalike']];
+/**
+ * What the caption may leave out, tried in this order until it fits: the ground ahead, side
+ * details, then a compact wording of the look-alike sentence (keeping the second feature), the
+ * second feature (with the full look-alike sentence, then the compact one), and only then the look-alike.
+ */
+const OMIT_ORDER = [['ahead'], ['ahead', 'detail'], ['ahead', 'detail', 'compact'], ['ahead', 'detail', 'feature2'],
+  ['ahead', 'detail', 'compact', 'feature2'], ['ahead', 'detail', 'compact', 'feature2', 'lookalike']];
 
 /** "the 192 m summit on the right of the view, the top of the skyline, is in E4, about 950 m to your south-west" */
 function featureWhere(f, omit) {
@@ -305,15 +310,20 @@ function featureAlso(f) {
     : `The top of the skyline, ${f.name} in ${f.cell}, is ${SIDE[f.side]}, ${f.distanceText} away.`;
 }
 
-/** "the 197 m summit would be out of the picture, off to the right" */
-function viewReason(r, features, omit) {
+/**
+ * "the 197 m summit would be out of the picture, off to the right". `shown` holds the indexes of
+ * the features the text has already introduced; any other feature is named with its cell.
+ */
+function viewReason(r, features, omit, shown) {
   const f = features[r.feature];
-  if (r.type.startsWith('landmark-') && !f) return null;
+  if (r.type.startsWith('landmark-') && !f?.cell) return null;
+  const name = r.type.startsWith('landmark-') ? (shown.has(r.feature) ? f.name : `${f.name} in ${f.cell}`) : null;
+  const compact = omit.has('compact'), detail = !omit.has('detail');
   switch (r.type) {
-    case 'landmark-out-of-frame': return `${f.name} would be out of the picture${omit.has('detail') ? '' : `, off to the ${r.direction}`}`;
-    case 'landmark-hidden': return `${f.name} would be hidden behind nearer ground`;
-    case 'landmark-side': return `${f.name} would sit ${SIDE[r.side]}, not ${SIDE[f.side]}`;
-    case 'landmark-range': return `${f.name} would be ${r.distanceText} away, not ${f.distanceText}${omit.has('detail') ? '' : `, and look much ${r.looks}`}`;
+    case 'landmark-out-of-frame': return `${name} would be out of the picture${detail ? `, off to the ${r.direction}` : ''}`;
+    case 'landmark-hidden': return `${name} would be hidden${compact ? '' : ' behind nearer ground'}`;
+    case 'landmark-side': return `${name} would sit ${SIDE[r.side]}${compact ? '' : `, not ${SIDE[f.side]}`}`;
+    case 'landmark-range': return `${name} would be ${r.distanceText} away, not ${f.distanceText}${detail ? `, and look much ${r.looks}` : ''}`;
     case 'skyline-higher': return `the skyline ${SIDE[r.side]} would sit higher`;
     case 'skyline-lower': return `the skyline ${SIDE[r.side]} would sit lower`;
     default: return null;
@@ -348,25 +358,30 @@ function gridSteps(facts, omit) {
   if (!omit.has('ahead') && (o.ahead === 'rises' || o.ahead === 'falls')) pin += ` The ground ahead ${o.ahead}, as the contours show.`;
   else if (!omit.has('ahead') && !a && o.ahead === 'level') pin += ' The ground ahead stays nearly level, as the contours show.';
   steps.push(pin);
-  const reason = !omit.has('lookalike') && l?.reason && viewReason(l.reason, facts.features, omit);
+  const shown = new Set([a, b].filter(Boolean).map((f) => facts.features.indexOf(f)));
+  const reason = !omit.has('lookalike') && l?.reason && viewReason(l.reason, facts.features, omit, shown);
   if (reason) steps.push(`Not ${l.label}: from there ${reason}.`);
   return steps;
 }
 
 function friendSteps(facts, omit) {
   const { answer: { label }, observer: o, target: t, caution, lookalike: l } = facts, cells = facts.features.filter((f) => f.cell);
-  const a = cells[0], b = omit.has('feature2') ? null : cells[1], steps = [];
+  const a = o.marked ? null : cells[0], b = o.marked || omit.has('feature2') ? null : cells[1], steps = [];
   const ahead = !omit.has('ahead') && (o.ahead === 'rises' || o.ahead === 'falls') ? `, and the ground ahead ${o.ahead}` : '';
   steps.push((o.marked ? `YOU are marked on the map in ${o.cell}, facing ${o.facing}${ahead}.`
     : a ? `First find YOU: ${featureWhere(a, omit)}, so you are in ${o.cell}, facing ${o.facing}.`
       : `First find YOU from the ground around you: you stand ${FORM[o.landform] || 'on open ground'} in ${o.cell}, facing ${o.facing}${ahead}.`)
-    + (b && !o.marked ? ` ${featureAlso(b)}` : ''));
+    + (b ? ` ${featureAlso(b)}` : ''));
   steps.push(`Your friend is about ${t.distanceText} ${t.compass} of you, ${FORM[t.landform] || 'in the open'}`
     + `${t.near ? ` near ${t.near.name}` : ''}: ${caution ? `that fits ${label} best` : label}.`);
   if (!omit.has('lookalike') && l?.reason) {
-    const reason = l.reason.type === 'person-range' ? null : viewReason(l.reason, facts.features, omit);
+    const shown = new Set([a, b].filter(Boolean).map((f) => facts.features.indexOf(f)));
     if (l.reason.type === 'person-range') steps.push(`Not ${l.label}: he would be ${l.reason.distanceText} away and look much ${l.reason.looks}.`);
-    else if (reason && l.observerCell) steps.push(`Not ${l.label}: YOU would then be in ${l.observerCell}${l.observerCell === l.label ? ' too' : ''}, and from there ${reason}.`);
+    else {
+      const reason = viewReason(l.reason, facts.features, omit, shown);
+      if (reason && l.observerCell) steps.push(omit.has('compact') ? `Not ${l.label}: with YOU in ${l.observerCell}, ${reason}.`
+        : `Not ${l.label}: YOU would then be in ${l.observerCell}${l.observerCell === l.label ? ' too' : ''}, and from there ${reason}.`);
+    }
   }
   return steps;
 }
@@ -391,7 +406,7 @@ function resectionSteps(facts, omit) {
   const { answer: { label }, features: peaks, lookalike: l } = facts, steps = [];
   steps.push(`${peaks[0].label} is ${peaks[0].name} in ${peaks[0].cell}`
     + `${peaks.length > 1 ? `, ${join(peaks.slice(1).map((p) => `${p.label} ${p.name} in ${p.cell}`))}` : ''}.`);
-  steps.push(`Draw the back-bearings: ${join(peaks.map((p) => `${bearing3(p.backBearing)} (${p.backCompass}) from ${p.label}`))}.`);
+  steps.push(`Draw the back-bearings: ${join(peaks.map((p) => `${bearing3(p.backBearing)}${omit.has('detail') ? '' : ` (${p.backCompass})`} from ${p.label}`))}.`);
   steps.push(`They cross in ${label}.`);
   const text = l && !omit.has('lookalike') ? resectionLookalike(l, omit) : null;
   if (text) steps.push(`Not ${l.label}: ${text}.`);
@@ -414,8 +429,7 @@ const STEPS = { grid: gridSteps, friend: friendSteps, resection: resectionSteps,
 /**
  * Template text from facts only. steps: 2–4 short steps for the site (feature → where it is on the
  * map → how it pins the answer → why not the closest look-alike); short: the same reasoning in
- * ≤ 280 characters for a caption, leaving out the ground ahead, then the second feature, then the
- * look-alike while it is too long.
+ * ≤ 280 characters for a caption, leaving out parts in OMIT_ORDER while it is too long.
  */
 export function renderExplanation(facts) {
   const build = STEPS[facts?.mode];

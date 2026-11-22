@@ -347,11 +347,15 @@ line to its top; "out of the picture" means at least 3° beyond the frame edge;
 needs a shift of at least 10°. Borderline cases fall through to the next reason.
 A resection reason is about the hill on its own bearing: the mistaken hill (named
 with its cell) or the true peak; on the same side of eye level it says "much
-higher / lower" instead of "look up / down". No internal measures (view distances, apparent sizes in degrees) appear in it.
+higher / lower" instead of "look up / down". No internal measures (view distances,
+apparent sizes in degrees) appear in it.
 `steps` (2–4 sentences, shown first after answering) and `short` (≤ 280
-characters, used for social captions) are built from `facts` alone; a long `short`
-leaves out the ground ahead, then side details, then the second feature, then the
-look-alike. Low-confidence questions say "best" instead of "only".
+characters, used for social captions) are built from `facts` alone; a feature the
+text has not introduced is named with its cell. A long `short` leaves out the
+ground ahead, then side details, then uses a compact look-alike sentence ("Not G7:
+with YOU in F7, the 197 m summit would be out of the picture."), then drops the
+second feature and only then the look-alike. Low-confidence questions say "best"
+instead of "only".
 
 **Download explanation JSON** on the answer screen exports the seed, mode,
 difficulty, variant, scramble number, submitted answer and full explanation,

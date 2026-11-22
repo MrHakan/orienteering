@@ -545,6 +545,23 @@ test('facts: resection trap reasons re-computed from the trap point (range, eye 
   assert.deepEqual([...types].sort(), ['peak-eye-level', 'peak-eye-level (same side)', 'peak-hidden', 'peak-range']);
 });
 
+test('template: every hill named in a text is placed in its cell; a same-side eye-level reason never says "look up / down"', () => {
+  for (const q of all()) {
+    const e = q.explanation, near = e.facts.target?.near?.name?.replace(/^the /, '');
+    for (const text of [e.short, e.steps.join(' ')]) {
+      for (const [name] of text.matchAll(/\b\d+ m (?:summit|knoll|hill|saddle)\b/g)) {
+        if (name === near) continue;
+        assert.match(text, new RegExp(`${name}(?: in [A-H][1-8]\\b|[^.]*?(?:is|it is) in [A-H][1-8]\\b)`), `${q.mode} ${q.seed}: "${name}" without a cell: ${text}`);
+      }
+    }
+    const r = e.facts.lookalike?.reason;
+    if (r?.type === 'peak-eye-level' && r.relative) {
+      assert.doesNotMatch(e.steps.at(-1), /look (?:up|down)/, q.seed);
+      assert.match(e.steps.at(-1), new RegExp(`much ${r.relative} than`), q.seed);
+    }
+  }
+});
+
 test('template: the resection reason is about the hill on its own bearing; same-side eye level says higher / lower', () => {
   const two = [{ peak: 'P1', name: 'the 136 m knoll', cell: 'B6' }, { peak: 'P2', name: 'the 93 m knoll', cell: 'E2' }];
   const look = (reason, mistaken) => renderExplanation(resection(reason, mistaken)).steps.at(-1);
@@ -563,3 +580,41 @@ test('template: the resection reason is about the hill on its own bearing; same-
     'Not C2: it only works if you take the 132 m knoll in B3 for P1.');
 });
 
+test('template: a look-alike reason about a feature the text did not introduce names its cell', () => {
+  // the second feature dropped for length (a very long first name), the reason about it keeps "in D7"
+  const long = gridFacts({ features: [feature({ name: `the ${'very '.repeat(14)}high summit` }), gridFacts().features[1]] });
+  const { short } = renderExplanation(long);
+  assert.doesNotMatch(short, /D7 is in the centre/);
+  assert.match(short, /Not A7: from there the 124 m knoll in D7 would sit on the left\./);
+  // a reason about a third feature (never introduced) is placed too
+  const third = gridFacts({ features: [...gridFacts().features, feature({ name: 'the 88 m knoll', heightMetres: 88, cell: 'C5', side: 'left' })],
+    lookalike: { label: 'A7', adjacent: true, reason: { type: 'landmark-hidden', feature: 2 } } });
+  assert.equal(renderExplanation(third).steps.at(-1), 'Not A7: from there the 88 m knoll in C5 would be hidden behind nearer ground.');
+});
+
+test('template: a long friend caption keeps the look-alike in a compact wording before dropping the second feature', () => {
+  const at = (n) => renderExplanation(friendFacts({ features: [feature({ name: `the ${'b'.repeat(n)}`, cell: 'G6', compass: 'south', distanceText: '650 m', side: 'left' }),
+    feature({ name: 'the 124 m knoll', heightMetres: 124, cell: 'D7', side: 'centre', distanceText: '500 m' })] }));
+  assert.match(at(1).steps.at(-1), /^Not G7: YOU would then be in F7, and from there the b would be out of the picture, off to the right\.$/);
+  const PREFERENCE = ['full+2', 'compact+2', 'full', 'compact', 'none'], seen = [];
+  for (let n = 1; n < 120; n++) {
+    const s = at(n).short;
+    assert.ok(s.length <= SHORT_MAX, `${n}: ${s.length}`);
+    const look = /Not G7: YOU would then be in F7, and from there/.test(s) ? 'full' : /Not G7: with YOU in F7, the b* would be out of the picture\.$/.test(s) ? 'compact' : 'none';
+    const form = look === 'none' ? 'none' : `${look}${/D7 is in the centre/.test(s) ? '+2' : ''}`;
+    if (seen.at(-1) !== form) seen.push(form);
+  }
+  assert.deepEqual(seen, PREFERENCE.filter((x) => seen.includes(x)), `in preference order: ${seen}`);
+  assert.ok(seen.includes('compact+2') && seen.includes('none'), String(seen));
+  // resection: growing names pass through the compact look-alike wording before it is dropped
+  const forms = [];
+  for (let n = 0; n < 30; n++) {
+    const s = renderExplanation(resection({ type: 'peak-range', peak: 'P2', subject: 'P2', distanceMetres: 200, distanceText: '200 m', seenText: '950 m', looks: 'larger' },
+      [{ peak: 'P1', name: `the 132 m knoll${' far'.repeat(n)}`, cell: 'B3' }])).short;
+    assert.ok(s.length <= SHORT_MAX);
+    forms.push(/to be P1; from there P2 would be 200 m away, but P2 in the view is 950 m away\.$/.test(s) ? 'full'
+      : /that takes the 132 m knoll[ a-z]* in B3 for P1, and P2 would be 200 m away, not 950 m\.$/.test(s) ? 'compact' : /Not C2/.test(s) ? 'other' : 'none');
+  }
+  const order = forms.filter((x, i) => x !== forms[i - 1]);
+  assert.deepEqual(order, ['full', 'compact', 'none'], forms.join(' '));
+});
