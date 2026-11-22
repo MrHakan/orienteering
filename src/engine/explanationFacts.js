@@ -100,15 +100,21 @@ function landmarkFeature(q, { lm, view }, role) {
 }
 
 /** Up to three features: the most conspicuous visible landmarks (distinct cells, ≥ 8° apart) and the skyline top. */
-function viewFeatures(q, model, shown) {
-  const all = visibleLandmarks(model, q.camera), picked = [];
-  for (const c of all) {
+/** The two landmarks to name, in order: at least MIN_SIZE tall, on the map, ≥ MIN_SEPARATION apart, in different cells. */
+export function pickLandmarks(candidates, cellFor) {
+  const picked = [];
+  for (const c of candidates) {
     if (c.size < MIN_SIZE) continue;
-    const cell = cellOf(q, c.lm);
-    if (!cell || picked.some((p) => angleDiff(p.view.az, c.view.az) < MIN_SEPARATION || cellOf(q, p.lm) === cell)) continue;
+    const cell = cellFor(c.lm);
+    if (!cell || picked.some((p) => angleDiff(p.view.az, c.view.az) < MIN_SEPARATION || cellFor(p.lm) === cell)) continue;
     picked.push(c);
     if (picked.length === 2) break;
   }
+  return picked;
+}
+
+function viewFeatures(q, model, shown) {
+  const all = visibleLandmarks(model, q.camera), picked = pickLandmarks(all, (lm) => cellOf(q, lm));
   const top = skylineTop(q, model, shown);
   // Named as a summit only when a verified visible summit/knoll is at that skyline point.
   const match = top && all.find((c) => (c.lm.kind === 'summit' || c.lm.kind === 'knoll')
@@ -140,7 +146,7 @@ function observerFacts(model, cam, cell) {
  * difference is clear: out of the picture, hidden, on another side (shift ≥ SIDE_SHIFT), or much
  * nearer / farther. Borderline cases (near the frame edge, partly hidden, small shifts) say nothing.
  */
-function landmarkReason(model, items, cam, altCam) {
+export function landmarkReason(model, items, cam, altCam) {
   for (const [index, { lm, feature }] of items.entries()) {
     if (!lm) continue;
     const seen = landmarkView(model, cam, lm), alt = landmarkView(model, altCam, lm);
@@ -160,7 +166,7 @@ function landmarkReason(model, items, cam, altCam) {
 }
 
 /** The existing skyline comparison, when the difference is at least 1°. */
-function skylineReason(alternative) {
+export function skylineReason(alternative) {
   const r = alternative?.reasons.find((x) => x.type === 'view-mismatch' && x.data.feature === 'skyline' && Math.abs(x.data.deltaDegrees) >= 1);
   return r ? { type: r.data.deltaDegrees > 0 ? 'skyline-higher' : 'skyline-lower', side: r.data.screenSide } : null;
 }

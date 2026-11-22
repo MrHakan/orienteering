@@ -6,7 +6,7 @@ import { buildAnswerExplanation } from '../src/engine/answerExplanation.js';
 import { cellAtExtent, parseCell } from '../src/engine/gridQuiz.js';
 import { scrambleLabels } from '../src/engine/scramble.js';
 import { modeResultHTML } from '../src/render/mapModesView.js';
-import { COMPASS_WORDS, SHORT_MAX, renderExplanation, resectionFacts, roundDistance, distanceText } from '../src/engine/explanationFacts.js';
+import { COMPASS_WORDS, SHORT_MAX, renderExplanation, resectionFacts, roundDistance, distanceText, landmarkReason, skylineReason, pickLandmarks, visibleLandmarks } from '../src/engine/explanationFacts.js';
 import { surfaceElevation } from '../src/engine/terrainSurface.js';
 
 const MODES = {
@@ -519,7 +519,7 @@ test('facts: resection trap reasons re-computed from the trap point (range, eye 
     const trap = points.find((p) => !p.correct && cellOf(q, p) === l.label);
     for (const m of l.mistaken) {
       const i = peaks.findIndex((p) => p.label === m.peak);
-      assert.ok(!(cellOf(q, peaks[i]) === m.cell && f.features[i].name === m.name), `${q.seed}: ${m.peak} is not mistaken for itself`);
+      assert.ok(m.name !== m.peak && !(cellOf(q, peaks[i]) === m.cell && f.features[i].name === m.name), `${q.seed}: ${m.peak} is not mistaken for itself`);
     }
     if (!r || !['peak-range', 'peak-eye-level', 'peak-hidden'].includes(r.type)) continue;
     types.add(r.relative ? 'peak-eye-level (same side)' : r.type);
@@ -617,4 +617,46 @@ test('template: a long friend caption keeps the look-alike in a compact wording 
   }
   const order = forms.filter((x, i) => x !== forms[i - 1]);
   assert.deepEqual(order, ['full', 'compact', 'none'], forms.join(' '));
+});
+
+// ------------------------------------------------------------ the thresholds on a synthetic terrain (M3)
+const flat = (bumps = [], landmarks = []) => ({ cell: 10, analyzer: { landmarks },
+  getElevation: (x, y) => bumps.reduce((h, b) => (Math.hypot(x - b.x, y - b.y) <= b.r ? Math.max(h, b.h) : h), 0) });
+const CAM = { x: 0, y: 0, z: 1.7, heading: 0, fov: 60, pitch: 0 };
+const PEAK = { x: 0, y: 1000, z: 0, kind: 'summit', prominence: 30 };
+const reasonFor = (model, altCam, cam = CAM) => landmarkReason(model, [{ lm: PEAK, feature: { distanceText: '1.0 km' } }], cam, altCam);
+
+test('thresholds: hidden only when ground hides 2 m above the top; nothing said near the frame edge', () => {
+  const ridge = (h) => flat([{ x: 0, y: 500, r: 15, h }]);
+  assert.equal(reasonFor(ridge(1.2), CAM), null, 'the top is behind 1.2 m of ground, 2 m above it is not: no claim');
+  assert.deepEqual(reasonFor(ridge(2.5), CAM), { type: 'landmark-hidden', feature: 0 });
+  assert.equal(reasonFor(ridge(2.5), { ...CAM, heading: -31.5 }), null, '31.5° off-centre in a 60° frame: neither in nor out');
+  assert.deepEqual(reasonFor(flat(), { ...CAM, heading: -34 }), { type: 'landmark-out-of-frame', feature: 0, direction: 'right' });
+  assert.deepEqual(reasonFor(flat(), { ...CAM, heading: 34 }), { type: 'landmark-out-of-frame', feature: 0, direction: 'left' });
+});
+
+test('thresholds: a side change needs a 10° shift; much nearer or farther is a range reason', () => {
+  const seen = { ...CAM, heading: -8 };                                            // the peak 8° right of centre: centre
+  assert.equal(reasonFor(flat(), { ...CAM, heading: -12 }, seen), null, '4° shift into "right": no claim');
+  assert.deepEqual(reasonFor(flat(), { ...CAM, heading: -19 }, seen), { type: 'landmark-side', feature: 0, side: 'right' });
+  assert.deepEqual(reasonFor(flat(), { ...CAM, y: 500 }), { type: 'landmark-range', feature: 0, distanceMetres: 500, distanceText: '500 m', looks: 'larger' });
+  assert.equal(reasonFor(flat(), { ...CAM, y: 200 }, { ...CAM, y: 150 }), null, 'ratio 0.94: no range claim');
+});
+
+test('thresholds: landmarks to name — 80 m to 1.7 km, at least 0.5° tall, 8° apart, different cells', () => {
+  const far = { x: 0, y: 2500, z: 0, kind: 'summit', prominence: 60 }, near = { x: 0, y: 50, z: 0, kind: 'knoll', prominence: 5 };
+  assert.deepEqual(visibleLandmarks(flat([], [PEAK, far, near]), CAM).map((c) => c.lm), [PEAK]);
+  const cand = (id, az, size) => ({ lm: { id }, view: { az }, size });
+  const cells = { 1: 'A1', 2: 'B2', 3: 'C3', 4: 'B2', 5: 'E5', 6: 'F6' };
+  const picked = pickLandmarks([cand(1, 0, 0.4), cand(2, 5, 1), cand(3, 10, 1), cand(4, 30, 1), cand(5, 50, 1), cand(6, 70, 1)], (lm) => cells[lm.id]);
+  assert.deepEqual(picked.map((c) => c.lm.id), [2, 5], 'too small, 5° from #2, same cell as #2; at most two');
+});
+
+test('skyline reason: only a skyline difference of at least 1°, higher or lower as measured', () => {
+  const alt = (deltaDegrees, feature = 'skyline') => ({ reasons: [{ type: 'view-mismatch', data: { feature, deltaDegrees, screenSide: 'left' } }] });
+  assert.equal(skylineReason(alt(0.6)), null);
+  assert.deepEqual(skylineReason(alt(1.2)), { type: 'skyline-higher', side: 'left' });
+  assert.deepEqual(skylineReason(alt(-1.5)), { type: 'skyline-lower', side: 'left' });
+  assert.equal(skylineReason(alt(3, 'foreground')), null);
+  assert.equal(skylineReason(undefined), null);
 });
