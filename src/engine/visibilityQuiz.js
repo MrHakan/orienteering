@@ -8,6 +8,7 @@
 import { now } from './quiz.js';
 import { surfaceElevation } from './terrainSurface.js';
 import { terrains, scaffold, bearingTo } from './mapModes.js';
+import { visibilityFacts, renderExplanation } from './explanationFacts.js';
 
 const EYE = 1.7, FLAG = 2;
 const BANDS = {
@@ -76,7 +77,7 @@ export function generateVisibilityQuiz(opts) {
 }
 
 export function visibilityExplanation(quiz) {
-  const correct = quiz.options.find((o) => o.correct);
+  const correct = quiz.options.find((o) => o.correct), facts = visibilityFacts(quiz);
   return { version: 1, language: 'en', source: 'sightline-analysis', kind: 'intervisibility',
     correct: { label: correct.label, summary: `${correct.label} is the only flag in sight from YOU.`,
       evidence: [{ type: 'clear-sightline', text: correct.minHeight <= 0
@@ -86,5 +87,6 @@ export function visibilityExplanation(quiz) {
     closestLabels: quiz.options.filter((o) => !o.correct).sort((a, b) => a.minHeight - b.minHeight).slice(0, 3).map((o) => o.label),
     alternatives: quiz.options.filter((o) => !o.correct).map((o) => ({ label: o.label, difference: +(o.minHeight - 2).toFixed(2), status: 'distinguished', plausibility: '',
       reasons: [{ type: 'hidden', text: `Ground ${Math.round(o.blockDistance)} m out along the line to ${o.label} rises above the sightline; a flag there would need to be ${o.minHeight.toFixed(1)} m tall to show.`,
-        data: { blockDistanceMetres: o.blockDistance, neededHeightMetres: o.minHeight } }] })) };
+        data: { blockDistanceMetres: o.blockDistance, neededHeightMetres: o.minHeight } }] })),
+    facts, ...renderExplanation(facts) };
 }

@@ -8,7 +8,8 @@
     "start": "node scripts/serve.mjs",
     "test": "node --test test/*.test.js",
     "generate": "node scripts/generate.mjs",
-    "batch": "node scripts/batch.mjs"
+    "batch": "node scripts/batch.mjs",
+    "quality": "node scripts/quality-report.mjs"
   },
   "engines": { "node": ">=18" }
 }

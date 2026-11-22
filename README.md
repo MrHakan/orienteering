@@ -15,6 +15,7 @@ npm start            # http://localhost:8080
 npm test             # engine tests (node:test)
 node scripts/generate.mjs <seed> [easy|medium|hard|expert]   # dump one quiz as JSON
 node scripts/batch.mjs 10                                     # pass-rate / timing stats
+npm run quality -- --n 60 --deep                              # master grid/resection/friend question-quality report
 ```
 
 ## GitHub Pages
@@ -116,7 +117,7 @@ Six modes test map skills directly. Each has a 15-second clip (the Play / Replay
 
 | Mode | Question | How the answer is computed |
 |---|---|---|
-| **Resection** | Compass bearings to 2–3 labelled peaks: where are you (A–D)? | Only the true point is within the reading accuracy of every bearing; one distractor sits on a single bearing line (the classic trap). Easy/Medium give 3 peaks, harder levels 2; Master reads bearings to the nearest 5°. The scene pans to each labelled peak. Only Easy marks the peaks on the map and offers near misses. From Medium up the map grows to 3 km × 3 km (same detail, about twice the hills), you first find each hill among the contours, and the four answers are spread over the map (at least a quarter of its width apart, on ground like yours), each where the bearings meet other, similar hills — mistake those for P1… and you land there. A bearing that meets no hill rules them out; from Hard some look-alikes meet a hill on every bearing and only the view tells them apart (a hill that would be hidden, much nearer or farther, or below instead of above eye level). After answering, the peaks and back-bearings appear and cross at YOU. **Find by → Grid — your cell** answers with the cell you stand in instead (4×4 to 16×16, link `&ra=grid&g=6`); the position is chosen so that every point fitting the bearings within the reading accuracy lies in one cell, and the cells holding the look-alike traps are explained. |
+| **Resection** | Compass bearings to 2–3 labelled peaks: where are you (A–D)? | Only the true point is within the reading accuracy of every bearing; one distractor sits on a single bearing line (the classic trap). Easy/Medium give 3 peaks, harder levels 2; Master reads bearings to the nearest 5°. The scene pans to each labelled peak. Only Easy marks the peaks on the map and offers near misses. From Medium up the map grows to 3 km × 3 km (same detail, about twice the hills), you first find each hill among the contours, and the four answers are spread over the map (at least a quarter of its width apart, on ground like yours), each where the bearings meet other, similar hills — mistake those for P1… and you land there. A bearing that meets no hill rules them out; from Hard some look-alikes meet a hill on every bearing and only the view tells them apart (a hill that would be hidden, much nearer or farther, or below instead of above eye level). After answering, the peaks and back-bearings appear and cross at YOU. **Find by → Grid — your cell** answers with the cell you stand in instead (4×4 to 16×16, link `&ra=grid&g=6`); the position is chosen so that every point fitting the bearings within the reading accuracy lies in one cell, and the cells holding the look-alike traps are explained. From Medium up you stand on a cell centre (no nearer the map edge than 12 % of its width; `grid.onCellCentre`), the fix must hold with 2° of extra reading error on 8×8 and coarser grids (±5.1° at Master), and no pair of other hills may cross in another cell unless the view tells it apart; `hardness` then grows with near-miss rival fixes and an oblique crossing, `validation.confidence` with the fix tolerance and the size and distance of the peaks (`validation.fixTolerance`, `rivalFixes`, `minPeakSize`). |
 | **Route choice** | Straight, or around the left / right: which route from ▲ to ◎ is fastest (A–C)? | Walking time from Tobler's hiking function, off-trail (×0.6), on 5 m steps; the detours are least-time Dijkstra legs through a waypoint. The winner must beat the next route by 20 % (Easy) down to 4.5 % (Master), and straight-line wins are rationed so the answer stays unpredictable. |
 | **Intervisibility** | From YOU, which one of five 2 m flags (A–E) is in sight? | For every flag, the lowest visible height above its foot along the sightline. Exactly one shows; the others need from ~14 m (Easy) down to ~3 m (Master) to appear. After answering, green / red sightlines show where the ground cuts them. |
 | **Profile** | Which of four elevation profiles is the line ▲ → ◎? | Distractors: the same line read backwards, lines turned about the same centre, parallel lines beside it or lines elsewhere — closer look-alikes on harder levels (minimum RMS difference 10 m → 3.2 m). |
@@ -328,6 +329,34 @@ Each evidence entry has a stable `type`, English `text`, and numeric `data`; sig
 differences mean **candidate minus the shown view**. Bearings are true north; map
 rotation does not change them. Scrambling remaps explanation labels with the points.
 
+Grid, Resection grid, Friend grid and Intervisibility explanations also carry
+`facts`, `steps` and `short` (`src/engine/explanationFacts.js`). `facts` holds only
+public, checkable values: the answer, the observer's cell, facing and landform, the
+one to three most conspicuous features **verified to be in the frame and in sight**
+(named summit, knoll, saddle or depression with its height, or the top of the
+skyline as ridge, spur or high ground), each with its cell, 8-point compass word,
+rounded distance (10 m below 250 m, 50 m below 1 km, then 0.1 km) and side of the
+view; the friend's direction, distance and landform from YOU; resection peaks with
+their back-bearings; and the closest look-alike with a concrete reason (a landmark
+out of the picture, hidden, on the other side or at another distance; a skyline
+higher or lower; a trap hill too near, hidden or on the wrong side of eye level).
+Claims are made only when they are clear: a named landmark is at least 2° inside
+the frame and no ground in front of it (beyond its own last 150 m) rises above the
+line to its top; "out of the picture" means at least 3° beyond the frame edge;
+"hidden" means ground hides even a point 2 m above the top; "on the other side"
+needs a shift of at least 10°. Borderline cases fall through to the next reason.
+A resection reason is about the hill on its own bearing: the mistaken hill (named
+with its cell) or the true peak; on the same side of eye level it says "much
+higher / lower" instead of "look up / down". No internal measures (view distances,
+apparent sizes in degrees) appear in it.
+`steps` (2–4 sentences, shown first after answering) and `short` (≤ 280
+characters, used for social captions) are built from `facts` alone; a feature the
+text has not introduced is named with its cell. A long `short` leaves out the
+ground ahead, then side details, then uses a compact look-alike sentence ("Not G7:
+with YOU in F7, the 197 m summit would be out of the picture."), then drops the
+second feature and only then the look-alike. Low-confidence questions say "best"
+instead of "only".
+
 **Download explanation JSON** on the answer screen exports the seed, mode,
 difficulty, variant, scramble number, submitted answer and full explanation,
 including all grid alternatives. For example:
@@ -335,6 +364,18 @@ including all grid alternatives. For example:
 ```sh
 node scripts/generate.mjs grid-check medium grid > quiz.json
 ```
+
+`quiz.hardness` and `quiz.validation.confidence` rank questions of the same mode
+(the automation keeps the best of several seeds). For Grid, Resection grid and
+Friend grid, hardness measures how close the look-alikes come and confidence how
+fair the question is (visible cue, reading tolerance); `npm run quality` reports
+their spread together with independent fairness checks. Changed outputs in this
+version: `m=grid&d=master` (questions and numbers), `m=grid` below Master (numbers
+only), `m=resection&ra=grid` and `m=friend&fa=grid` from Medium up (questions and
+numbers). Easy grids, point answers and every other mode are unchanged. When a
+Master grid or a friend grid has no question that passes its look-alike rule
+(mostly on dunes), the least ambiguous one is returned with `lowConfidence: true`,
+`validation.ok: false`, hardness ≤ 0.3 and confidence ≤ 0.4 instead of an error.
 
 Explanations are shown only after answering. They describe the generated terrain
 and sightlines; an inconclusive comparison or low-confidence question is marked

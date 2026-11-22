@@ -46,9 +46,27 @@ export function parseCell(value, divisions) {
   return `${match[1]}${Number(match[2])}`;
 }
 
+/**
+ * Grid question metrics. hardness: how close the nearest look-alike comes, how many cells look
+ * alike and how many of those are far from the answer (no neighbouring-cell shortcut).
+ * confidence: how visible the weakest look-alike's skyline cue is and how clear the view is —
+ * fairness, not closeness, so the two numbers rank different things.
+ */
+export function gridScore({ closestD, minD, lookalikes, remote, weakestCue, quality, blockedFrac, edgeFrac }) {
+  const closeness = Math.exp(-(closestD - minD) / 1.2);
+  return {
+    hardness: saturate(0.5 * closeness + 0.3 * (1 - Math.exp(-lookalikes / 5)) + 0.2 * (lookalikes ? remote / lookalikes : 0)),
+    confidence: saturate(0.45 * saturate((weakestCue - 0.8) / 1.6) + 0.4 * saturate(quality / 0.8) + 0.15 * saturate(1 - 2 * blockedFrac - 2 * edgeFrac)),
+  };
+}
+
+// Master grids whose look-alikes all lack a visible cue try one more terrain, then settle for the clearest.
+const FAINT_CUE = 'look-alike cell without a visible cue', FAINT_AFTER = 1;
+
 /** Every possible origin is a cell centre, so all answers can be checked.
  * Lost compass checks other cells in all eight directions, not only the
- * true heading. No unvalidated fallback question is returned.
+ * true heading. The only fallback question is a Master one whose look-alikes
+ * all lack a visible cue (validation.ok false, lowConfidence, faintCue).
  */
 export function generateGridQuiz({ seed, world = 'classic', difficulty = 'medium', variant = 0, headingMode = null,
   gridSize = 4, gridChallenge = 'standard', tuning = null, size, n, maxTerrainAttempts = 4, onProgress = () => {} }) {
@@ -81,7 +99,8 @@ export function generateGridQuiz({ seed, world = 'classic', difficulty = 'medium
       if (!cache.has(key)) cache.set(key, model.skyline.viewDescriptor(p.x, p.y, h, fov, { eyeHeight, columns: 49 }));
       return cache.get(key);
     };
-    const valid = [];
+    // Master: candidates that pass everything except the visible-cue gate (repetitive terrain).
+    const valid = [], faint = [];
     for (const [t, vp] of picked.entries()) {
       const label = cellAt(vp.x, vp.y, model.size, divisions);
       const origin = cells.find((p) => p.label === label);
@@ -98,24 +117,35 @@ export function generateGridQuiz({ seed, world = 'classic', difficulty = 'medium
         }
         return { ...p, ...best, correct: false };
       });
-      const closest = options.filter((o) => !o.correct).reduce((a, b) => b.D < a.D ? b : a);
+      const wrong = options.filter((o) => !o.correct), closest = wrong.reduce((a, b) => b.D < a.D ? b : a);
+      // Look-alike cells: the closest one and every cell within twice the ambiguity limit.
+      const near = wrong.filter((o) => o.D < 2 * minD), weakestCue = Math.min(...[closest, ...near].map((o) => o.cue.magnitude));
       const issues = [];
       if (closest.D < minD) issues.push(`cell ${closest.label} looks too similar (${closest.D.toFixed(2)}°)`);
+      // Master: each look-alike must differ by a skyline cue large enough to see in the frame.
+      if (base.search && weakestCue < base.search.cue) issues.push(FAINT_CUE);
       const uniqueness = saturate(closest.D / (minD * 2));
-      const confidence = saturate(0.6 * uniqueness + 0.4 * vp.quality.total);
-      if (confidence < base.minConfidence) issues.push('insufficient confidence');
-      log.push({ attempt, stage: 'question', try: t, ok: !issues.length, confidence: +confidence.toFixed(3), issues });
-      if (issues.length) continue;
-      const hardness = saturate(Math.exp(-(closest.D - minD) / 1.2));
-      valid.push({ vp, correct, options, closest, confidence, uniqueness, hardness });
+      const accept = saturate(0.6 * uniqueness + 0.4 * vp.quality.total); // acceptance rule, unchanged
+      if (accept < base.minConfidence) issues.push('insufficient confidence');
+      const remote = near.filter((o) => Math.max(Math.abs(o.row - origin.row), Math.abs(o.column - origin.column)) > 1).length;
+      const { hardness, confidence } = gridScore({ closestD: closest.D, minD, lookalikes: near.length, remote, weakestCue,
+        quality: vp.quality.total, blockedFrac: correct.blockedFrac, edgeFrac: correct.edgeFrac });
+      log.push({ attempt, stage: 'question', try: t, ok: !issues.length, confidence: +confidence.toFixed(3), hardness: +hardness.toFixed(4),
+        weakestCue: +weakestCue.toFixed(2), issues });
+      const entry = { vp, correct, options, closest, confidence, uniqueness, hardness, weakestCue, lookalikes: near.length, remote };
+      if (issues.length) { if (issues.length === 1 && issues[0] === FAINT_CUE) faint.push(entry); continue; }
+      valid.push(entry);
       if (!base.search) break;
     }
-    if (!valid.length) continue;
+    if (!valid.length && (attempt < Math.min(FAINT_AFTER, maxTerrainAttempts - 1) || !faint.length)) continue;
+    // Still no candidate with a visible cue: keep the one with the clearest cue, marked low-confidence
+    // and ranked below clean questions (hardness ≤ 0.3, confidence ≤ 0.4), rather than spend more terrain.
     valid.sort((a, b) => b.hardness - a.hardness);
-    const e = rng.fork('choice').pick(valid.slice(0, base.search?.shortlist || 1));
+    const fallback = !valid.length, e = fallback ? faint.reduce((a, b) => b.weakestCue > a.weakestCue ? b : a)
+      : rng.fork('choice').pick(valid.slice(0, base.search?.shortlist || 1));
     const options = e.options.map((o) => ({ ...o, z: model.getElevation(o.x, o.y), landform: model.analyzer.classify(o.x, o.y) }));
     const quiz = {
-      version: 1, mode: 'grid', seed, difficulty, variant, lowConfidence: false,
+      version: 1, mode: 'grid', seed, difficulty, variant, lowConfidence: fallback,
       grid: { size: divisions, challenge, origin: 'cell-centre', cellMetres: model.size / divisions },
       terrain: terrainSummary(model, interval, terrainCheck),
       camera: { x: e.vp.x, y: e.vp.y, z: model.getElevation(e.vp.x, e.vp.y) + eyeHeight,
@@ -126,8 +156,10 @@ export function generateGridQuiz({ seed, world = 'classic', difficulty = 'medium
       options, correctLabel: cellAt(e.vp.x, e.vp.y, model.size, divisions), closestLabel: e.closest.label,
       quality: { total: e.vp.quality.total, ...e.vp.quality.components, blockedFrac: e.correct.blockedFrac,
         edgeFrac: e.correct.edgeFrac, landmarksInView: e.vp.quality.landmarksInView },
-      validation: { ok: true, issues: [], confidence: e.confidence, uniqueness: e.uniqueness, minDistance: e.closest.D, minRequiredDistance: minD },
-      hardness: e.hardness, landmarks: landmarkSummary(model),
+      validation: { ok: !fallback, issues: fallback ? [FAINT_CUE] : [], confidence: fallback ? Math.min(e.confidence, 0.4) : e.confidence,
+        uniqueness: e.uniqueness, minDistance: e.closest.D, minRequiredDistance: minD,
+        weakestCue: +e.weakestCue.toFixed(2), lookalikes: e.lookalikes, remoteLookalikes: e.remote, faintCue: fallback },
+      hardness: fallback ? Math.min(e.hardness, 0.3) : e.hardness, landmarks: landmarkSummary(model),
       stats: { viewpointsEvaluated: evaluated, cellsChecked: cells.length, directionsChecked: hidden ? 8 : 1,
         questionsCompared: valid.length, terrainAttempt: attempt, ms: Math.round(now() - t0) }, log,
     };

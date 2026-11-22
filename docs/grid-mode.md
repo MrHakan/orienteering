@@ -75,6 +75,22 @@ This is a sampled visual comparison rather than a proof that no two continuous
 positions on the terrain could look alike; the cell-centre rule makes the tested
 answer set finite and explicit.
 
+Master also requires a visible difference from every look-alike: the closest
+cell and every cell within twice the ambiguity limit must differ by a skyline
+cue of at least 1.6° (developer setting **Min visible skyline cue**), the same
+rule where-am-i Master applies to its distractors. The two quality numbers
+measure different things: `hardness` combines how close the nearest look-alike
+comes, how many cells look alike and how many of those are far from the answer;
+`validation.confidence` combines the weakest look-alike cue with the view
+quality. `validation.weakestCue`, `lookalikes` and `remoteLookalikes` report the
+inputs. When no candidate on two terrains passes the cue rule (repetitive
+terrain such as dunes), the candidate with the clearest weakest cue is kept
+instead of failing: `validation.faintCue: true`, `validation.ok: false`,
+`lowConfidence: true` (the explanation carries a caution), hardness at most 0.3
+and confidence at most 0.4, so it ranks below questions that pass. Each try in
+`quiz.log` records its `hardness` and `weakestCue`. Below Master the chosen cell
+and heading are unchanged; only these numbers differ from earlier versions.
+
 ## Replay and export
 
 Grid links add `m=grid&g=4|6|8|16` to the hash. Lost compass adds

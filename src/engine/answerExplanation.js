@@ -4,6 +4,7 @@ import { TerrainModel } from './terrainModel.js';
 import { DEG, angleDiff, wrap360 } from './grid.js';
 import { cellAtExtent } from './gridQuiz.js';
 import { solarPosition } from './sunWatch.js';
+import { viewExplanationFacts, renderExplanation, relabelFacts } from './explanationFacts.js';
 
 const round = (value, places = 2) => +value.toFixed(places);
 const bearingText = value => `${String(Math.round(wrap360(value)) % 360).padStart(3, '0')}°`;
@@ -118,8 +119,8 @@ function correctEvidence(q, model, shown, correct) {
   if (q.mode === 'friend') {
     const target = q.grid ? q.friend.matches.find(o => o.correct) : correct;
     result.push(evidence('person-sighting', `From the original observation point, the visible 1.80 m person is about `
-      + `${Math.round(target.distance)} m away near ${bearingText(target.bearing)}, with an apparent height of ${target.angularHeight.toFixed(2)}°. `
-      + (q.friend.observerHidden ? 'Other candidate observers also fit the person, so the surrounding terrain must match as well.'
+      + `${Math.round(target.distance)} m away near ${bearingText(target.bearing)}. `
+      + (q.friend.observerHidden ? 'The same sighting could be taken from other spots on the map, so first find where YOU stand from the skyline and the ground around you.'
         : 'The bearing, apparent size and surrounding contours must agree together.'),
     { rangeMetres: round(target.distance), bearing: round(target.bearing), apparentHeightDegrees: round(target.angularHeight),
       observerHidden: q.friend.observerHidden }));
@@ -222,15 +223,19 @@ export function buildAnswerExplanation(q, model = new TerrainModel({ ...q.terrai
   const alternatives = q.mode === 'friend' && q.grid ? friendGridAlternatives(q, model, shown)
     : q.options.filter(o => !o.correct).map(option => alternativeExplanation(q, model, shown, correct, option));
   const ranked = alternatives.filter(o => Number.isFinite(o.difference)).sort((a, b) => a.difference - b.difference || a.label.localeCompare(b.label));
+  // Grid and Friend grid: public facts and the reasoning steps built only from them.
+  const facts = q.grid && (q.mode === 'grid' || q.mode === 'friend') ? viewExplanationFacts(q, model, shown, { alternatives, cameraFor }) : null;
   return { version: 1, language: 'en', source: 'terrain-and-sightline-analysis',
     kind: q.mode === 'trail' ? q.grid ? 'finish-cell' : 'route' : q.mode === 'friend' ? q.grid ? 'person-cell' : 'person-position'
       : q.mode === 'facing' ? 'direction' : q.grid ? 'observer-cell' : 'observer-position',
     correct: { label: q.correctLabel,
       summary: q.mode === 'trail' ? 'The complete terrain sequence matches this run, including its finish.'
-        : q.mode === 'friend' ? 'The person sighting and the surrounding terrain agree at this location.'
+        : q.mode === 'friend' ? (q.friend.observerHidden ? 'Find where YOU stand from the terrain first; the person\'s bearing and range from there place him here.'
+          : 'The person\'s bearing, range and the contours around him place him here.')
           : 'This position and direction reproduce the skyline and the contour pattern in the starting view.',
       evidence: correctEvidence(q, model, shown, correct) },
     closestLabels: ranked.slice(0, 3).map(o => o.label), alternatives,
+    ...(facts ? { facts, ...renderExplanation(facts) } : {}),
     ...(q.lowConfidence ? { caution: 'Generation confidence was below the target. Treat this answer and its comparisons as uncertain.' } : {}) };
 }
 
@@ -254,7 +259,9 @@ export function explanationReport(quiz, chosenLabel) {
 
 export function relabelExplanation(explanation, labels) {
   if (!explanation) return undefined;
+  const facts = explanation.facts && relabelFacts(explanation.facts, labels);
   return { ...explanation, correct: { ...explanation.correct, label: labels.get(explanation.correct.label) },
     closestLabels: explanation.closestLabels.map(label => labels.get(label)),
-    alternatives: explanation.alternatives.map(o => ({ ...o, label: labels.get(o.label) })) };
+    alternatives: explanation.alternatives.map(o => ({ ...o, label: labels.get(o.label) })),
+    ...(facts ? { facts, ...renderExplanation(facts) } : {}) };
 }

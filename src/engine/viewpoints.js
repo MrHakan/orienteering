@@ -6,7 +6,25 @@ import { horizonDistance } from './skyline.js';
 import { candidateHeadings } from './heading.js';
 
 const RAY_STEP = 2.5; // degrees between rays in the 360 degree sweep
-const MAX_LANDMARK_DIST = 1700;
+export const MAX_LANDMARK_DIST = 1700;
+
+/** Clear line from (x0,y0,z0) to (x1,y1,z1) over the terrain (sampled every 1.2 cells, 0.5 m slack). */
+export function lineOfSight(model, x0, y0, z0, x1, y1, z1) {
+  const d = Math.hypot(x1 - x0, y1 - y0);
+  const steps = Math.ceil(d / (model.cell * 1.2));
+  for (let s = 1; s < steps; s++) {
+    const t = s / steps;
+    const h = model.getElevation(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
+    if (h > z0 + (z1 - z0) * t + 0.5) return false;
+  }
+  return true;
+}
+
+/** How much a landmark counts in a view, before its apparent size. */
+export const landmarkWeight = (lm) => lm.kind === 'summit' ? Math.min(1.2, 0.4 + lm.prominence / 30)
+  : lm.kind === 'knoll' ? 0.6 : lm.kind === 'saddle' ? 0.8 : 0.35;
+/** How far a landmark stands out (m); its apparent size is atan(relief / distance). */
+export const landmarkRelief = (lm) => lm.kind === 'summit' || lm.kind === 'knoll' ? lm.prominence : lm.kind === 'saddle' ? 12 : lm.depth;
 
 export class ViewpointGenerator {
   /**
@@ -70,25 +88,16 @@ export class ViewpointGenerator {
       const d = Math.hypot(dx, dy);
       if (d < 60 || d > MAX_LANDMARK_DIST) continue;
       if (this.lineOfSight(p.x, p.y, z, lm.x, lm.y, model.getElevation(lm.x, lm.y) + 1.5)) {
-        const weight = lm.kind === 'summit' ? Math.min(1.2, 0.4 + lm.prominence / 30)
-          : lm.kind === 'knoll' ? 0.6 : lm.kind === 'saddle' ? 0.8 : 0.35;
         // Apparent size: how far the feature stands out, as an angle.
-        const relief = lm.kind === 'summit' || lm.kind === 'knoll' ? lm.prominence : lm.kind === 'saddle' ? 12 : lm.depth;
-        visible.push({ az: wrap360(Math.atan2(dx, dy) / DEG), d, weight, kind: lm.kind, angularSize: Math.atan(relief / d) / DEG });
+        visible.push({ az: wrap360(Math.atan2(dx, dy) / DEG), d, weight: landmarkWeight(lm), kind: lm.kind,
+          angularSize: Math.atan(landmarkRelief(lm) / d) / DEG });
       }
     }
     return { p, z, rays, visible };
   }
 
   lineOfSight(x0, y0, z0, x1, y1, z1) {
-    const d = Math.hypot(x1 - x0, y1 - y0);
-    const steps = Math.ceil(d / (this.model.cell * 1.2));
-    for (let s = 1; s < steps; s++) {
-      const t = s / steps;
-      const h = this.model.getElevation(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
-      if (h > z0 + (z1 - z0) * t + 0.5) return false;
-    }
-    return true;
+    return lineOfSight(this.model, x0, y0, z0, x1, y1, z1);
   }
 
   /** Quality of the view from a sweep at a given heading. */

@@ -11,6 +11,7 @@ import { surfaceElevation } from './terrainSurface.js';
 import { DEG, angleDiff, wrap360 } from './grid.js';
 import { terrains, scaffold, bearingTo, bearingText, panCamera, CLIP_DURATION, normaliseResectionAnswer } from './mapModes.js';
 import { normaliseGridSize, gridCells, cellAt } from './gridQuiz.js';
+import { resectionFacts, renderExplanation } from './explanationFacts.js';
 
 // hidden: peaks unmarked, answers spread; lookalikes: answers whose every bearing meets a hill
 // (ruled out only by the view, needing `cues` differences).
@@ -22,6 +23,7 @@ const BANDS = {
   master: { peaks: 2, minError: 6, maxError: 20, round: 5, hidden: true, lookalikes: 2, cues: 1 },
 };
 const EYE = 1.7, PEAK_LIFT = 2, SPREAD = 0.25; // hidden peaks: answers at least a quarter of the map apart
+export { BANDS as RESECTION_BANDS };
 // Hidden peaks need more hills to confuse and room to spread the answers: a 3 km map at the usual detail.
 const LARGE_MAP = { size: 3000, n: 385 };
 const formGroup = (form) => ['valley', 'reentrant'].includes(form) ? 'hollow' : ['ridge', 'spur'].includes(form) ? 'crest'
@@ -47,8 +49,13 @@ export function generateResectionQuiz(opts) {
       .map((s) => ({ x: s.x, y: s.y, z: surfaceElevation(model, s.x, s.y) + PEAK_LIFT, prominence: s.prominence || 0, kind: s.kind }))
       .sort((a, b) => b.prominence - a.prominence).slice(0, 14);
     if (peaks.length < band.peaks) continue;
+    // Grid answers with hidden peaks: you stand on a cell centre, as far from every border as the grid
+    // allows, and no nearer the map edge than a free observer (the centres between 12% and 88%).
+    const centred = gridSize && band.hidden, step = L / (gridSize || 1);
+    const first = Math.ceil(0.12 * gridSize - 0.5), last = Math.floor(0.88 * gridSize - 0.5);
     for (let tries = 0; tries < 220; tries++) {
       const o = { x: rng.range(0.12, 0.88) * L, y: rng.range(0.12, 0.88) * L };
+      if (centred) for (const a of ['x', 'y']) o[a] = (Math.min(last, Math.max(first, Math.floor(o[a] / step))) + 0.5) * step;
       if (model.getSlope(o.x, o.y) > 22) continue;
       const eye = { ...o, z: surfaceElevation(model, o.x, o.y) + EYE };
       const visible = peaks.filter((p) => { const d = Math.hypot(p.x - o.x, p.y - o.y); return d > 250 && d < 1600 && sees(model, eye, p); });
@@ -62,7 +69,10 @@ export function generateResectionQuiz(opts) {
       }
       if (chosen.length < band.peaks) continue;
       const shown = chosen.map((p) => Math.round(p.bearing / band.round) * band.round % 360);
-      if (gridSize && !fixInOneCell(o, chosen, shown, band, L, gridSize)) continue;
+      if (gridSize && !fixInOneCell(o, chosen, shown, fixSlack(band, gridSize), L, gridSize)) continue;
+      // No second defensible cell: two other hills whose bearings cross elsewhere must differ in the view.
+      const rivals = centred ? rivalFixes({ model, observer: o, eye, peaks: chosen, shown, band, ownCell: cellAt(o.x, o.y, L, gridSize), gridSize }) : null;
+      if (rivals?.unrefuted) continue;
       const error = (q) => chosen.map((p, i) => angleDiff(bearingTo(q, p), shown[i]));
       const distractors = band.hidden ? lookalikeDistractors({ model, rng, o, eye, chosen, shown, band, error }) : nearMisses({ model, rng, o, chosen, band, error });
       if (!distractors) continue;
@@ -75,14 +85,24 @@ export function generateResectionQuiz(opts) {
       const peaksOut = chosen.map((p, i) => ({ label: `P${i + 1}`, x: p.x, y: p.y, z: p.z, bearing: +p.bearing.toFixed(2), shown: shown[i],
         elevation: +(Math.atan2(p.z - eye.z, Math.hypot(p.x - o.x, p.y - o.y)) / DEG).toFixed(3) }));
       const camera = { x: o.x, y: o.y, z: eye.z, eyeHeight: EYE, heading: peaksOut[0].bearing, fov: 50, pitch: peaksOut[0].elevation, roll: 0 };
+      const bandHardness = Math.min(1, (band.peaks === 2 ? 0.5 : 0.25) + (band.round > 1 ? 0.3 : 0) + (10 - band.minError) / 20
+        + (band.hidden ? 0.15 + 0.1 * wrong.filter((q) => q.refute === 'view').length : 0));
+      const validation = { ok: true, issues: [], confidence: 0.85, uniqueness: Math.min(1, ...wrong.map((q) => band.hidden
+        ? (q.refute === 'view' ? 0.3 : Math.max(...q.lines.map((l) => l.error)) / 20) : Math.max(...q.errors) / 20)) };
+      let hardness = bandHardness;
+      if (centred) {
+        const ranges = chosen.map((p) => Math.hypot(p.x - o.x, p.y - o.y));
+        const metrics = { weak: rivals.weak, crossing: angleDiff(chosen[0].bearing, chosen[1].bearing), tolerance: fixTolerance(o, chosen, shown, L, gridSize),
+          minPeakSize: Math.min(...chosen.map((p, i) => Math.atan(p.prominence / ranges[i]) / DEG)), farPeak: Math.max(...ranges) };
+        const score = resectionGridScore({ base: bandHardness, ...metrics });
+        hardness = score.hardness;
+        Object.assign(validation, { confidence: score.confidence, fixTolerance: +metrics.tolerance.toFixed(2),
+          rivalFixes: { weak: rivals.weak, refuted: rivals.refuted }, minPeakSize: +metrics.minPeakSize.toFixed(2) });
+      }
       const quiz = scaffold({ ...built, mode: 'resection', seed: opts.seed, difficulty, variant: opts.variant || 0, camera, t0, extra: {
         // Only Easy marks the peaks; harder levels make you find each labelled hill on the contour map.
         resection: { peaks: peaksOut, rounding: band.round, peaksMarked: difficulty === 'easy' },
-        options, correctLabel: correct.label,
-        hardness: Math.min(1, (band.peaks === 2 ? 0.5 : 0.25) + (band.round > 1 ? 0.3 : 0) + (10 - band.minError) / 20
-          + (band.hidden ? 0.15 + 0.1 * wrong.filter((q) => q.refute === 'view').length : 0)),
-        validation: { ok: true, issues: [], confidence: 0.85, uniqueness: Math.min(1, ...wrong.map((q) => band.hidden
-          ? (q.refute === 'view' ? 0.3 : Math.max(...q.lines.map((l) => l.error)) / 20) : Math.max(...q.errors) / 20)) },
+        options, correctLabel: correct.label, hardness, validation,
       } });
       const extend = (p, through) => { const d = Math.hypot(through.x - p.x, through.y - p.y), k = (d + 260) / d; return { x: p.x + (through.x - p.x) * k, y: p.y + (through.y - p.y) * k }; };
       quiz.map = {
@@ -91,15 +111,21 @@ export function generateResectionQuiz(opts) {
         revealYou: true, centre: { x: o.x, y: o.y },
       };
       quiz.explanation = resectionExplanation(quiz);
-      return gridSize ? toGridAnswer(quiz, o, L, gridSize) : quiz;
+      return gridSize ? toGridAnswer(quiz, o, L, gridSize, !!centred) : quiz;
     }
   }
   throw new Error('No clear resection found for this seed. Try another seed.');
 }
 
-/** Every position that fits all bearings (within the reading accuracy) lies in the observer's cell. */
-function fixInOneCell(o, chosen, shown, band, L, size) {
-  const own = cellAt(o.x, o.y, L, size), slack = band.round / 2 + 0.6, reach = 500, step = 10;
+/**
+ * Reading error (°, every bearing) a grid answer must survive: half the rounding plus 0.6° of
+ * compass error; with hidden peaks on 8×8 or coarser grids 2° more for drawing the lines on a phone.
+ */
+export const fixSlack = (band, size) => band.round / 2 + 0.6 + (band.hidden && size <= 8 ? 2 : 0);
+
+/** Every position that fits all bearings (within `slack` degrees) lies in the observer's cell. */
+function fixInOneCell(o, chosen, shown, slack, L, size) {
+  const own = cellAt(o.x, o.y, L, size), reach = 500, step = 10;
   for (let dy = -reach; dy <= reach; dy += step) for (let dx = -reach; dx <= reach; dx += step) {
     const q = { x: o.x + dx, y: o.y + dy };
     if (cellAt(q.x, q.y, L, size) === own) continue;
@@ -108,15 +134,98 @@ function fixInOneCell(o, chosen, shown, band, L, size) {
   return true;
 }
 
+/** Smallest worst-bearing error (°) that lets a position outside the observer's cell fit: the fix's real tolerance. */
+export function fixTolerance(o, peaks, shown, L, size, reach = 500, step = 10) {
+  const own = cellAt(o.x, o.y, L, size);
+  let best = Infinity;
+  for (let dy = -reach; dy <= reach; dy += step) for (let dx = -reach; dx <= reach; dx += step) {
+    const q = { x: o.x + dx, y: o.y + dy };
+    if (cellAt(q.x, q.y, L, size) === own) continue;
+    let worst = 0;
+    for (let i = 0; i < peaks.length && worst < best; i++) worst = Math.max(worst, angleDiff(bearingTo(q, peaks[i]), shown[i]));
+    best = Math.min(best, worst);
+  }
+  return best;
+}
+
+/** Hills a reader could take for a labelled peak: clear summits and knolls of some prominence. */
+const peakLike = (model, inset) => model.analyzer.summits.filter((s) => model.inside(s.x, s.y, inset) && (s.kind === 'summit' || (s.prominence || 0) >= 7));
+
+/**
+ * Rival fixes: other hills (one per bearing) whose back-bearings cross in another cell, as if
+ * you mistook them for P1, P2…. Each is refuted by view cues (see viewCues); an unrefuted rival
+ * is a second defensible answer. `weak` rivals differ by a single cue. With three peaks the third
+ * bearing must also meet a hill from there, otherwise the map alone rules the spot out.
+ */
+export function rivalFixes({ model, observer, eye, peaks, shown, band, ownCell, gridSize, excludeTrue = true }) {
+  const L = model.size, reach = Math.max(2000, 0.85 * L), onHill = band.round / 2 + 1;
+  const hills = peakLike(model, 40).map((s) => ({ x: s.x, y: s.y, z: surfaceElevation(model, s.x, s.y) + PEAK_LIFT }));
+  const [u, v] = shown.slice(0, 2).map((b) => ({ x: Math.sin((b + 180) * DEG), y: Math.cos((b + 180) * DEG) })), det = v.x * u.y - u.x * v.y;
+  const isPeak = (h, i) => Math.hypot(h.x - peaks[i].x, h.y - peaks[i].y) < 1;
+  const out = { unrefuted: 0, weak: 0, refuted: 0 };
+  for (const a of hills) for (const b of hills) {
+    if (a === b || (excludeTrue && isPeak(a, 0) && isPeak(b, 1))) continue;
+    const dx = b.x - a.x, dy = b.y - a.y, t = (v.x * dy - v.y * dx) / det, s = (u.x * dy - u.y * dx) / det;
+    if (!(t >= 100 && t <= reach && s >= 100 && s <= reach)) continue;
+    const q = { x: a.x + u.x * t, y: a.y + u.y * t };
+    if (!model.inside(q.x, q.y, 80) || model.getSlope(q.x, q.y) > 26 || cellAt(q.x, q.y, L, gridSize) === ownCell) continue;
+    const taken = [a, b];
+    for (let i = 2; i < shown.length; i++) {
+      let best = null, error = onHill;
+      for (const h of hills) {
+        const d = Math.hypot(h.x - q.x, h.y - q.y), e = d >= 100 && d <= reach ? angleDiff(bearingTo(q, h), shown[i]) : 180;
+        if (e <= error) { error = e; best = h; }
+      }
+      taken.push(best);
+    }
+    if (taken.includes(null)) continue;
+    const at = { ...q, z: surfaceElevation(model, q.x, q.y) + EYE };
+    // Distance and height first; a hidden hill counts as one cue whatever they say, so the
+    // line of sight is only traced where it can change the count.
+    const cheap = taken.map((h, i) => sightCues(at, h, peaks[i], observer, eye, i).length);
+    let cues = cheap.filter((n) => n > 0).length;
+    if (cues < 2) cues = taken.reduce((n, h, i) => n + (cheap[i] === 1 || !sees(model, at, h) ? 1 : cheap[i]), 0);
+    if (!cues) out.unrefuted++;
+    else { out.refuted++; if (cues === 1) out.weak++; }
+  }
+  return out;
+}
+
+/** Distance and eye-level cues between hill `h` seen from `at` and peak `p` (index `i`) seen from the observer. */
+function sightCues(at, h, p, o, eye, i) {
+  const d = Math.hypot(h.x - at.x, h.y - at.y), r = Math.hypot(p.x - o.x, p.y - o.y), cues = [];
+  const e = Math.atan2(h.z - at.z, d) / DEG, e0 = Math.atan2(p.z - eye.z, r) / DEG;
+  if (d / r >= 2 || d / r <= 0.5) cues.push({ type: 'distance', peak: i, metres: Math.round(d), seen: Math.round(r) });
+  if ((Math.sign(e) !== Math.sign(e0) && Math.abs(e - e0) >= 1.5) || Math.abs(e - e0) >= 4) cues.push({ type: 'elevation', peak: i, degrees: +e.toFixed(1), seen: +e0.toFixed(1) });
+  return cues;
+}
+
+/** What tells hill `h` from `at` apart from peak `p` in the view: hidden, much nearer or farther, other side of eye level. */
+function viewCues(model, at, h, p, o, eye, i) {
+  return sees(model, at, h) ? sightCues(at, h, p, o, eye, i) : [{ type: 'hidden', peak: i }];
+}
+
+/**
+ * Grid answers with hidden peaks. hardness: the band's ceiling scaled by rival fixes that differ by
+ * one cue only and by an oblique crossing. confidence: how much reading error the fix survives,
+ * how large the smallest labelled hill looks and how near the farthest one is (haze).
+ */
+export function resectionGridScore({ base, weak, crossing, tolerance, minPeakSize, farPeak }) {
+  const sat = (x) => Math.max(0, Math.min(1, x));
+  const pressure = 1 - Math.exp(-weak / 10), oblique = 1 - Math.sin(crossing * DEG);
+  return { hardness: sat(base * (0.45 + 0.55 * (0.8 * pressure + 0.2 * oblique))),
+    confidence: sat(0.5 + 0.25 * sat((tolerance - 3) / 8) + 0.15 * sat(minPeakSize / 2) + 0.1 * sat((1800 - farPeak) / 1200)) };
+}
+
 /**
  * Grid answer: the cell you stand in. The point answers stay as
  * `resection.points`; their cells explain the look-alike traps.
  */
-function toGridAnswer(quiz, o, L, size) {
+function toGridAnswer(quiz, o, L, size, onCellCentre) {
   const correctLabel = cellAt(o.x, o.y, L, size), points = quiz.options;
   const options = gridCells(L, size).map((c) => ({ ...c, correct: c.label === correctLabel }));
   const out = { ...quiz, options, correctLabel, resection: { ...quiz.resection, answer: 'grid', points },
-    grid: { size, origin: 'observer', cellMetres: L / size, target: { x: Math.round(o.x), y: Math.round(o.y) } } };
+    grid: { size, origin: 'observer', onCellCentre, cellMetres: L / size, target: { x: Math.round(o.x), y: Math.round(o.y) } } };
   out.explanation = gridExplanation(out, quiz.explanation);
   return out;
 }
@@ -143,13 +252,14 @@ function gridExplanation(quiz, pointExplanation) {
         data: { peak: p.label, errorDegrees: +errors[worst].toFixed(1) } }] };
   });
   const ranked = [...alternatives].sort((a, b) => (a.scope === 'trap-point' ? -1 : 0) - (b.scope === 'trap-point' ? -1 : 0) || a.difference - b.difference);
+  const facts = resectionFacts(quiz, ranked.find((a) => a.scope === 'trap-point')?.label);
   return { ...pointExplanation, kind: 'resection-cell',
     correct: { label: cell, summary: `Only ${cell} holds the point where every back-bearing crosses.`,
       evidence: [...pointExplanation.correct.evidence.filter((e) => e.type !== 'bearing-check')
         .map((e) => e.type === 'back-bearings' ? { ...e, text: e.text.replace(/The lines cross at \w+\.$/, `The lines cross where you stand, in ${cell}.`) } : e),
-        { type: 'observer-cell', text: `The back-bearings cross inside ${cell} (${Math.round(quiz.grid.cellMetres)} m cells). Allowing ±${(rounding / 2 + 0.6).toFixed(1)}° of reading error on every bearing, all positions that fit stay in ${cell}.`,
+        { type: 'observer-cell', text: `The back-bearings cross inside ${cell} (${Math.round(quiz.grid.cellMetres)} m cells). Allowing ±${fixSlack({ ...BANDS[quiz.difficulty], round: rounding }, size).toFixed(1)}° of reading error on every bearing, all positions that fit stay in ${cell}.`,
           data: { label: cell, target: quiz.grid.target, divisions: size } }] },
-    closestLabels: ranked.slice(0, 3).map((a) => a.label), alternatives };
+    closestLabels: ranked.slice(0, 3).map((a) => a.label), alternatives, facts, ...renderExplanation(facts) };
 }
 
 /** What a bearing line from a point runs to: its nearest hill and the angle off it. */
@@ -229,15 +339,8 @@ function lookalikeDistractors({ model, rng, o, eye, chosen, shown, band, error }
   for (let i = 0; i < shown.length; i++) for (const h of hills) for (let t = 250; t <= 1600; t += 45) consider(h.x + back[i].x * t, h.y + back[i].y * t);
 
   const cuesOf = (c) => {
-    const at = { x: c.x, y: c.y, z: surfaceElevation(model, c.x, c.y) + EYE }, cues = [];
-    c.near.forEach(({ hill: h }, i) => {
-      const p = chosen[i], d = Math.hypot(h.x - c.x, h.y - c.y), r = Math.hypot(p.x - o.x, p.y - o.y);
-      const e = Math.atan2(h.z - at.z, d) / DEG, e0 = Math.atan2(p.z - eye.z, r) / DEG;
-      if (!sees(model, at, h)) { cues.push({ type: 'hidden', peak: i }); return; }
-      if (d / r >= 2 || d / r <= 0.5) cues.push({ type: 'distance', peak: i, metres: Math.round(d), seen: Math.round(r) });
-      if ((Math.sign(e) !== Math.sign(e0) && Math.abs(e - e0) >= 1.5) || Math.abs(e - e0) >= 4) cues.push({ type: 'elevation', peak: i, degrees: +e.toFixed(1), seen: +e0.toFixed(1) });
-    });
-    return cues;
+    const at = { x: c.x, y: c.y, z: surfaceElevation(model, c.x, c.y) + EYE };
+    return c.near.flatMap(({ hill: h }, i) => viewCues(model, at, h, chosen[i], o, eye, i));
   };
   const picked = [];
   let views = 0;

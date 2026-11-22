@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generate } from '../src/engine/quiz.js';
-import { gridCells, cellAt, parseCell, normaliseGridSize, headingHidden } from '../src/engine/gridQuiz.js';
+import { gridCells, cellAt, parseCell, normaliseGridSize, headingHidden, gridScore } from '../src/engine/gridQuiz.js';
 import { MapRenderer, quizMarkers } from '../src/render/mapRenderer.js';
 import { TerrainModel } from '../src/engine/terrainModel.js';
 import { descriptorDistance } from '../src/engine/skyline.js';
@@ -163,5 +163,86 @@ test('small grids handle a depleted viewpoint pool across difficulty extremes', 
   for (const difficulty of ['easy', 'master']) for (const gridChallenge of ['standard', 'lost-compass']) {
     const q = await generate({ seed: 'grid-matrix', mode: 'grid', gridSize: 4, difficulty, gridChallenge });
     assert.equal(q.validation.ok, true);
+  }
+});
+
+const MASTER_SEEDS = ['gq-0', 'gq-1', 'gq-2', 'gq-3', 'gq-4', 'gq-5'];
+let masterGrids;
+const masterGrid = () => masterGrids ??= Promise.all(MASTER_SEEDS.map((seed) => generate({ seed, mode: 'grid', gridSize: 8, difficulty: 'master' })));
+
+test('master grid: every look-alike cell differs by a skyline cue you can see', async () => {
+  for (const q of await masterGrid()) {
+    const wrong = q.options.filter((o) => !o.correct), minD = q.validation.minRequiredDistance;
+    const closest = wrong.reduce((a, b) => b.D < a.D ? b : a), near = wrong.filter((o) => o.D < 2 * minD);
+    const gate = [closest, ...near];
+    for (const o of gate) assert.ok(o.cue.magnitude >= 1.6, `${q.seed} ${o.label}: cue ${o.cue.magnitude.toFixed(2)}°`);
+    assert.equal(q.validation.weakestCue, +Math.min(...gate.map((o) => o.cue.magnitude)).toFixed(2));
+    assert.equal(q.validation.lookalikes, near.length);
+    const [row, column] = [q.correctLabel.charCodeAt(0) - 65, +q.correctLabel.slice(1) - 1];
+    assert.equal(q.validation.remoteLookalikes, near.filter((o) => Math.max(Math.abs(o.row - row), Math.abs(o.column - column)) > 1).length);
+  }
+});
+
+test('master grid: the dev tuning cue 0 switches the visible-cue gate off', async () => {
+  const issue = (q) => q.log.filter((l) => l.issues.includes('look-alike cell without a visible cue')).length;
+  const gated = await generate({ seed: 'gq-0', mode: 'grid', gridSize: 8, difficulty: 'master' });
+  const open = await generate({ seed: 'gq-0', mode: 'grid', gridSize: 8, difficulty: 'master', tuning: { cue: 0 } });
+  assert.ok(issue(gated) > 0, 'the gate rejected a candidate');
+  assert.equal(issue(open), 0);
+  assert.ok(open.validation.weakestCue < 1.6, 'the open search keeps a faint-cue question');
+});
+
+test('grid score: hardness measures closeness and spread, confidence the weakest cue', () => {
+  const base = { closestD: 1.1, minD: 0.9, lookalikes: 4, remote: 1, weakestCue: 2, quality: 0.7, blockedFrac: 0, edgeFrac: 0 };
+  const s = gridScore(base);
+  for (const v of [s.hardness, s.confidence]) assert.ok(v >= 0 && v <= 1);
+  assert.ok(gridScore({ ...base, remote: 4 }).hardness > s.hardness, 'distant look-alikes are harder');
+  assert.ok(gridScore({ ...base, lookalikes: 12, remote: 3 }).hardness > s.hardness);
+  assert.ok(gridScore({ ...base, closestD: 0.95 }).hardness > s.hardness);
+  assert.ok(gridScore({ ...base, weakestCue: 1.2 }).confidence < s.confidence, 'a fainter cue is less fair');
+  assert.ok(gridScore({ ...base, blockedFrac: 0.2 }).confidence < s.confidence);
+  assert.equal(gridScore({ ...base, closestD: 0.95 }).confidence, s.confidence, 'closeness alone does not move confidence');
+});
+
+test('grid: below master only the reported numbers change; master repeats exactly', async () => {
+  for (const [difficulty, gridSize, gridChallenge, label, heading] of [['medium', 8, 'standard', 'C5', 225], ['hard', 8, 'standard', 'G5', 346], ['expert', 16, 'lost-compass', 'K11', 0]]) {
+    const q = await generate({ seed: 'grid-check', mode: 'grid', difficulty, gridSize, gridChallenge });
+    assert.deepEqual([q.correctLabel, q.camera.heading], [label, heading], difficulty);
+  }
+  const [a] = await masterGrid(), b = await generate({ seed: MASTER_SEEDS[0], mode: 'grid', gridSize: 8, difficulty: 'master' });
+  assert.deepEqual(b.camera, a.camera);
+  assert.deepEqual([b.correctLabel, b.hardness, b.validation], [a.correctLabel, a.hardness, a.validation]);
+});
+
+test('master grid: Master ranks by the reported hardness and picks from the three hardest', async () => {
+  for (const q of await masterGrid()) {
+    assert.equal(q.validation.faintCue, false, q.seed);
+    const ok = q.log.filter((l) => l.ok && l.attempt === q.stats.terrainAttempt).map((l) => l.hardness).sort((a, b) => b - a);
+    assert.equal(ok.length, q.stats.questionsCompared, q.seed);
+    assert.ok(+q.hardness.toFixed(4) >= ok[Math.min(2, ok.length - 1)], `${q.seed}: ${q.hardness} not among ${ok.slice(0, 3)}`);
+  }
+});
+
+test('master grid on dunes: when no look-alike shows a visible cue, the clearest one is kept and marked', async () => {
+  // These seeds found no candidate with a visible cue on two terrains (earlier they threw after four).
+  for (const seed of ['dn-16', 'dn-34']) {
+    const q = await generate({ seed, world: 'dunes', mode: 'grid', gridSize: 8, difficulty: 'master' });
+    assert.deepEqual([q.validation.faintCue, q.validation.ok, q.lowConfidence], [true, false, true], seed);
+    assert.ok(q.stats.terrainAttempt >= 1, `${seed}: one more terrain is tried first`);
+    assert.ok(q.validation.weakestCue < 1.6 && q.hardness <= 0.3 && q.validation.confidence <= 0.4, seed);
+    assert.deepEqual(q.validation.issues, ['look-alike cell without a visible cue']);
+    assert.match(q.explanation.caution, /uncertain/);
+    const faint = q.log.filter((l) => l.attempt === q.stats.terrainAttempt && l.issues.length === 1 && l.issues[0] === 'look-alike cell without a visible cue');
+    assert.ok(faint.length >= 1 && !q.log.some((l) => l.attempt === q.stats.terrainAttempt && l.ok), seed);
+    assert.equal(q.validation.weakestCue, Math.max(...faint.map((l) => l.weakestCue)), `${seed}: the clearest cue is kept`);
+  }
+});
+
+test('master grid: the reported hardness and confidence come from gridScore (golden values)', async () => {
+  // Pins the public numbers the automation ranks on; a revert to the old closeness-only formulas changes them.
+  const r = (x) => +x.toFixed(4);
+  for (const [seed, label, hardness, confidence] of [['gq-1', 'H2', 0.6295, 0.8552], ['gq-2', 'F8', 0.7691, 0.9157]]) {
+    const q = await generate({ seed, mode: 'grid', gridSize: 8, difficulty: 'master' });
+    assert.deepEqual([q.correctLabel, r(q.hardness), r(q.validation.confidence)], [label, hardness, confidence], seed);
   }
 });
