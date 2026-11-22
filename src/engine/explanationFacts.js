@@ -6,7 +6,7 @@ import { DEG, angleDiff, wrap360 } from './grid.js';
 import { cellAtExtent } from './gridQuiz.js';
 import { lineOfSight, landmarkWeight, landmarkRelief, MAX_LANDMARK_DIST } from './viewpoints.js';
 
-export const FACTS_VERSION = 1;
+export const FACTS_VERSION = 2; // 2: names without heights; text without distances
 export const COMPASS_WORDS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
 export const SHORT_MAX = 280;
 export const compassOf = (deg) => COMPASS_WORDS[Math.round(wrap360(deg) / 45) % 8];
@@ -29,7 +29,19 @@ const signed = (a, b) => wrap360(a - b + 180) - 180;
 const sideAt = (offset, fov) => offset < -fov / 6 ? 'left' : offset > fov / 6 ? 'right' : 'centre';
 const extentOf = (q) => q.mapExtent || { x: q.terrain.size / 2, y: q.terrain.size / 2, size: q.terrain.size };
 const cellOf = (q, p) => cellAtExtent(p.x, p.y, extentOf(q), q.grid.size);
-const landmarkName = (kind, height) => kind === 'depression' ? 'the depression' : `the ${height} m ${kind}`;
+// Names say what a viewer can match by eye: the landform, and "higher" / "lower" when two of a kind
+// are named. Heights and distances stay in the facts (checks, weather) but never in the text.
+const landmarkName = (kind) => `the ${kind}`;
+/** "the higher summit" / "the lower summit" when two named features share a kind (summit, knoll, hill). */
+export function relativeNames(features) {
+  for (const kind of new Set(features.map((f) => f.kind))) {
+    const same = features.filter((f) => f.kind === kind && Number.isFinite(f.heightMetres) && /^the [a-z-]+$/.test(f.name));
+    if (same.length !== 2 || same[0].heightMetres === same[1].heightMetres || kind === 'depression' || kind === 'high-ground') continue;
+    const [hi, lo] = same[0].heightMetres > same[1].heightMetres ? same : [same[1], same[0]];
+    hi.name = `the higher ${kind}`; lo.name = `the lower ${kind}`; hi.rank = 'higher'; lo.rank = 'lower';
+  }
+  return features;
+}
 const round1 = (v) => Math.round(v * 10) / 10;
 const cellIndex = (label) => [label.charCodeAt(0) - 65, Number(label.slice(1)) - 1];
 const adjacentCells = (a, b) => {
@@ -95,7 +107,7 @@ function skylineTop(q, model, shown) {
 
 function landmarkFeature(q, { lm, view }, role) {
   const height = Math.round(lm.z);
-  return { role, kind: lm.kind, name: landmarkName(lm.kind, height), heightMetres: height, cell: cellOf(q, lm),
+  return { role, kind: lm.kind, name: landmarkName(lm.kind), heightMetres: height, cell: cellOf(q, lm),
     compass: compassOf(view.az), distanceMetres: roundDistance(view.d), distanceText: distanceText(view.d), side: view.side };
 }
 
@@ -176,7 +188,7 @@ export function skylineReason(alternative) {
  * option or friend match; `alternatives` the explanation's comparison records.
  */
 export function viewExplanationFacts(q, model, shown, { alternatives, cameraFor }) {
-  const items = viewFeatures(q, model, shown), features = items.map((i) => i.feature);
+  const items = viewFeatures(q, model, shown), features = relativeNames(items.map((i) => i.feature));
   const facts = { version: FACTS_VERSION, mode: q.mode, answer: { label: q.correctLabel, kind: 'cell' },
     grid: { size: q.grid.size, cellMetres: Math.round(q.grid.cellMetres) }, observer: null, features, lookalike: null };
   if (q.mode === 'grid') {
@@ -194,7 +206,7 @@ export function viewExplanationFacts(q, model, shown, { alternatives, cameraFor 
       .filter((o) => o.d <= NEAR_TARGET).sort((a, b) => a.d - b.d)[0];
     facts.target = { cell: q.correctLabel, compass: compassOf(Math.atan2(f.x - cam.x, f.y - cam.y) / DEG),
       distanceMetres: roundDistance(d), distanceText: distanceText(d), landform: model.analyzer.classify(f.x, f.y),
-      near: near ? { kind: near.lm.kind, name: landmarkName(near.lm.kind, Math.round(near.lm.z)), cell: cellOf(q, near.lm) } : null };
+      near: near ? { kind: near.lm.kind, name: landmarkName(near.lm.kind), heightMetres: Math.round(near.lm.z), cell: cellOf(q, near.lm) } : null };
     const rival = q.friend.matches.filter((m) => !m.correct).map((m) => ({ m, label: cellOf(q, m) }))
       .filter((o) => o.label && o.label !== q.correctLabel)
       .sort((a, b) => a.m.D - b.m.D || a.label.localeCompare(b.label))[0];
@@ -223,18 +235,19 @@ export function resectionFacts(quiz, trapLabel) {
   const features = peaks.map((p, i) => {
     const kind = correct.lines?.[i]?.hill?.kind === 'knoll' ? 'knoll' : 'summit', height = Math.round(p.z - 2);
     const d = Math.hypot(p.x - correct.x, p.y - correct.y), back = wrap360(p.shown + 180);
-    return { role: 'peak', label: p.label, kind, name: `the ${height} m ${kind}`, heightMetres: height, cell: cell(p),
+    return { role: 'peak', label: p.label, kind, name: `the ${kind}`, heightMetres: height, cell: cell(p),
       compass: compassOf(p.bearing), distanceMetres: roundDistance(d), distanceText: distanceText(d),
       bearing: p.shown, backBearing: back, backCompass: compassOf(back) };
   });
+  relativeNames(features);
   const facts = { version: FACTS_VERSION, mode: 'resection', answer: { label: quiz.correctLabel, kind: 'cell' },
     grid: { size: quiz.grid.size, cellMetres: Math.round(quiz.grid.cellMetres) },
     observer: { cell: quiz.correctLabel, facing: null, landform: correct.landform, ahead: null }, features, lookalike: null };
   const trap = trapLabel && points.find((o) => !o.correct && cell(o) === trapLabel);
   if (trap) {
-    const hillName = (hill) => hill.peak >= 0 ? peaks[hill.peak].label : `the ${hill.height} m ${hill.kind === 'knoll' ? 'knoll' : 'hill'}`;
+    const hillName = (hill) => hill.peak >= 0 ? peaks[hill.peak].label : `the ${hill.kind === 'knoll' ? 'knoll' : 'hill'}`;
     const mistaken = (trap.lines || []).map((l, i) => ({ l, i })).filter(({ l, i }) => l.error <= onHill && l.hill && l.hill.peak !== i)
-      .map(({ l, i }) => ({ peak: peaks[i].label, name: hillName(l.hill), cell: cell(l.hill) }));
+      .map(({ l, i }) => ({ peak: peaks[i].label, name: hillName(l.hill), heightMetres: l.hill.height, cell: cell(l.hill) }));
     const cues = trap.cues || [], cue = ['distance', 'hidden', 'elevation'].map((t) => cues.find((c) => c.type === t)).find(Boolean);
     let reason = null;
     if (cue) {
@@ -298,22 +311,22 @@ const join = (list) => list.length < 2 ? list.join('') : `${list.slice(0, -1).jo
 const OMIT_ORDER = [['ahead'], ['ahead', 'detail'], ['ahead', 'detail', 'compact'], ['ahead', 'detail', 'feature2'],
   ['ahead', 'detail', 'compact', 'feature2'], ['ahead', 'detail', 'compact', 'feature2', 'lookalike']];
 
-/** "the 192 m summit on the right of the view, the top of the skyline, is in E4, about 950 m to your south-west" */
+/** "the higher summit on the right of the view, the top of the skyline, is in E4, to your south-west" */
 function featureWhere(f, omit) {
-  const side = `${SIDE[f.side]}${omit.has('detail') ? '' : ' of the view'}`, about = omit.has('detail') ? '' : 'about ';
+  const side = `${SIDE[f.side]}${omit.has('detail') ? '' : ' of the view'}`;
   return isLandmark(f)
-    ? `${f.name} ${side}${f.role === 'skyline-top' ? ', the top of the skyline,' : ''} is in ${f.cell}, ${about}${f.distanceText} to your ${f.compass}`
-    : `the top of the skyline, ${side}, is ${f.name} in ${f.cell}, ${about}${f.distanceText} to your ${f.compass}`;
+    ? `${f.name} ${side}${f.role === 'skyline-top' ? ', the top of the skyline,' : ''} is in ${f.cell}, to your ${f.compass}`
+    : `the top of the skyline, ${side}, is ${f.name} in ${f.cell}, to your ${f.compass}`;
 }
 function findStep(f, omit) {
-  const side = `${SIDE[f.side]}${omit.has('detail') ? '' : ' of the view'}`, about = omit.has('detail') ? '' : 'about ';
+  const side = `${SIDE[f.side]}${omit.has('detail') ? '' : ' of the view'}`;
   return isLandmark(f)
-    ? `Find ${f.name} ${side}${f.role === 'skyline-top' ? ', the top of the skyline' : ''}: it is in ${f.cell}, ${about}${f.distanceText} to your ${f.compass}.`
-    : `Find the top of the skyline ${side}: it is ${f.name} in ${f.cell}, ${about}${f.distanceText} to your ${f.compass}.`;
+    ? `Find ${f.name} ${side}${f.role === 'skyline-top' ? ', the top of the skyline' : ''}: it is in ${f.cell}, to your ${f.compass}.`
+    : `Find the top of the skyline ${side}: it is ${f.name} in ${f.cell}, to your ${f.compass}.`;
 }
 function featureAlso(f) {
-  return isLandmark(f) ? `${cap(f.name)} in ${f.cell} is ${SIDE[f.side]}, ${f.distanceText} away.`
-    : `The top of the skyline, ${f.name} in ${f.cell}, is ${SIDE[f.side]}, ${f.distanceText} away.`;
+  return isLandmark(f) ? `${cap(f.name)} in ${f.cell} is ${SIDE[f.side]}.`
+    : `The top of the skyline, ${f.name} in ${f.cell}, is ${SIDE[f.side]}.`;
 }
 
 /**
@@ -329,7 +342,7 @@ function viewReason(r, features, omit, shown) {
     case 'landmark-out-of-frame': return `${name} would be out of the picture${detail ? `, off to the ${r.direction}` : ''}`;
     case 'landmark-hidden': return `${name} would be hidden${compact ? '' : ' behind nearer ground'}`;
     case 'landmark-side': return `${name} would sit ${SIDE[r.side]}${compact ? '' : `, not ${SIDE[f.side]}`}`;
-    case 'landmark-range': return `${name} would be ${r.distanceText} away, not ${f.distanceText}${detail ? `, and look much ${r.looks}` : ''}`;
+    case 'landmark-range': return `${name} would look much ${r.looks}`;
     case 'skyline-higher': return `the skyline ${SIDE[r.side]} would sit higher`;
     case 'skyline-lower': return `the skyline ${SIDE[r.side]} would sit lower`;
     default: return null;
@@ -339,8 +352,8 @@ function viewReason(r, features, omit, shown) {
 /** Why the trap cell fails, about `subject` ("that hill" for the mistaken hill already named, or a peak label). */
 function resectionReason(r, subject, compact) {
   switch (r.type) {
-    case 'peak-range': return compact ? `${subject} would be ${r.distanceText} away, not ${r.seenText}`
-      : `${subject} would be ${r.distanceText} away, but ${r.peak} in the view is ${r.seenText} away`;
+    case 'peak-range': return compact ? `${subject} would look much ${r.looks}`
+      : `${subject} would look much ${r.looks} than ${subject === r.peak ? 'it does' : r.peak} in the view`;
     case 'peak-hidden': return compact ? `${subject} would be hidden` : `${subject} would be hidden behind higher ground, yet ${r.peak} is in view`;
     case 'peak-eye-level':
       if (r.relative) return `${subject} would sit much ${r.relative} than ${subject === r.peak ? '' : `${r.peak} `}in the view`;
@@ -378,11 +391,12 @@ function friendSteps(facts, omit) {
     : a ? `First find YOU: ${featureWhere(a, omit)}, so you are in ${o.cell}, facing ${o.facing}.`
       : `First find YOU from the ground around you: you stand ${FORM[o.landform] || 'on open ground'} in ${o.cell}, facing ${o.facing}${ahead}.`)
     + (b ? ` ${featureAlso(b)}` : ''));
-  steps.push(`Your friend is about ${t.distanceText} ${t.compass} of you, ${FORM[t.landform] || 'in the open'}`
-    + `${t.near ? ` near ${t.near.name}` : ''}: ${caution ? `that fits ${label} best` : label}.`);
+  const where = o.cell === label ? `close by, ${t.compass} of you` : o.cell && adjacentCells(o.cell, label) ? `just ${t.compass} of you` : `${t.compass} of you`;
+  const near = !t.near ? '' : t.near.cell && t.near.cell !== label ? ` near ${t.near.name} in ${t.near.cell}` : ` near ${t.near.name.replace(/^the /, 'a ')}`;
+  steps.push(`Your friend is ${where}, ${FORM[t.landform] || 'in the open'}${near}: ${caution ? `that fits ${label} best` : label}.`);
   if (!omit.has('lookalike') && l?.reason) {
     const shown = new Set([a, b].filter(Boolean).map((f) => facts.features.indexOf(f)));
-    if (l.reason.type === 'person-range') steps.push(`Not ${l.label}: he would be ${l.reason.distanceText} away and look much ${l.reason.looks}.`);
+    if (l.reason.type === 'person-range') steps.push(`Not ${l.label}: he would look much ${l.reason.looks}.`);
     else {
       const reason = viewReason(l.reason, facts.features, omit, shown);
       if (reason && l.observerCell) steps.push(omit.has('compact') ? `Not ${l.label}: with YOU in ${l.observerCell}, ${reason}.`
@@ -421,12 +435,11 @@ function resectionSteps(facts, omit) {
 
 function visibilitySteps(facts, omit) {
   const { answer: { label }, target: t, lookalike: l } = facts, steps = [];
-  steps.push(`${label} is the only flag in sight from YOU: it stands about ${t.distanceText} to your ${t.compass}.`);
+  steps.push(`${label} is the only flag in sight from YOU, to your ${t.compass}.`);
   steps.push(t.hiddenLowestMetres > 0
-    ? `The ground hides only its lowest ${t.hiddenLowestMetres.toFixed(1)} m, so the top of the ${t.flagMetres} m flag still shows.`
-    : 'Nothing rises above the line from your eye to its foot, so the whole flag shows.');
-  if (l?.reason && !omit.has('lookalike')) steps.push(`Not ${l.label}: ground about ${l.reason.blockDistanceText} out on that line hides it; `
-    + `it would need to be ${l.reason.neededMetres.toFixed(1)} m tall to show.`);
+    ? 'The ground in between hides only its foot, so the top of the flag still shows.'
+    : 'Nothing rises between your eye and its foot, so the whole flag shows.');
+  if (l?.reason && !omit.has('lookalike')) steps.push(`Not ${l.label}: a rise on the way hides the whole flag.`);
   return steps;
 }
 

@@ -102,7 +102,7 @@ test('facts: generated for every master quiz of the four modes, answer and publi
   for (const [id, list] of Object.entries(quizzes)) assert.ok(list.length >= 10, `${id}: ${list.length}/12 generated`);
   for (const q of all()) {
     const f = q.explanation.facts, tag = `${q.mode} ${q.seed}`;
-    assert.equal(f.version, 1, tag);
+    assert.equal(f.version, 2, tag);
     assert.equal(f.answer.label, q.correctLabel, tag);
     assert.equal(f.answer.kind, q.grid ? 'cell' : 'option', tag);
     const json = JSON.stringify(f);
@@ -113,6 +113,10 @@ test('facts: generated for every master quiz of the four modes, answer and publi
     for (const cell of cells) assert.equal(parseCell(cell, q.grid.size), cell, `${tag}: ${cell}`);
     for (const [, word] of json.matchAll(/"(?:compass|facing|backCompass)":"([^"]+)"/g)) assert.ok(COMPASS_WORDS.includes(word), `${tag}: ${word}`);
     for (const ft of f.features) assert.equal(ft.distanceText, ft.distanceMetres >= 1000 ? `${(ft.distanceMetres / 1000).toFixed(1)} km` : `${ft.distanceMetres} m`, tag);
+    // Text for viewers: landforms, sides, compass and cells; no distances or heights (Hakan, 2026-11-22).
+    const text = [q.explanation.short, ...q.explanation.steps].join(' ');
+    assert.doesNotMatch(text, /\d\s*(?:m|km)\b/, `${tag}: ${text}`);
+    for (const ft of f.features) assert.doesNotMatch(ft.name, /\d/, `${tag}: ${ft.name}`);
     const technical = [q.explanation.correct.summary, ...q.explanation.correct.evidence.map((x) => x.text)].join(' ');
     assert.doesNotMatch(technical, /also fit|apparent height of|terrain agree/, `${tag}: ${technical}`);
   }
@@ -295,15 +299,15 @@ test('template: one sentence for every look-alike reason type', () => {
   assert.equal(grid({ type: 'landmark-out-of-frame', feature: 0, direction: 'left' }), 'Not A7: from there the 192 m summit would be out of the picture, off to the left.');
   assert.equal(grid({ type: 'landmark-hidden', feature: 0 }), 'Not A7: from there the 192 m summit would be hidden behind nearer ground.');
   assert.equal(grid({ type: 'landmark-range', feature: 0, distanceMetres: 1600, distanceText: '1.6 km', looks: 'smaller' }),
-    'Not A7: from there the 192 m summit would be 1.6 km away, not 950 m, and look much smaller.');
+    'Not A7: from there the 192 m summit would look much smaller.');
   assert.equal(grid({ type: 'skyline-higher', side: 'left' }), 'Not A7: from there the skyline on the left would sit higher.');
   assert.equal(grid({ type: 'skyline-lower', side: 'centre' }), 'Not A7: from there the skyline in the centre would sit lower.');
   assert.equal(look(friendFacts()), 'Not G7: YOU would then be in F7, and from there the 197 m summit would be out of the picture, off to the right.');
   assert.equal(look(friendFacts({ lookalike: { label: 'E5', adjacent: true, observerCell: null, reason: { type: 'person-range', distanceMetres: 80, distanceText: '80 m', looks: 'larger' } } })),
-    'Not E5: he would be 80 m away and look much larger.');
+    'Not E5: he would look much larger.');
   const mistaken = [{ peak: 'P1', name: 'the 132 m knoll', cell: 'B3' }];
   assert.equal(look(resection({ type: 'peak-range', peak: 'P2', subject: 'P2', distanceMetres: 200, distanceText: '200 m', seenText: '950 m', looks: 'larger' }, mistaken)),
-    'Not C2: it needs the 132 m knoll in B3 to be P1; from there P2 would be 200 m away, but P2 in the view is 950 m away.');
+    'Not C2: it needs the 132 m knoll in B3 to be P1; from there P2 would look much larger than it does in the view.');
   assert.equal(look(resection({ type: 'peak-hidden', peak: 'P1', subject: 'the 132 m knoll' }, mistaken)),
     'Not C2: it needs the 132 m knoll in B3 to be P1; from there that hill would be hidden behind higher ground, yet P1 is in view.');
   assert.equal(look(resection({ type: 'peak-eye-level', peak: 'P2', subject: 'P2', from: 'below', seen: 'above' })),
@@ -315,15 +319,15 @@ test('template: one sentence for every look-alike reason type', () => {
   const vis = { version: 1, mode: 'visibility', answer: { label: 'B', kind: 'option' }, grid: null, observer: null, features: [],
     target: { label: 'B', compass: 'south-west', distanceMetres: 300, distanceText: '300 m', flagMetres: 2, hiddenLowestMetres: 0 },
     lookalike: { label: 'E', adjacent: false, reason: { type: 'flag-hidden', blockDistanceMetres: 600, blockDistanceText: '600 m', neededMetres: 2.8 } } };
-  assert.deepEqual(renderExplanation(vis).steps, ['B is the only flag in sight from YOU: it stands about 300 m to your south-west.',
-    'Nothing rises above the line from your eye to its foot, so the whole flag shows.',
-    'Not E: ground about 600 m out on that line hides it; it would need to be 2.8 m tall to show.']);
+  assert.deepEqual(renderExplanation(vis).steps, ['B is the only flag in sight from YOU, to your south-west.',
+    'Nothing rises between your eye and its foot, so the whole flag shows.',
+    'Not E: a rise on the way hides the whole flag.']);
 });
 
 test('template: reasoning order, no invented features, caution wording', () => {
   assert.deepEqual(renderExplanation(gridFacts()).steps, [
-    'Find the 192 m summit on the right of the view: it is in E4, about 950 m to your south-west.',
-    'The 124 m knoll in D7 is in the centre, 500 m away.',
+    'Find the 192 m summit on the right of the view: it is in E4, to your south-west.',
+    'The 124 m knoll in D7 is in the centre.',
     'Both line up like this only from B7, facing south. The ground ahead falls, as the contours show.',
     'Not A7: from there the 124 m knoll would sit on the left, not in the centre.']);
   const bare = renderExplanation(gridFacts({ features: [], lookalike: null, observer: { cell: 'B7', facing: 'south', landform: 'valley', ahead: 'level' } }));
@@ -334,10 +338,10 @@ test('template: reasoning order, no invented features, caution wording', () => {
   assert.match(caution.short, /line up best from B7/); assert.doesNotMatch(caution.short, /\bonly\b/);
   const friend = renderExplanation(friendFacts({ caution: true, features: [] }));
   assert.equal(friend.steps[0], 'First find YOU from the ground around you: you stand in a re-entrant in D6, facing south, and the ground ahead rises.');
-  assert.equal(friend.steps[1], 'Your friend is about 160 m south of you, on a slope: that fits E6 best.');
+  assert.equal(friend.steps[1], 'Your friend is just south of you, on a slope: that fits E6 best.');
   const marked = renderExplanation(friendFacts({ observer: { ...friendFacts().observer, marked: true } }));
   assert.equal(marked.steps[0], 'YOU are marked on the map in D6, facing south, and the ground ahead rises.');
-  assert.match(renderExplanation(friendFacts()).steps[0], /^First find YOU: the 197 m summit on the left of the view is in G6, about 650 m to your south, so you are in D6, facing south\.$/);
+  assert.match(renderExplanation(friendFacts()).steps[0], /^First find YOU: the 197 m summit on the left of the view is in G6, to your south, so you are in D6, facing south\.$/);
   assert.deepEqual(renderExplanation(resection(null)).steps.slice(0, 3), ['P1 is the 155 m knoll in A5, P2 the 128 m knoll in C1.',
     'Draw the back-bearings: 210° (south-west) from P1 and 090° (east) from P2.', 'They cross in C4.']);
   assert.equal(renderExplanation({ mode: 'route' }), null);
@@ -412,7 +416,8 @@ test('facts: friend — the landmark "near" him is within 150 m and the closest;
     if (byDistance[0].d <= 150) {
       nears++;
       assert.equal(t.near.cell, cellOf(q, byDistance[0].l), q.seed);
-      assert.match(t.near.name, new RegExp(byDistance[0].l.kind === 'depression' ? 'depression' : `${Math.round(byDistance[0].l.z)} m ${byDistance[0].l.kind}`));
+      assert.equal(t.near.name, `the ${byDistance[0].l.kind}`, q.seed);
+      if (byDistance[0].l.kind !== 'depression') assert.equal(t.near.heightMetres, Math.round(byDistance[0].l.z), q.seed);
     } else assert.equal(t.near, null, `${q.seed}: nothing within 150 m`);
     const wrong = q.friend.matches.filter((m) => !m.correct && cellOf(q, m) && cellOf(q, m) !== q.correctLabel);
     if (!wrong.length) { assert.equal(f.lookalike, null); continue; }
@@ -566,7 +571,7 @@ test('template: the resection reason is about the hill on its own bearing; same-
   const two = [{ peak: 'P1', name: 'the 136 m knoll', cell: 'B6' }, { peak: 'P2', name: 'the 93 m knoll', cell: 'E2' }];
   const look = (reason, mistaken) => renderExplanation(resection(reason, mistaken)).steps.at(-1);
   assert.equal(look({ type: 'peak-range', peak: 'P2', subject: 'the 93 m knoll', distanceMetres: 1600, distanceText: '1.6 km', seenText: '600 m', looks: 'smaller' }, two),
-    'Not C2: it needs the 93 m knoll in E2 to be P2; from there that hill would be 1.6 km away, but P2 in the view is 600 m away.');
+    'Not C2: it needs the 93 m knoll in E2 to be P2; from there that hill would look much smaller than P2 in the view.');
   // two hills of the same name: the one on the reason's bearing is meant
   const twins = [{ peak: 'P1', name: 'the 114 m knoll', cell: 'D1' }, { peak: 'P2', name: 'the 114 m knoll', cell: 'E1' }];
   assert.match(look({ type: 'peak-range', peak: 'P2', subject: 'the 114 m knoll', distanceMetres: 400, distanceText: '400 m', seenText: '1.5 km', looks: 'larger' }, twins),
@@ -585,7 +590,7 @@ test('template: a look-alike reason about a feature the text did not introduce n
   const long = gridFacts({ features: [feature({ name: `the ${'very '.repeat(14)}high summit` }), gridFacts().features[1]] });
   const { short } = renderExplanation(long);
   assert.doesNotMatch(short, /D7 is in the centre/);
-  assert.match(short, /Not A7: from there the 124 m knoll in D7 would sit on the left\./);
+  assert.match(short, /Not A7: from there the 124 m knoll in D7 would sit on the left\b/);
   // a reason about a third feature (never introduced) is placed too
   const third = gridFacts({ features: [...gridFacts().features, feature({ name: 'the 88 m knoll', heightMetres: 88, cell: 'C5', side: 'left' })],
     lookalike: { label: 'A7', adjacent: true, reason: { type: 'landmark-hidden', feature: 2 } } });
@@ -612,8 +617,8 @@ test('template: a long friend caption keeps the look-alike in a compact wording 
     const s = renderExplanation(resection({ type: 'peak-range', peak: 'P2', subject: 'P2', distanceMetres: 200, distanceText: '200 m', seenText: '950 m', looks: 'larger' },
       [{ peak: 'P1', name: `the 132 m knoll${' far'.repeat(n)}`, cell: 'B3' }])).short;
     assert.ok(s.length <= SHORT_MAX);
-    forms.push(/to be P1; from there P2 would be 200 m away, but P2 in the view is 950 m away\.$/.test(s) ? 'full'
-      : /that takes the 132 m knoll[ a-z]* in B3 for P1, and P2 would be 200 m away, not 950 m\.$/.test(s) ? 'compact' : /Not C2/.test(s) ? 'other' : 'none');
+    forms.push(/to be P1; from there P2 would look much larger than it does in the view\.$/.test(s) ? 'full'
+      : /that takes the 132 m knoll[ a-z]* in B3 for P1, and P2 would look much larger\.$/.test(s) ? 'compact' : /Not C2/.test(s) ? 'other' : 'none');
   }
   const order = forms.filter((x, i) => x !== forms[i - 1]);
   assert.deepEqual(order, ['full', 'compact', 'none'], forms.join(' '));
