@@ -45,6 +45,12 @@ const FRIEND_BANDS = {
   expert: { min: 0.9, max: 3.8, cue: 1.1, search: 14 },
   master: { min: 0.8, max: 3.2, cue: 1.0, search: 20 },
 };
+/**
+ * Grid answers: a sighting from another cell whose view is closer than this is a second answer.
+ * A skilled viewer tells views apart from the Master floor up, so the limit is the same at every
+ * level (the higher Medium–Expert floors only keep the A/B/C matches easy).
+ */
+export const FRIEND_LOOKALIKE_LIMIT = FRIEND_BANDS.master.min;
 
 /** The question map must not expose a hidden observer through a marker or cone. */
 export function friendObserver(quiz) {
@@ -107,6 +113,19 @@ export function friendGridScore({ closestD, rivals, weakestCue, band, quality, b
   };
 }
 
+/**
+ * A grid question with a look-alike sighting in another cell is kept only when no clean one exists;
+ * its numbers then rank it below clean questions (confidence ≤ 0.4, hardness ≤ 0.3) and it is marked
+ * low-confidence (validation.ok false), so the explanation carries a caution.
+ */
+export function flagLookalike(q) {
+  q.lowConfidence = true;
+  Object.assign(q.validation, { ok: false, issues: [...q.validation.issues, 'look-alike sighting in another cell'], lookalikeElsewhere: true });
+  q.validation.confidence = Math.min(q.validation.confidence, 0.4);
+  q.hardness = Math.min(q.hardness, 0.3);
+  return q;
+}
+
 /** The best three candidates, minus any much easier than the best (no 'too easy' day by chance). */
 export const friendShortlist = (sorted, floor = 0.15) => sorted.slice(0, 3).filter((q) => q.hardness >= sorted[0].hardness - floor);
 
@@ -155,7 +174,9 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
     onProgress('Matching ranges and searching terrain look-alikes');
     const { picked, evaluated } = vg.generate();
     const margin = 70, grid = hypothesisLattice(model, rng.fork('hypotheses'), 48, margin);
-    const valid = [], farScans = new Map();
+    // twins: view distance of a look-alike sighting already found in another cell (grid answers).
+    const valid = [], farScans = new Map(), twins = new Map(), twinD = FRIEND_LOOKALIKE_LIMIT;
+    let clean = 0;
     let considered = 0;
     // Grid answers: the friend stands on a cell centre of the full-map grid.
     const cells = centred ? gridCells(model.size, divisions) : null;
@@ -204,7 +225,7 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
         // Another place for the friend, seen at the same range, bearing and eye-level angle from `observer`.
         const consistent = (observer, point) => Math.abs(Math.atan2(surfaceElevation(model, point.x, point.y) + FRIEND_HEIGHT / 2 - observer.z, distance) / DEG
           - chosen.elevation) <= elevationTolerance && personSight(model, observer, point).visible;
-        let ambiguous = false;
+        let twin = Infinity;
         for (const p of grid) {
           if (Math.hypot(p.x - camera.x, p.y - camera.y) < 280) continue;
           const point = { x: p.x + dx, y: p.y + dy };
@@ -221,7 +242,7 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
           considered++;
           const desc = describe(observer), D = descriptorDistance(correctDesc, desc);
           // Grid answers: the same sighting from a spot whose friend lies in another cell is a second answer.
-          if (centred && D < band.min && cellAt(point.x, point.y, model.size, divisions) !== targetCell) { ambiguous = true; break; }
+          if (centred && D < twinD && cellAt(point.x, point.y, model.size, divisions) !== targetCell) twin = Math.min(twin, D);
           if (desc.edgeFrac > 0.3 || desc.blockedFrac > 0.5 || D < band.min || D > band.max) continue;
           const cue = distinguishingCue(correctDesc, desc);
           const cueOffset = wrap360(cue.bearing - camera.heading + 180) - 180;
@@ -229,7 +250,6 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
           if (cue.magnitude < band.cue || Math.abs(correctDesc.horizon[cueColumn] - camera.pitch) > 14) continue;
           pool.push({ ...point, ...sight, observer, D, cue, desc });
         }
-        if (ambiguous) continue;
         // Prefer similar terrain; do not stop at the first legal pair.
         pool.sort((a, b) => a.D - b.D);
         let pair = null, cost = Infinity;
@@ -248,7 +268,6 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
         if (centred) {
           // Every other cell centre that gives the same sighting: none may look the same.
           const alts = pair.map((p) => ({ D: p.D, cue: p.cue.magnitude }));
-          let twin = false;
           for (const c of cells) {
             if (c.label === targetCell) continue;
             const p = { x: c.x - dx, y: c.y - dy };
@@ -256,15 +275,14 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
             const observer = { ...camera, ...p, z: surfaceElevation(model, p.x, p.y) + eyeHeight };
             if (!consistent(observer, c)) continue;
             const desc = describe(observer), D = descriptorDistance(correctDesc, desc);
-            if (D < band.min) { twin = true; break; }
+            if (D < twinD) twin = Math.min(twin, D);
             if (D <= band.max) alts.push({ D, cue: distinguishingCue(correctDesc, desc).magnitude });
           }
-          if (twin) continue;
           const nearest = alts.reduce((a, b) => b.D < a.D ? b : a), near = alts.filter((a) => a.D < 2 * band.min);
           const summary = { closestD: nearest.D, rivals: alts.length, weakestCue: Math.min(...(near.length ? near : [nearest]).map((a) => a.cue)) };
           ({ hardness, confidence: reported } = friendGridScore({ ...summary, band, quality: vp.quality.total,
             blockedFrac: correctDesc.blockedFrac, edgeFrac: correctDesc.edgeFrac }));
-          gridChecks = { rivalCells: summary.rivals, weakestCue: +summary.weakestCue.toFixed(2), lookalikeElsewhere: false };
+          gridChecks = { rivalCells: summary.rivals, weakestCue: +summary.weakestCue.toFixed(2), lookalikeElsewhere: false, lookalikeLimit: twinD };
         }
         const options = rng.fork(`labels-${t}-${line}`).shuffle(points).map((p, i) => ({
           ...p, label: ['A', 'B', 'C'][i], correct: p.D === 0, landform: model.analyzer.classify(p.x, p.y),
@@ -291,7 +309,11 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
           stats: { viewpointsEvaluated: evaluated, terrainAttempt: attempt, viewTry: t }, log,
         };
         valid.push(q);
-        if (centred) {
+        if (centred) log.push({ attempt, stage: 'candidate', try: t, line, ok: !(twin < twinD), confidence: +reported.toFixed(3),
+          hardness: +hardness.toFixed(4), issues: twin < twinD ? ['look-alike sighting in another cell'] : [] });
+        if (centred && twin < twinD) twins.set(q, twin);
+        else if (centred) {
+          clean++;
           // Lazy, for the final pick only: the same sighting from any lattice spot whose friend is in
           // another cell and at least 240 m away. Returns the smallest view distance (stops below band.min).
           const cam = { ...camera };
@@ -304,32 +326,34 @@ function generateTerrainFriendQuiz({ seed, world = 'classic', difficulty = 'medi
               const observer = { ...cam, ...p, z: surfaceElevation(model, p.x, p.y) + eyeHeight };
               if (!consistent(observer, point)) continue;
               min = Math.min(min, descriptorDistance(correctDesc, describe(observer)));
-              if (min < band.min) break;
+              if (min < twinD) break;
             }
             return min;
           });
         }
         break;
       }
-      // Centred targets constrain the geometry, so compare more views before settling.
-      if (valid.length && t + 1 >= band.search * (centred ? 2 : 1)) break;
+      // Centred targets constrain the geometry, so compare more views before settling; while every
+      // candidate so far has a look-alike in another cell (repetitive terrain), compare them all.
+      if (centred ? clean && t + 1 >= band.search * 2 : valid.length && t + 1 >= band.search) break;
       if (t % 4 === 3) onProgress(`Checking terrain matches (${t + 1}/${picked.length})`);
     }
     if (valid.length) {
       valid.sort((a, b) => b.hardness - a.hardness);
       let q;
+      let extra = {};
       if (centred) {
         // A clean shortlist candidate; else the hardest clean one; else the least ambiguous, flagged.
-        const far = new Map(), farD = (v) => { if (!far.has(v)) far.set(v, farScans.get(v)()); return far.get(v); };
-        const clean = friendShortlist(valid).filter((v) => farD(v) >= band.min);
-        q = clean.length ? rng.fork('shortlist').pick(clean) : valid.find((v) => farD(v) >= band.min);
-        if (!q) {
-          q = valid.reduce((a, v) => farD(v) > farD(a) ? v : a);
-          q.validation.lookalikeElsewhere = true;
-          q.validation.confidence = Math.min(q.validation.confidence, 0.4);
-        }
+        const far = new Map(), lookalikeD = (v) => {
+          if (!far.has(v)) far.set(v, twins.has(v) ? twins.get(v) : farScans.get(v)());
+          return far.get(v);
+        };
+        const open = valid.filter((v) => !twins.has(v)), short = open.length ? friendShortlist(open).filter((v) => lookalikeD(v) >= twinD) : [];
+        q = short.length ? rng.fork('shortlist').pick(short) : open.find((v) => lookalikeD(v) >= twinD);
+        extra = { pick: short.length ? 'shortlist' : q ? 'clean' : 'flagged', lookalikeCandidates: twins.size };
+        if (!q) q = flagLookalike(valid.reduce((a, v) => lookalikeD(v) > lookalikeD(a) ? v : a));
       } else q = rng.fork('shortlist').pick(valid.slice(0, 3));
-      q.stats = { ...q.stats, questionsCompared: valid.length, distractorCandidates: considered, ms: Math.round(now() - t0) };
+      q.stats = { ...q.stats, questionsCompared: valid.length, distractorCandidates: considered, ...extra, ms: Math.round(now() - t0) };
       log.push({ attempt, stage: 'question', try: q.stats.viewTry, ok: true, confidence: +q.validation.confidence.toFixed(3), issues: [] });
       return q;
     }

@@ -156,23 +156,92 @@ const engineLattice = (q, model) => hypothesisLattice(model, new SeedManager(`${
   .stream('friend-terrain', q.stats.terrainAttempt, q.friend.challenge, q.heading.mode, q.variant).fork('hypotheses'))
   .map((p) => ({ x: p.x + q.friend.x - q.camera.x, y: p.y + q.friend.y - q.camera.y }));
 
-test('master friend grid: no other cell centre gives the same sighting and view', async () => {
-  for (const q of await masterFriend()) {
-    const { out } = sightings(q, gridCells(q.terrain.size, 8));
-    for (const D of out) assert.ok(D >= q.validation.minRequiredDistance, `${q.seed}: another cell looks the same (${D.toFixed(2)})`);
-    assert.equal(typeof q.validation.lookalikeElsewhere, 'boolean');
+const friendGrid = (seed, difficulty = 'master', world = 'auto') => generate({ seed, world, mode: 'friend', difficulty, friendAnswer: 'grid', gridSize: 8 });
+// Seeds whose earlier (unchecked) question had another cell centre with the same sighting and view.
+const CENTRE_TWIN_SEEDS = ['qq-5', 'qq-16', 'qq-17', 'qq-21', 'qq-32', 'qq-38', 'qq-40'];
+let centreTwins;
+const centreTwinFriends = () => centreTwins ??= Promise.all(CENTRE_TWIN_SEEDS.map((seed) => friendGrid(seed)));
+const lookalikes = (q) => {
+  const { model, out: centres } = sightings(q, gridCells(q.terrain.size, 8)), { out: lattice } = sightings(q, engineLattice(q, model), { far: 240 });
+  const limit = q.validation.lookalikeLimit;
+  return { centre: centres.some((D) => D < limit), lattice: lattice.some((D) => D < limit) };
+};
+const assertFlagged = (q) => {
+  assert.deepEqual([q.validation.lookalikeElsewhere, q.validation.ok, q.lowConfidence, q.stats.pick], [true, false, true, 'flagged'], q.seed);
+  assert.ok(q.validation.confidence <= 0.4 && q.hardness <= 0.3, `${q.seed}: flagged numbers ${q.hardness} / ${q.validation.confidence}`);
+  assert.ok(q.validation.issues.includes('look-alike sighting in another cell'));
+  assert.match(q.explanation.caution, /uncertain/);
+};
+
+test('friend grid: a clean question has no other cell centre with the same sighting and view', async () => {
+  for (const q of [...await masterFriend(), ...await centreTwinFriends()]) {
+    assert.equal(q.validation.lookalikeLimit, 0.8);
     assert.ok(q.validation.rivalCells >= 2 && Number.isFinite(q.validation.weakestCue));
+    if (q.validation.lookalikeElsewhere) { assertFlagged(q); continue; }
+    const { out } = sightings(q, gridCells(q.terrain.size, 8));
+    for (const D of out) assert.ok(D >= q.validation.lookalikeLimit, `${q.seed}: another cell looks the same (${D.toFixed(2)})`);
+    assert.equal(q.validation.ok, true);
   }
 });
 
-test('friend grid flag: clean quizzes have no look-alike on the lattice; flagged ones say so', async () => {
-  const flagged = await generate({ seed: 'qq-16', world: 'auto', mode: 'friend', difficulty: 'master', friendAnswer: 'grid', gridSize: 8 });
-  assert.equal(flagged.validation.lookalikeElsewhere, true, 'qq-16 has no clean candidate');
-  for (const q of [...await masterFriend(), flagged]) {
-    const { model } = sightings(q, []), { out } = sightings(q, engineLattice(q, model), { far: 240 });
-    const twin = out.some((D) => D < q.validation.minRequiredDistance);
-    assert.equal(q.validation.lookalikeElsewhere, twin, `${q.seed}: flag matches the lattice scan`);
-    if (twin) assert.ok(q.validation.confidence <= 0.4, `${q.seed}: flagged confidence ${q.validation.confidence}`);
+test('friend grid flag: flagged exactly when the picked sighting has a look-alike in another cell', async () => {
+  const quizzes = [...await masterFriend(), ...await centreTwinFriends()];
+  for (const q of quizzes) {
+    const found = lookalikes(q);
+    assert.equal(q.validation.lookalikeElsewhere, found.centre || found.lattice, `${q.seed}: flag matches the independent scans`);
+    if (q.validation.lookalikeElsewhere) assertFlagged(q);
+  }
+  // qq-16 / qq-38: candidates without a twin at a centre or on the search lattice all have one farther away.
+  assert.deepEqual(quizzes.filter((q) => q.validation.lookalikeElsewhere).map((q) => q.seed), ['qq-16', 'qq-38']);
+});
+
+test('friend grid: candidates with a twin are logged and set aside before the pick', async () => {
+  for (const q of [...await masterFriend(), ...await centreTwinFriends()]) {
+    const candidates = q.log.filter((l) => l.stage === 'candidate' && l.attempt === q.stats.terrainAttempt);
+    assert.equal(candidates.length, q.stats.questionsCompared, q.seed);
+    assert.equal(candidates.filter((l) => !l.ok).length, q.stats.lookalikeCandidates, q.seed);
+    for (const l of candidates) assert.deepEqual(l.issues, l.ok ? [] : ['look-alike sighting in another cell']);
+  }
+  // Pinned counts: the sightings searched on the observer lattice (pool stage) and at the other cell
+  // centres both mark candidates; qq-5 needs both.
+  const counts = Object.fromEntries((await centreTwinFriends()).map((q) => [q.seed, [q.stats.lookalikeCandidates, q.stats.questionsCompared]]));
+  assert.deepEqual(counts, { 'qq-5': [5, 14], 'qq-16': [2, 3], 'qq-17': [1, 5], 'qq-21': [3, 7], 'qq-32': [2, 12], 'qq-38': [4, 5], 'qq-40': [4, 8] });
+});
+
+test('friend grid pick: from the three hardest clean candidates, none much easier than the best', async () => {
+  for (const q of [...await masterFriend(), ...await centreTwinFriends()]) {
+    if (q.stats.pick !== 'shortlist') continue;
+    const open = q.log.filter((l) => l.stage === 'candidate' && l.attempt === q.stats.terrainAttempt && l.ok).map((l) => l.hardness).sort((a, b) => b - a);
+    const h = +q.hardness.toFixed(4);
+    assert.ok(open.slice(0, 3).includes(h), `${q.seed}: ${h} among ${open.slice(0, 3)}`);
+    assert.ok(h >= open[0] - 0.15, `${q.seed}: ${h} vs best ${open[0]}`);
+  }
+});
+
+test('friend grid on dunes: repetitive terrain still yields a question, flagged when no sighting is unique', async () => {
+  // Medium dn-0/dn-3 and Master dn-1/dn-14 threw "No clear friend sighting found" when twins were hard rejections.
+  for (const [seed, difficulty] of [['dn-0', 'medium'], ['dn-3', 'medium'], ['dn-1', 'master'], ['dn-14', 'master']]) {
+    const q = await friendGrid(seed, difficulty, 'dunes');
+    assert.equal(q.terrain.world, 'dunes');
+    assert.equal(q.validation.lookalikeLimit, 0.8, 'the same look-alike limit at every level');
+    if (q.validation.lookalikeElsewhere) assertFlagged(q);
+    else assert.deepEqual([q.validation.ok, q.lowConfidence], [true, false], seed);
+  }
+});
+
+test('friend grid on dunes: no unflagged centre twin, and the search goes on until a clean candidate appears', async () => {
+  // dn-24 / dn-33: a candidate has a twin only at another cell centre. dn-6 / dn-26: every candidate in
+  // the first 2 × 6 views has a twin, so the usual Medium stop would have flagged the question.
+  const quizzes = Object.fromEntries(await Promise.all(['dn-24', 'dn-33', 'dn-6', 'dn-26'].map(async (seed) => [seed, await friendGrid(seed, 'medium', 'dunes')])));
+  for (const [seed, q] of Object.entries(quizzes)) {
+    if (q.validation.lookalikeElsewhere) { assertFlagged(q); continue; }
+    const { out } = sightings(q, gridCells(q.terrain.size, 8));
+    for (const D of out) assert.ok(D >= q.validation.lookalikeLimit, `${seed}: another cell centre looks the same (${D.toFixed(2)})`);
+  }
+  for (const seed of ['dn-6', 'dn-26']) {
+    const q = quizzes[seed], candidates = q.log.filter((l) => l.stage === 'candidate' && l.attempt === q.stats.terrainAttempt);
+    assert.equal(q.stats.pick, 'shortlist', seed);
+    assert.ok(q.stats.viewTry >= 12 && candidates.some((l) => l.try < 12) && candidates.filter((l) => l.try < 12).every((l) => !l.ok), seed);
   }
 });
 
