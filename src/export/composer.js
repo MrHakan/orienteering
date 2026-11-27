@@ -18,7 +18,8 @@ import { trailFrame } from '../engine/trailMotion.js';
 import { usesSunWatch, sunWatchFrame } from '../engine/sunWatch.js';
 import { sniperFrame, sniperWeather } from '../engine/sniper.js';
 import { drawSniperOverlay } from '../render/sniperOverlay.js';
-import { isMapMode } from '../engine/mapModes.js';
+import { isMapMode, CLIP_DURATION } from '../engine/mapModes.js';
+import { normaliseFriendSkin } from '../engine/friendAppearance.js';
 import { modeTitle, modeSubtitle, modeCaption, modeFrame, drawModeOverlay } from '../render/mapModesView.js';
 
 /** The YOU marker on exported maps: the same rule as the live page (map modes use quiz.map.observer). */
@@ -54,6 +55,26 @@ export function captionText(quiz) {
 }
 
 export const exportDuration = quiz => quiz.mode === 'trail' ? quiz.trail.duration + 3 : 15;
+
+/**
+ * Clip moments a blind reviewer must also see, because the question still alone hides a decisive clue
+ * (rendering-only; never changes the quiz). Friend (classic skin, no sun watch): the still is the wide view, the
+ * clip holds a 3x optical zoom at 5-8 s. Resection: the still looks at P1; the clip then pans to every later peak.
+ * Other modes: none (their still is the whole clue). Each entry: { time, animated, label }.
+ */
+export function reviewFrameTimes(quiz) {
+  if (quiz.mode === 'friend' && !usesSunWatch(quiz) && normaliseFriendSkin(quiz.friend?.skin) !== 'conquest')
+    return [{ time: 6.5, animated: true, label: 'SAME CLIP AT 6.5 s · 3× ZOOM' }];
+  if (quiz.mode === 'resection' && quiz.resection?.peaks?.length > 1) {
+    const peaks = quiz.resection.peaks, slot = CLIP_DURATION / peaks.length;
+    return peaks.slice(1).map((p, i) => {
+      const time = +((i + 1.6) * slot).toFixed(2); // the pan to peak i+1 is complete after 35 % of its slot
+      return { time, animated: false, label: `SAME CLIP AT ${time} s · VIEW TO ${p.label || `P${i + 2}`}` };
+    });
+  }
+  return [];
+}
+export const REVIEW_STRIP_LABEL = 56;
 
 export class ExportComposer {
   /**
@@ -300,12 +321,55 @@ export class ExportComposer {
     ctx.fillText(text, x, y + 10);
   }
 
+  /** The moment the question still shows. */
+  questionTime() {
+    return this.quiz.mode === 'trail' && this.quiz.grid ? this.quiz.trail.duration : this.quiz.mode === 'sniper' ? 7.5
+      : usesSunWatch(this.quiz) && this.quiz.mode === 'friend' ? 8 : 4;
+  }
+
   /** PNG of a single frame. */
-  async toImage({ reveal = false, time = this.quiz.mode === 'trail' && this.quiz.grid ? this.quiz.trail.duration : this.quiz.mode === 'sniper' ? 7.5
-    : usesSunWatch(this.quiz) && this.quiz.mode === 'friend' ? 8 : 4 } = {}) {
+  async toImage({ reveal = false, time = this.questionTime() } = {}) {
     this.animated = false;
     await this.drawFrameReady(time, { reveal });
     return new Promise((resolve) => this.canvas.toBlob(resolve, 'image/png'));
+  }
+
+  /**
+   * Review sheet (fairness review only, never posted): the question still with the scene of every
+   * reviewFrameTimes() moment inserted under its own scene, each strip labelled; the map and text are unchanged.
+   * Without extra moments it equals the question still. Returns a PNG blob of 1080 x (1920 + k strips).
+   */
+  async toReviewImage() {
+    const extra = reviewFrameTimes(this.quiz), S = this.layout.scene, W = this.canvas.width, H = this.canvas.height;
+    const strips = [];
+    for (const f of extra) {
+      this.animated = !!f.animated;
+      await this.drawFrameReady(f.time, { reveal: false });
+      const c = document.createElement('canvas');
+      c.width = S.w; c.height = S.h;
+      c.getContext('2d').drawImage(this.canvas, S.x, S.y, S.w, S.h, 0, 0, S.w, S.h);
+      strips.push({ ...f, canvas: c });
+    }
+    this.animated = false;
+    await this.drawFrameReady(this.questionTime(), { reveal: false });
+    if (!strips.length) return new Promise((resolve) => this.canvas.toBlob(resolve, 'image/png'));
+    const cut = S.y + S.h, step = REVIEW_STRIP_LABEL + S.h, out = document.createElement('canvas');
+    out.width = W; out.height = H + strips.length * step;
+    const ctx = out.getContext('2d');
+    ctx.fillStyle = '#151a20';
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.drawImage(this.canvas, 0, 0, W, cut, 0, 0, W, cut);
+    strips.forEach((st, i) => {
+      const y = cut + i * step;
+      ctx.fillStyle = '#ffd666';
+      ctx.font = `700 30px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
+      ctx.fillText(st.label, W / 2, y + 40);
+      ctx.drawImage(st.canvas, S.x, y + REVIEW_STRIP_LABEL, S.w, S.h);
+    });
+    ctx.drawImage(this.canvas, 0, cut, W, H - cut, 0, cut + strips.length * step, W, H - cut);
+    return new Promise((resolve) => out.toBlob(resolve, 'image/png'));
   }
 
   dispose() {

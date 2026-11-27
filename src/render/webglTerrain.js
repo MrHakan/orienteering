@@ -25,6 +25,8 @@ void main() {
   vWorld = aPos; vNormal = aNormal; vColor = aColor;
   gl_Position = uProj * uView * vec4(aPos, 1.0);
 }`;
+/** Friend high-visibility rendering: the share of the terrain's fog density applied to the walker figure. */
+export const PERSON_HIGHVIS_FOG = 0.35;
 const PERSON_FRAG = `
 precision highp float;
 varying vec3 vWorld;
@@ -34,11 +36,17 @@ uniform vec3 uEye;
 uniform vec3 uSunDir;
 uniform vec3 uFogColor;
 uniform float uFogDensity;
+uniform float uHighVis;
 void main() {
-  float light = 0.72 + 0.28 * max(0.0, dot(normalize(vNormal), uSunDir));
-  float fog = 1.0 - exp(-pow(length(vWorld - uEye) * uFogDensity, 1.35));
+  // High-visibility friend (uHighVis 1): a bright, nearly unshaded jacket that haze barely greys, so a figure of
+  // ~10-35 px stays distinguishable on a phone. Size, distance and the terrain stay exactly as generated.
+  float light = mix(0.72, 0.92, uHighVis) + mix(0.28, 0.08, uHighVis) * max(0.0, dot(normalize(vNormal), uSunDir));
+  float fog = 1.0 - exp(-pow(length(vWorld - uEye) * uFogDensity * mix(1.0, ${PERSON_HIGHVIS_FOG.toFixed(2)}, uHighVis), 1.35));
   gl_FragColor = vec4(mix(vColor * light, uFogColor, clamp(fog, 0.0, 1.0)), 1.0);
 }`;
+
+/** The walker figure (friend modes) is drawn high-visibility; the sniper's prone target keeps its camouflage. */
+export const personHighVis = (person) => !!person && person.skin !== 'sniper';
 
 const VERT = `
 attribute vec3 aPos;
@@ -455,6 +463,7 @@ export class TerrainRenderer {
     gl.uniform3fv(gl.getUniformLocation(p, 'uSunDir'), sun);
     gl.uniform3fv(gl.getUniformLocation(p, 'uFogColor'), horizon);
     gl.uniform1f(gl.getUniformLocation(p, 'uFogDensity'), fogDensity);
+    gl.uniform1f(gl.getUniformLocation(p, 'uHighVis'), personHighVis(this.person) ? 1 : 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.personBuf);
     const attrs = ['aPos', 'aNormal', 'aColor'].map((name) => gl.getAttribLocation(p, name));
     attrs.forEach((a, i) => { gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, 3, gl.FLOAT, false, 36, i * 12); });

@@ -8,10 +8,11 @@
 
 import { now } from './quiz.js';
 import { surfaceElevation } from './terrainSurface.js';
-import { DEG, angleDiff, wrap360 } from './grid.js';
+import { DEG, angleDiff, wrap360, saturate } from './grid.js';
 import { terrains, scaffold, bearingTo, bearingText, panCamera, CLIP_DURATION, normaliseResectionAnswer } from './mapModes.js';
 import { normaliseGridSize, gridCells, cellAt } from './gridQuiz.js';
 import { resectionFacts, renderExplanation } from './explanationFacts.js';
+import { normaliseGen, GEN2_RESECTION_THRESHOLDS, analyzeResectionPeakView, quickResectionPeakOk } from './gen2.js';
 
 // hidden: peaks unmarked, answers spread; lookalikes: answers whose every bearing meets a hill
 // (ruled out only by the view, needing `cues` differences).
@@ -40,6 +41,7 @@ function sees(model, a, b) {
 }
 
 export function generateResectionQuiz(opts) {
+  if (normaliseGen(opts.gen) === 2) return generateResectionQuizGen2(opts);
   const difficulty = BANDS[opts.difficulty] ? opts.difficulty : 'medium', band = BANDS[difficulty], t0 = now();
   const gridSize = normaliseResectionAnswer(opts.resectionAnswer) === 'grid' ? normaliseGridSize(opts.gridSize) : 0;
   for (const built of terrains({ ...opts, difficulty, ...(band.hidden && !opts.size ? LARGE_MAP : {}) }, 'resection')) {
@@ -418,4 +420,329 @@ export function resectionExplanation(quiz) {
   return { version: 1, language: 'en', source: 'bearing-geometry', kind: 'resection',
     correct: { label: correct.label, summary: `Only ${correct.label} reproduces every measured bearing.`, evidence },
     closestLabels: [...alternatives].sort((a, b) => a.difference - b.difference).slice(0, 3).map((a) => a.label), alternatives };
+}
+
+/**
+ * Gen=2 resection generator: ensures every labelled peak (P1, P2...) is a
+ * sharp, phone-legible, closed-contour summit centred cleanly under its pin,
+ * while preserving master difficulty (weak rival fixes and hidden peaks).
+ */
+function generateResectionQuizGen2(opts) {
+  const difficulty = BANDS[opts.difficulty] ? opts.difficulty : 'medium';
+  const band = BANDS[difficulty];
+  const t0 = now();
+  const gridSize = normaliseResectionAnswer(opts.resectionAnswer) === 'grid' ? normaliseGridSize(opts.gridSize) : 0;
+  const centred = !!(gridSize && band.hidden);
+  const T = GEN2_RESECTION_THRESHOLDS;
+  const attemptCap = Math.max(0, opts.maxTerrainAttempts ?? 5);
+
+  let bestStrict = null;
+  let bestFallback = null;
+  let totalEvaluated = 0;
+
+  const cmpCand = (a, b) => (b.rankScore - a.rankScore)
+    || (a.o.x - b.o.x) || (a.o.y - b.o.y)
+    || (a.chosen[0].bearing - b.chosen[0].bearing);
+
+  for (const built of terrains({ ...opts, difficulty, maxTerrainAttempts: attemptCap, ...(band.hidden && !opts.size ? LARGE_MAP : {}) }, 'resection')) {
+    const { model, interval, rng } = built;
+    const L = model.size;
+    const minProm = Math.max(T.minMapPromMetres, T.minMapPromFactor * interval);
+    const mapPeak = (s) => ({
+      x: s.x, y: s.y, z: surfaceElevation(model, s.x, s.y) + PEAK_LIFT,
+      prominence: s.prominence || 0, kind: s.kind,
+    });
+    const sortPeaks = (list) => list.sort((a, b) => (b.prominence - a.prominence) || (a.x - b.x) || (a.y - b.y));
+    const strictPeaks = sortPeaks(model.analyzer.summits
+      .filter((s) => model.inside(s.x, s.y, 60) && (s.prominence || 0) >= minProm)
+      .map(mapPeak)).slice(0, 18);
+    const allPeaks = sortPeaks(model.analyzer.summits
+      .filter((s) => model.inside(s.x, s.y, 60) && (s.kind === 'summit' || (s.prominence || 0) >= (band.hidden ? 7 : 10)))
+      .map(mapPeak)).slice(0, 16);
+    if (allPeaks.length < band.peaks) continue;
+
+    // Enumerate all interior cell centres once when grid-centred (36 cells for 8x8),
+    // instead of randomly resampling the same centres.
+    const observers = [];
+    if (centred) {
+      const step = L / gridSize;
+      const first = Math.ceil(0.12 * gridSize - 0.5);
+      const last = Math.floor(0.88 * gridSize - 0.5);
+      for (let row = first; row <= last; row++) {
+        for (let col = first; col <= last; col++) {
+          const x = (col + 0.5) * step, y = L - (row + 0.5) * step;
+          if (model.getSlope(x, y) <= 22) observers.push({ x, y });
+        }
+      }
+      rng.shuffle(observers);
+    } else {
+      for (let k = 0; k < 140; k++) {
+        const x = rng.range(0.12, 0.88) * L, y = rng.range(0.12, 0.88) * L;
+        if (model.getSlope(x, y) <= 22) observers.push({ x, y });
+      }
+    }
+
+    const evaluateSet = (o, eye, chosen, isFallbackPass) => {
+      totalEvaluated++;
+      const shown = chosen.map((p) => Math.round(p.bearing / band.round) * band.round % 360);
+      if (gridSize && !fixInOneCell(o, chosen, shown, fixSlack(band, gridSize), L, gridSize)) return null;
+      const ownCell = gridSize ? cellAt(o.x, o.y, L, gridSize) : null;
+      const rivals = centred ? rivalFixes({ model, observer: o, eye, peaks: chosen, shown, band, ownCell, gridSize }) : null;
+      if (rivals?.unrefuted) return null;
+      const error = (q) => chosen.map((p, i) => angleDiff(bearingTo(q, p), shown[i]));
+      const drng = rng.fork(`d-${Math.round(o.x)}-${Math.round(o.y)}-${shown.join('-')}`);
+      const distractors = band.hidden
+        ? lookalikeDistractors({ model, rng: drng, o, eye, chosen, shown, band, error })
+        : nearMisses({ model, rng: drng, o, chosen, band, error });
+      if (!distractors) return null;
+
+      const peakViews = chosen.map((p) => analyzeResectionPeakView(model, o, p, { fov: 50, step: 0.5, eyeHeight: EYE, thresholds: T }));
+      const ranges = chosen.map((p) => Math.hypot(p.x - o.x, p.y - o.y));
+      const crossing = chosen.length >= 2 ? angleDiff(chosen[0].bearing, chosen[1].bearing) : 90;
+      const tolerance = gridSize ? fixTolerance(o, chosen, shown, L, gridSize) : 10;
+      const minPeakSize = Math.min(...peakViews.map((v) => v.peakSize));
+      const minDrop8 = Math.min(...peakViews.map((v) => v.drop8));
+      const minDrop12 = Math.min(...peakViews.map((v) => v.drop12));
+      const minPromView = Math.min(...peakViews.map((v) => v.prom));
+      const maxEdgeCut = Math.max(...peakViews.map((v) => v.edgeCut));
+      const maxApexOffset = Math.max(...peakViews.map((v) => Math.abs(v.apexOffset)));
+      const contextPeaks = peakViews.reduce((s, v) => s + v.contextPeaks, 0);
+      const minViewScore = Math.min(...peakViews.map((v) => v.score));
+      const meanViewScore = peakViews.reduce((s, v) => s + v.score, 0) / peakViews.length;
+
+      const bandHardness = Math.min(1, (band.peaks === 2 ? 0.5 : 0.25) + (band.round > 1 ? 0.3 : 0) + (10 - band.minError) / 20
+        + (band.hidden ? 0.15 + 0.1 * distractors.filter((q) => q.refute === 'view').length : 0));
+      const baseScore = centred
+        ? resectionGridScore({ base: bandHardness, weak: rivals.weak, crossing, tolerance, minPeakSize, farPeak: Math.max(...ranges) })
+        : { hardness: bandHardness, confidence: 0.85 };
+
+      const strict = !isFallbackPass
+        && peakViews.every((v) => v.strictOk)
+        && (!gridSize || tolerance >= T.minFixTolerance)
+        && crossing >= T.minCrossing && crossing <= T.maxCrossing;
+
+      const hasHardRivals = !centred || rivals.weak >= T.minWeakRivals;
+      const fairness = saturate(
+        0.48 * minViewScore
+        + 0.24 * meanViewScore
+        + 0.16 * saturate((tolerance - 4.5) / 5.5)
+        + 0.12 * saturate(1 - Math.max(0, maxEdgeCut) / 2.2)
+      );
+      const readability = saturate(
+        0.45 * saturate(minDrop8 / 1.6)
+        + 0.25 * saturate(minPromView / 2.4)
+        + 0.15 * saturate(minPeakSize / 2.0)
+        + 0.15 * saturate(1 - maxApexOffset / 2.5)
+      );
+      const rivalPressure = centred ? (1 - Math.exp(-rivals.weak / 8)) * 0.75 + (1 - Math.exp(-rivals.refuted / 20)) * 0.25 : 0.7;
+      const oblique = 1 - Math.sin(crossing * DEG);
+      const difficultyScore = saturate(0.65 * baseScore.hardness + 0.25 * rivalPressure + 0.10 * oblique);
+      const rankScore = (strict ? 2.0 : 0) + (hasHardRivals ? 0.35 : 0) + 0.55 * fairness + 0.30 * difficultyScore + 0.15 * readability;
+
+      return {
+        built, o, eye, chosen, shown, rivals, distractors, error, peakViews, ranges, crossing,
+        tolerance, minPeakSize, minDrop8, minDrop12, minPromView, maxEdgeCut, maxApexOffset,
+        contextPeaks, baseScore, fairness, readability, difficultyScore, strict, hasHardRivals, rankScore,
+      };
+    };
+
+    // Pass 1: sharp phone-legible peak pairs
+    let terrainStrictCount = 0;
+    if (strictPeaks.length >= band.peaks) {
+      for (const o of observers) {
+        const eye = { ...o, z: surfaceElevation(model, o.x, o.y) + EYE };
+        const sharpVis = [];
+        for (const p of strictPeaks) {
+          const d = Math.hypot(p.x - o.x, p.y - o.y);
+          if (d < T.minDist || d > T.maxDist) continue;
+          if (!sees(model, eye, p)) continue;
+          if (!quickResectionPeakOk(model, o, p, EYE, T)) continue;
+          sharpVis.push({ ...p, bearing: bearingTo(o, p), dist: d });
+        }
+        if (sharpVis.length < band.peaks) continue;
+
+        if (band.peaks === 2) {
+          const pairs = [];
+          for (let i = 0; i < sharpVis.length; i++) {
+            for (let j = i + 1; j < sharpVis.length; j++) {
+              const sep = angleDiff(sharpVis[i].bearing, sharpVis[j].bearing);
+              if (sep < T.minCrossing || sep > T.maxCrossing) continue;
+              const sizeScore = Math.min(sharpVis[i].prominence / sharpVis[i].dist, sharpVis[j].prominence / sharpVis[j].dist);
+              pairs.push({ a: sharpVis[i], b: sharpVis[j], sizeScore });
+            }
+          }
+          pairs.sort((u, v) => (v.sizeScore - u.sizeScore) || (u.a.bearing - v.a.bearing) || (u.b.bearing - v.b.bearing));
+          for (const pair of pairs.slice(0, 12)) {
+            const cand = evaluateSet(o, eye, [pair.a, pair.b], false);
+            if (!cand) continue;
+            if (cand.strict) {
+              terrainStrictCount++;
+              if (!bestStrict || cmpCand(cand, bestStrict) < 0) bestStrict = cand;
+            } else if (!bestFallback || cmpCand(cand, bestFallback) < 0) {
+              bestFallback = cand;
+            }
+            if (terrainStrictCount >= 8) break;
+          }
+        } else {
+          // 3-peak resection (Easy / Medium with gen=2)
+          const chosen = [];
+          for (const p of sharpVis) {
+            if (chosen.every((q) => { const sep = angleDiff(p.bearing, q.bearing); return sep >= 35 && sep <= 150; })) chosen.push(p);
+            if (chosen.length === band.peaks) break;
+          }
+          if (chosen.length === band.peaks) {
+            const cand = evaluateSet(o, eye, chosen, false);
+            if (cand) {
+              if (cand.strict) { terrainStrictCount++; if (!bestStrict || cmpCand(cand, bestStrict) < 0) bestStrict = cand; }
+              else if (!bestFallback || cmpCand(cand, bestFallback) < 0) bestFallback = cand;
+            }
+          }
+        }
+        if (terrainStrictCount >= 10) break;
+      }
+    }
+
+    // Pass 2 (fallback only when no strict candidate found on this terrain, e.g. mesas or flat dunes)
+    if (!bestStrict && terrainStrictCount === 0) {
+      const flatTerrain = strictPeaks.length < band.peaks;
+      const checkCap = flatTerrain ? 14 : 36;
+      const validCap = flatTerrain ? 1 : 3;
+      let fallbackValid = 0;
+      let fallbackChecks = 0;
+      for (const o of observers) {
+        const eye = { ...o, z: surfaceElevation(model, o.x, o.y) + EYE };
+        const vis = allPeaks.filter((p) => { const d = Math.hypot(p.x - o.x, p.y - o.y); return d > 250 && d < 1600 && sees(model, eye, p); })
+          .map((p) => ({ ...p, bearing: bearingTo(o, p) }));
+        if (vis.length < band.peaks) continue;
+        if (band.peaks === 2) {
+          let tried = 0;
+          for (let i = 0; i < vis.length && tried < 6 && fallbackChecks < checkCap; i++) {
+            for (let j = i + 1; j < vis.length && tried < 6 && fallbackChecks < checkCap; j++) {
+              const sep = angleDiff(vis[i].bearing, vis[j].bearing);
+              if (sep < 35 || sep > 150) continue;
+              tried++;
+              fallbackChecks++;
+              const cand = evaluateSet(o, eye, [vis[i], vis[j]], true);
+              if (cand) {
+                fallbackValid++;
+                if (!bestFallback || cmpCand(cand, bestFallback) < 0) bestFallback = cand;
+              }
+            }
+          }
+        } else {
+          for (let k = 0; k < 4 && fallbackChecks < checkCap; k++) {
+            const chosen = [];
+            for (const p of rng.shuffle([...vis])) {
+              if (chosen.every((q) => { const sep = angleDiff(p.bearing, q.bearing); return sep >= 35 && sep <= 150; })) chosen.push(p);
+              if (chosen.length === band.peaks) break;
+            }
+            if (chosen.length < band.peaks) continue;
+            fallbackChecks++;
+            const cand = evaluateSet(o, eye, chosen, true);
+            if (cand) {
+              fallbackValid++;
+              if (!bestFallback || cmpCand(cand, bestFallback) < 0) bestFallback = cand;
+            }
+          }
+        }
+        if (fallbackValid >= validCap || fallbackChecks >= checkCap) break;
+      }
+    }
+
+    if (bestStrict && (bestStrict.hasHardRivals || built.attempt >= 1)) break;
+    if (!bestStrict && bestFallback && (built.attempt >= 2 || (strictPeaks.length < band.peaks && built.attempt >= 1))) break;
+  }
+
+  const win = bestStrict || bestFallback;
+  if (!win) {
+    // Safety fallback to legacy generator so gen=2 never throws on a seed gen=1 can solve.
+    const legacy = generateResectionQuiz({ ...opts, gen: 1 });
+    legacy.gen = 2;
+    legacy.gen2 = { version: 2, mode: 'resection', strict: false, fallback: true };
+    return legacy;
+  }
+
+  const isFallback = !bestStrict;
+  const { built, o, eye, chosen, shown, rivals, distractors, error, peakViews, crossing, tolerance, minPeakSize } = win;
+  const { model, rng } = built;
+  const L = model.size;
+  const own = band.hidden ? { lines: chosen.map((p, i) => line(error(o)[i], p, i)), refute: null, cues: [] } : {};
+  const labels = rng.fork('final-labels').shuffle([{ ...o, ...own, correct: true }, ...distractors]).map((q, i) => ({
+    ...q, label: 'ABCD'[i], z: surfaceElevation(model, q.x, q.y), errors: error(q).map((e) => +e.toFixed(1)),
+  }));
+  const options = labels.map(({ label, x, y, z, correct, trap, errors, lines, refute, cues }) => ({
+    label, x, y, z, correct: !!correct, trap: !!trap, errors,
+    ...(band.hidden ? { lines, refute, cues } : {}), landform: model.analyzer.classify(x, y),
+  }));
+  const correct = options.find((q) => q.correct);
+  const wrong = options.filter((q) => !q.correct);
+  const peaksOut = chosen.map((p, i) => ({
+    label: `P${i + 1}`, x: p.x, y: p.y, z: p.z, bearing: +p.bearing.toFixed(2), shown: shown[i],
+    elevation: +(Math.atan2(p.z - eye.z, Math.hypot(p.x - o.x, p.y - o.y)) / DEG).toFixed(3),
+  }));
+  const camera = { x: o.x, y: o.y, z: eye.z, eyeHeight: EYE, heading: peaksOut[0].bearing, fov: 50, pitch: peaksOut[0].elevation, roll: 0 };
+  const validation = {
+    ok: true,
+    issues: [],
+    confidence: isFallback ? Math.min(win.fairness, 0.55) : win.fairness,
+    uniqueness: Math.min(1, ...wrong.map((q) => band.hidden
+      ? (q.refute === 'view' ? 0.3 : Math.max(...q.lines.map((l) => l.error)) / 20)
+      : Math.max(...q.errors) / 20)),
+  };
+  if (centred) {
+    Object.assign(validation, {
+      fixTolerance: +tolerance.toFixed(2),
+      rivalFixes: { weak: rivals.weak, refuted: rivals.refuted },
+      minPeakSize: +minPeakSize.toFixed(2),
+    });
+  }
+  const quiz = scaffold({
+    ...built, mode: 'resection', seed: opts.seed, difficulty, variant: opts.variant || 0, camera, t0,
+    extra: {
+      gen: 2,
+      lowConfidence: isFallback && win.minDrop8 < 0.5,
+      resection: { peaks: peaksOut, rounding: band.round, peaksMarked: difficulty === 'easy' },
+      options,
+      correctLabel: correct.label,
+      hardness: win.difficultyScore,
+      validation,
+      gen2: {
+        version: 2,
+        mode: 'resection',
+        strict: !isFallback,
+        fallback: isFallback,
+        minDrop8: +win.minDrop8.toFixed(2),
+        minDrop12: +win.minDrop12.toFixed(2),
+        minProm: +win.minPromView.toFixed(2),
+        minPeakSize: +minPeakSize.toFixed(2),
+        maxApexOffset: +win.maxApexOffset.toFixed(1),
+        maxEdgeCut: +win.maxEdgeCut.toFixed(2),
+        crossing: +crossing.toFixed(1),
+        fixTolerance: +tolerance.toFixed(2),
+        weakRivals: rivals ? rivals.weak : 0,
+        refutedRivals: rivals ? rivals.refuted : 0,
+        contextPeaks: win.contextPeaks,
+        difficulty: +win.difficultyScore.toFixed(3),
+        fairness: +win.fairness.toFixed(3),
+        readability: +win.readability.toFixed(3),
+        estimatedDifficulty: +(6.0 + 3.4 * win.difficultyScore).toFixed(1),
+        estimatedFairness: +(4.5 + 4.8 * win.fairness).toFixed(1),
+        estimatedReadability: +(4.5 + 4.3 * win.readability).toFixed(1),
+        rankScore: +win.rankScore.toFixed(4),
+        peakViews: peakViews.map((v, i) => ({
+          label: `P${i + 1}`, dist: v.dist, peakSize: v.peakSize, apexOffset: v.apexOffset,
+          drop8: v.drop8, drop12: v.drop12, prom: v.prom, edgeCut: v.edgeCut, contextPeaks: v.contextPeaks, strictOk: v.strictOk,
+        })),
+      },
+    },
+  });
+  quiz.stats.viewpointsEvaluated = totalEvaluated;
+  const extend = (p, through) => { const d = Math.hypot(through.x - p.x, through.y - p.y), k = (d + 260) / d; return { x: p.x + (through.x - p.x) * k, y: p.y + (through.y - p.y) * k }; };
+  quiz.map = {
+    extras: difficulty === 'easy' ? peaksOut.map((p) => ({ type: 'point', shape: 'peak', x: p.x, y: p.y, label: p.label, color: '#ffd666' })) : [],
+    revealExtras: [...(difficulty === 'easy' ? [] : peaksOut.map((p) => ({ type: 'point', shape: 'peak', x: p.x, y: p.y, label: p.label, color: '#ffd666' })))].concat(peaksOut.map((p) => ({ type: 'line', points: [p, extend(p, o)], color: 'rgba(255, 214, 102, .85)', width: 1.6, dash: [6, 4], label: bearingText(p.shown + 180), labelAt: 0.75 }))),
+    revealYou: true, centre: { x: o.x, y: o.y },
+  };
+  quiz.explanation = resectionExplanation(quiz);
+  return gridSize ? toGridAnswer(quiz, o, L, gridSize, centred) : quiz;
 }

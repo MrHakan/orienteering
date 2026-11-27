@@ -223,6 +223,9 @@ export function buildAnswerExplanation(q, model = new TerrainModel({ ...q.terrai
   const alternatives = q.mode === 'friend' && q.grid ? friendGridAlternatives(q, model, shown)
     : q.options.filter(o => !o.correct).map(option => alternativeExplanation(q, model, shown, correct, option));
   const ranked = alternatives.filter(o => Number.isFinite(o.difference)).sort((a, b) => a.difference - b.difference || a.label.localeCompare(b.label));
+  const closestLabels = q.gen === 2 && q.gen2?.primaryTwin?.cell && q.closestLabel
+    ? [q.closestLabel, ...ranked.map(o => o.label).filter(l => l !== q.closestLabel)].slice(0, 3)
+    : ranked.slice(0, 3).map(o => o.label);
   // Grid and Friend grid: public facts and the reasoning steps built only from them.
   const facts = q.grid && (q.mode === 'grid' || q.mode === 'friend') ? viewExplanationFacts(q, model, shown, { alternatives, cameraFor }) : null;
   return { version: 1, language: 'en', source: 'terrain-and-sightline-analysis',
@@ -234,7 +237,7 @@ export function buildAnswerExplanation(q, model = new TerrainModel({ ...q.terrai
           : 'The person\'s bearing, range and the contours around him place him here.')
           : 'This position and direction reproduce the skyline and the contour pattern in the starting view.',
       evidence: correctEvidence(q, model, shown, correct) },
-    closestLabels: ranked.slice(0, 3).map(o => o.label), alternatives,
+    closestLabels, alternatives,
     ...(facts ? { facts, ...renderExplanation(facts) } : {}),
     ...(q.lowConfidence ? { caution: 'Generation confidence was below the target. Treat this answer and its comparisons as uncertain.' } : {}) };
 }

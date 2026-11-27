@@ -281,14 +281,14 @@ function getWorker() {
   return worker;
 }
 
-function requestQuiz({ seed, world, sniperWind, customTerrain, difficulty, variant = 0, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, resectionAnswer, tuning }) {
+function requestQuiz({ seed, world, sniperWind, customTerrain, difficulty, variant = 0, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, resectionAnswer, tuning, gen }) {
   const id = ++state.requestId;
   return new Promise((resolve, reject) => {
     const w = getWorker();
     if (!w) {
       // Fallback: generate on the main thread.
       import('../engine/quiz.js').then(({ generate }) => {
-        setTimeout(() => generate({ seed, world, sniperWind, customTerrain, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, resectionAnswer, tuning }).then(resolve, reject), 30);
+        setTimeout(() => generate({ seed, world, sniperWind, customTerrain, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, resectionAnswer, tuning, gen }).then(resolve, reject), 30);
       }, reject);
       return;
     }
@@ -300,7 +300,7 @@ function requestQuiz({ seed, world, sniperWind, customTerrain, difficulty, varia
       else reject(new Error(e.data.message));
     };
     w.addEventListener('message', onMessage);
-    w.postMessage({ id, seed, world, sniperWind, customTerrain, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, resectionAnswer, tuning });
+    w.postMessage({ id, seed, world, sniperWind, customTerrain, difficulty, variant, mode, headingMode, direction, gridSize, gridChallenge, friendChallenge, friendAnswer, friendSkin, movement, trailAnswer, resectionAnswer, tuning, gen });
   });
 }
 
@@ -329,6 +329,7 @@ async function load(req) {
     resectionAnswer: normaliseResectionAnswer(req.resectionAnswer ?? $('resection-answer').value),
     appearance: normaliseAppearance(req.appearance || state.appearance),
     tuning: req.tuning || activeTuning(),
+    gen: Number(req.gen ?? state.quiz?.gen) === 2 ? 2 : 1,
   };
   if (r.difficulty === 'sun-watch' && !supportsSunWatch(r.mode)) r.difficulty = 'medium';
   if (r.difficulty === 'sun-watch') { r.headingMode = 'auto'; r.direction = 'auto'; }
@@ -417,6 +418,7 @@ function updateHash() {
   }
   else if (q.headingChoice && q.headingChoice !== 'auto') parts.push(`h=${q.headingChoice}`);
   if (q.variant) parts.push(`v=${q.variant}`);
+  if (q.gen === 2) parts.push('gen=2');
   if (q.tuning && Object.keys(q.tuning).length) parts.push(`dev=${encodeURIComponent(encodeTuning(q.tuning))}`);
   if (q.scramble) parts.push(`s=${q.scramble}`);
   history.replaceState(null, '', `#${parts.join('&')}`);
@@ -1456,7 +1458,10 @@ async function exportImage(reveal) {
   stopPreview();
   setExportBusy(true);
   try {
-    const blob = await c.toImage({ reveal });
+    // data-review="1" (set by the fairness-review runtime, never by the UI): the review sheet with the clip's
+    // decisive moments under the question still. Same file name; the posted media never use it.
+    const sheet = !reveal && $('export-png').dataset.review === '1';
+    const blob = await (sheet ? c.toReviewImage() : c.toImage({ reveal }));
     download(blob, exportName(reveal ? '-answer' : '', 'png'));
     setExportStatus(`Saved ${exportName(reveal ? '-answer' : '', 'png')}`);
   } catch (error) {
@@ -1514,6 +1519,7 @@ $('export-handle').addEventListener('input', () => {
   exportUi.composer?.setOptions({ handle: opts.handle });
 });
 $('export-png').addEventListener('click', () => exportImage(false));
+$('export-png').dataset.reviewSheet = '1'; // feature flag: this build can export a review sheet (data-review="1")
 $('export-answer-png').addEventListener('click', () => exportImage(true));
 $('export-video').addEventListener('click', exportVideo);
 $('export-share').addEventListener('click', async () => {
@@ -1544,6 +1550,7 @@ function parseHash() {
     direction: DIRECTIONS.some((d) => d.label === p.get('dir')) ? p.get('dir') : 'auto',
     headingMode: ['exact', 'intercardinal', 'cardinal'].includes(h) ? h : 'auto',
     tuning: p.has('dev') ? decodeTuning(p.get('dev')) : null,
+    gen: p.get('gen') === '2' ? 2 : 1,
     daily: isDateKey(p.get('daily')) ? p.get('daily') : null,
     challenge: p.has('ch') ? decodeChallenge(p.get('ch')) : null,
   };
@@ -1562,6 +1569,7 @@ window.addEventListener('hashchange', () => {
       || (h.friendAnswer === 'grid' && h.gridSize !== q?.grid?.size)))
     || (h.mode === 'grid' && (h.gridSize !== q?.grid?.size || h.gridChallenge !== q?.grid?.challenge))
     || (h.mode === 'resection' && (h.resectionAnswer !== (q?.grid ? 'grid' : 'point') || (h.resectionAnswer === 'grid' && h.gridSize !== q?.grid?.size)))
+    || h.gen !== (q?.gen || 1)
     || encodeTuning(h.tuning || {}) !== encodeTuning(q?.tuning || {}))) { adoptLinkTuning(h.tuning); load({ ...h, difficulty: h.difficulty || 'medium' }); }
 });
 
