@@ -310,10 +310,10 @@ Following the owner's Round 3 direction (master GRID, north-up, heading shown, n
 ## 9. Round 3 Algorithm, Rule Set & Calibrated Thresholds
 
 ### Files Updated in Round 3
-- [`src/engine/gen2.js`](file:///Users/mrhakan/Projects/orienteering-gen2-gemini/src/engine/gen2.js): tightened `GEN2_GRID_THRESHOLDS`, added `GEN2_TWIN_THRESHOLDS`, `extractSweepWindow`, `fastTwinScan`, `compareSkylineTwin`, `rankTwinScore`, and recalibrated `gridGen2Scores` with `targetReady`.
-- [`src/engine/gridQuiz.js`](file:///Users/mrhakan/Projects/orienteering-gen2-gemini/src/engine/gridQuiz.js): twin-first 60-heading + peak-pair scan (`fastTwinScan`), exact 0.5° twin verification on shortlisted rivals, strict twin requirement with safe fallback, `closestLabel` set to primary twin, and Round 3 `quiz.gen2` metadata.
-- [`src/engine/explanationFacts.js`](file:///Users/mrhakan/Projects/orienteering-gen2-gemini/src/engine/explanationFacts.js) & [`src/engine/answerExplanation.js`](file:///Users/mrhakan/Projects/orienteering-gen2-gemini/src/engine/answerExplanation.js): `twinExplanationReason` renders `"Not <twinCell>: from there ..."` naming the exact map-checkable decisive detail for `gen=2` grid quizzes while keeping `gen=1` byte-identical.
-- [`scripts/gen2-report.mjs`](file:///Users/mrhakan/Projects/orienteering-gen2-gemini/scripts/gen2-report.mjs) & [`test/gen2.test.js`](file:///Users/mrhakan/Projects/orienteering-gen2-gemini/test/gen2.test.js): apples-to-apples twin & `targetReady` metrics for `gen=1` vs `gen=2` plus mutation tests isolating lower-bound ambiguity, upper-bound glaring exclusion, map-checkability, and calibration.
+- [`src/engine/gen2.js`](src/engine/gen2.js): tightened `GEN2_GRID_THRESHOLDS`, added `GEN2_TWIN_THRESHOLDS`, `extractSweepWindow`, `fastTwinScan`, `compareSkylineTwin`, `rankTwinScore`, and recalibrated `gridGen2Scores` with `targetReady`.
+- [`src/engine/gridQuiz.js`](src/engine/gridQuiz.js): twin-first 60-heading + peak-pair scan (`fastTwinScan`), exact 0.5° twin verification on shortlisted rivals, strict twin requirement with safe fallback, `closestLabel` set to primary twin, and Round 3 `quiz.gen2` metadata.
+- [`src/engine/explanationFacts.js`](src/engine/explanationFacts.js) & [`src/engine/answerExplanation.js`](src/engine/answerExplanation.js): `twinExplanationReason` renders `"Not <twinCell>: from there ..."` naming the exact map-checkable decisive detail for `gen=2` grid quizzes while keeping `gen=1` byte-identical.
+- [`scripts/gen2-report.mjs`](scripts/gen2-report.mjs) & [`test/gen2.test.js`](test/gen2.test.js): apples-to-apples twin & `targetReady` metrics for `gen=1` vs `gen=2` plus mutation tests isolating lower-bound ambiguity, upper-bound glaring exclusion, map-checkability, and calibration.
 
 ### Tightened Origin Phone-Legibility Rules (`GEN2_GRID_THRESHOLDS`)
 All Round 1 framing/edge/uniqueness rules remain intact, with three calibration tightening updates:
