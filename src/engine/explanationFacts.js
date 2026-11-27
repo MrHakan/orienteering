@@ -187,6 +187,14 @@ export function skylineReason(alternative) {
  * Structured decisive-detail reason for a gen=2 grid near-twin look-alike cell,
  * directly naming the map-checkable contour summit(s) and visual difference.
  */
+const TWIN_LANDFORM = { 'twin-height-flip': 'summit', 'twin-height-gap': 'summit', 'twin-crest-height': 'ridge',
+  'twin-crest-shift': 'ridge', 'twin-saddle-depth': 'saddle', 'twin-summit-absent': 'knoll', 'twin-summit-extra': 'summit' };
+/** The cells a twin reason names in the look-alike view, with its landform (a skyline crest is a ridge top). */
+export function twinMistaken(reason) {
+  const landform = TWIN_LANDFORM[reason?.type];
+  return [reason?.cell, reason?.otherCell].filter((c) => typeof c === 'string').map((cell) => ({ cell, landform }));
+}
+
 export function twinExplanationReason(primaryTwin, optionLabel) {
   if (!primaryTwin || primaryTwin.cell !== optionLabel || !primaryTwin.decisiveDetails?.length) return null;
   const d = primaryTwin.decisiveDetails[0];
@@ -274,6 +282,9 @@ export function viewExplanationFacts(q, model, shown, { alternatives, cameraFor 
         || landmarkReason(model, items, q.camera, cameraFor(q, option))
         || skylineReason(alternatives.find((a) => a.label === option.label));
       facts.lookalike = { label: option.label, adjacent: adjacentCells(option.label, q.correctLabel), reason };
+      // gen=2 twin: the twin view's cells and landform are facts too, so a checker accepts the "Not X: ..." sentence.
+      const tw = reason?.type?.startsWith('twin-') ? twinMistaken(reason) : null;
+      if (tw?.length) facts.lookalike.mistaken = tw;
     }
   } else {
     const f = q.friend, cam = q.camera, d = Math.hypot(f.x - cam.x, f.y - cam.y);
@@ -421,21 +432,22 @@ function viewReason(r, features, omit, shown) {
     case 'landmark-range': return `${name} would look much ${r.looks}`;
     case 'skyline-higher': return `the skyline ${SIDE[r.side]} would sit higher`;
     case 'skyline-lower': return `the skyline ${SIDE[r.side]} would sit lower`;
+    // Viewer text tells the deciding detail through landforms only (Hakan: no measures; degrees stay in the facts).
     case 'twin-height-flip': return r.cell && r.otherCell
-      ? `the ${r.side} summit (in ${r.cell}) would stand higher than ${r.otherCell} (a ${r.degrees.toFixed(1)}° swap)`
-      : `the taller summit would swap to the ${r.side} (${r.degrees.toFixed(1)}°)`;
+      ? `the ${r.side} summit (in ${r.cell}) would stand higher than ${r.otherCell}`
+      : `the taller summit would swap to the ${r.side}`;
     case 'twin-height-gap': return r.cell && r.otherCell
-      ? `the height difference between ${r.cell} and ${r.otherCell} would shift by ${r.degrees.toFixed(1)}°`
-      : `the height difference between the crests would shift by ${r.degrees.toFixed(1)}°`;
+      ? `${r.cell} and ${r.otherCell} would not match in height the same way`
+      : 'the two crests would not match in height the same way';
     case 'twin-crest-height': return r.cell
-      ? `the ${r.side} crest (in ${r.cell}) would sit ${r.degrees.toFixed(1)}° ${r.direction}`
-      : `the ${r.side} crest would sit ${r.degrees.toFixed(1)}° ${r.direction}`;
+      ? `the ${r.side} crest (in ${r.cell}) would sit ${r.direction}`
+      : `the ${r.side} crest would sit ${r.direction}`;
     case 'twin-crest-shift': return r.cell
-      ? `the ${r.side} crest (in ${r.cell}) would shift ${r.degrees}° ${r.direction}`
-      : `the ${r.side} crest would shift ${r.degrees}° ${r.direction}`;
+      ? `the ${r.side} crest (in ${r.cell}) would sit further ${r.direction}`
+      : `the ${r.side} crest would sit further ${r.direction}`;
     case 'twin-saddle-depth': return r.cell && r.otherCell
-      ? `the saddle between ${r.cell} and ${r.otherCell} would drop ${r.degrees.toFixed(1)}° ${r.direction}`
-      : `the saddle between the crests would drop ${r.degrees.toFixed(1)}° ${r.direction}`;
+      ? `the saddle between ${r.cell} and ${r.otherCell} would be ${r.direction}`
+      : `the saddle between the crests would be ${r.direction}`;
     case 'twin-summit-absent': return r.cell
       ? `the ${r.side} knoll (in ${r.cell}) would be missing`
       : `the ${r.side} crest would be missing`;

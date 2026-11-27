@@ -431,3 +431,17 @@ test('gen2-report produces finite before/after comparison tables for all three m
   assert.match(md, /\| resection \| gen=2 \|/);
   assert.match(md, /\| friend \| gen=2 \|/);
 });
+
+test('gen=2 grid twin explanation: landform words only, and every look-alike cell is a fact', async () => {
+  for (const [seed, world] of [['tg-r3-karst-4', 'karst'], ['tg-r3-glacial-6', 'glacial'], ['tg-r3-classic-11', 'classic']]) {
+    const q = await generate({ seed, difficulty: 'master', mode: 'grid', gridSize: 8, world, gen: 2 });
+    const f = q.explanation.facts, l = f.lookalike, short = q.explanation.short;
+    assert.ok(l?.reason?.type?.startsWith('twin-'), `${seed}: twin reason`);
+    const not = short.slice(short.indexOf(`Not ${l.label}:`));
+    assert.ok(not.length > 6, `${seed}: names the twin`);
+    assert.doesNotMatch(short, /°|\d+\s*(?:m|km)\b/, `${seed}: no measures in viewer text`);
+    const known = new Set([l.label, f.answer.label, ...f.features.map((x) => x.cell), ...(l.mistaken || []).map((m) => m.cell)]);
+    for (const cell of not.match(/\b[A-H][1-8]\b/g)) assert.ok(known.has(cell), `${seed}: ${cell} is a fact`);
+    assert.ok((l.mistaken || []).every((m) => typeof m.landform === 'string'), `${seed}: landform per twin cell`);
+  }
+});
