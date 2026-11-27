@@ -8,7 +8,7 @@
 
 import { performance } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
-import { generate } from '../src/engine/quiz.js';
+import { generate, framingPitch } from '../src/engine/quiz.js';
 import { TerrainModel } from '../src/engine/terrainModel.js';
 import { resolveWorld } from '../src/engine/worlds.js';
 import { gridCells } from '../src/engine/gridQuiz.js';
@@ -17,9 +17,9 @@ import { personSight } from '../src/engine/friendQuiz.js';
 import { surfaceElevation } from '../src/engine/terrainSurface.js';
 import { angleDiff, saturate } from '../src/engine/grid.js';
 import {
-  GEN2_GRID_THRESHOLDS, GEN2_RESECTION_THRESHOLDS, GEN2_FRIEND_THRESHOLDS,
-  analyzeSkylineFrame, analyzeResectionPeakView, descriptorHorizonPeaks,
-  featureDistinction, adjacentSummitShift, interiorHorizonCue,
+  GEN2_GRID_THRESHOLDS, GEN2_TWIN_THRESHOLDS, GEN2_RESECTION_THRESHOLDS, GEN2_FRIEND_THRESHOLDS,
+  qualifiedMapSummits, analyzeSkylineFrame, analyzeResectionPeakView, descriptorHorizonPeaks,
+  featureDistinction, adjacentSummitShift, interiorHorizonCue, compareSkylineTwin, rankTwinScore,
   mapReasoningMetrics, gridGen2Scores,
 } from '../src/engine/gen2.js';
 
@@ -48,16 +48,29 @@ function evaluateQuiz(mode, q) {
     let estFairness = q.gen2?.estimatedFairness;
     let estReadability = q.gen2?.estimatedReadability;
     let decoySameOrder = q.gen2?.decoySameOrder;
+    let hasTwin = q.gen2?.hasTwin;
+    let nonAdjTwin = q.gen2 ? !!(q.gen2.hasTwin && !q.gen2.twinAdjacent) : undefined;
+    let sameCountTwin = q.gen2?.twinSameCount;
+    let twinSimilarity = q.gen2?.hasTwin ? q.gen2.twinSimilarity : NaN;
+    let decisiveDetailCount = q.gen2?.hasTwin ? q.gen2.decisiveDetailCount : NaN;
+    let targetReady = q.gen2?.targetReady;
 
     if (!Number.isFinite(uniquenessMargin) || !Number.isFinite(estDifficulty)) {
+      const TW = GEN2_TWIN_THRESHOLDS;
       const cells = gridCells(model.size, 8);
       const origin = cells.find((c) => c.label === q.correctLabel);
+      const summits = qualifiedMapSummits(model, interval, T.minMapPromFactor, T.minMapPromMetres);
       const baseDesc = model.skyline.viewDescriptor(q.camera.x, q.camera.y, q.camera.heading, q.camera.fov, { eyeHeight: q.camera.eyeHeight, columns: 49 });
+      const pitch0 = framingPitch(Array.from(baseDesc.horizon));
       let minHD = Infinity, minIC = Infinity, minFM = Infinity, minAdj = Infinity, amb = 0, remH = 0;
+      const shortlist = [];
+      const hLen = baseDesc.horizon.length;
+      const igCols = Math.ceil((3 / q.camera.fov) * (hLen - 1));
       for (const c of cells) {
         if (c.label === q.correctLabel) continue;
         const desc = model.skyline.viewDescriptor(c.x, c.y, q.camera.heading, q.camera.fov, { eyeHeight: q.camera.eyeHeight, columns: 49 });
-        const fd = featureDistinction(baseDesc, sky.peaks, sky.relief, desc, descriptorHorizonPeaks(desc.horizon, q.camera.fov, 0.35), T);
+        const candPeaks = descriptorHorizonPeaks(desc.horizon, q.camera.fov, 0.35);
+        const fd = featureDistinction(baseDesc, sky.peaks, sky.relief, desc, candPeaks, T);
         if (fd.hRMS < minHD) minHD = fd.hRMS;
         if (fd.intCue < minIC) minIC = fd.intCue;
         if (fd.effectiveMargin < minFM) minFM = fd.effectiveMargin;
@@ -65,13 +78,50 @@ function evaluateQuiz(mode, q) {
         const cheb = Math.max(Math.abs(c.row - origin.row), Math.abs(c.column - origin.column));
         if (cheb === 1) minAdj = Math.min(minAdj, adjacentSummitShift(model, q.camera, sky.peaks, c));
         else if (fd.hRMS < 1.8) remH++;
+        if (sky.peaks.length >= 2 && candPeaks.length >= 1) {
+          const pitch1 = framingPitch(Array.from(desc.horizon));
+          if (Math.abs(pitch1 - pitch0) <= TW.maxPitchShift + 0.4) {
+            let ss = 0, cnt = 0;
+            for (let i = igCols; i < hLen - igCols; i++) {
+              const ds = (desc.horizon[i] - pitch1) - (baseDesc.horizon[i] - pitch0);
+              ss += ds * ds; cnt++;
+            }
+            const shapeRMS = cnt ? Math.sqrt(ss / cnt) : Infinity;
+            if (shapeRMS <= Math.min(2.45, Math.max(TW.maxShapeRMS + 0.25, 0.50 * sky.relief))) {
+              shortlist.push({ c, adj: cheb === 1, desc, pitch1, shapeRMS });
+            }
+          }
+        }
       }
       if (!Number.isFinite(minAdj)) minAdj = 0;
+      shortlist.sort((a, b) => (a.shapeRMS - b.shapeRMS) || a.c.label.localeCompare(b.c.label));
+      const origData = {
+        label: origin.label, fov: q.camera.fov, horizon: baseDesc.horizon, pitch: pitch0, relief: sky.relief,
+        peaks: sky.peaks, allSkylinePeaks: sky.allSkylinePeaks,
+        maxAngle: sky.maxAngle, blockedFrac: sky.blockedFrac, edgeFrac: sky.edgeFrac, edgeWall: sky.edgeWall,
+      };
+      const twins = [];
+      for (const item of shortlist.slice(0, 10)) {
+        const rSky = analyzeSkylineFrame(model, { x: item.c.x, y: item.c.y, heading: q.camera.heading, fov: q.camera.fov, eyeHeight: q.camera.eyeHeight }, {
+          step: 0.5, margin: 10, contourInterval: interval, thresholds: T, summits, divisions: 8,
+        });
+        const cmp = compareSkylineTwin(origData, {
+          label: item.c.label, fov: q.camera.fov, horizon: item.desc.horizon, pitch: item.pitch1,
+          peaks: rSky.peaks, allSkylinePeaks: rSky.allSkylinePeaks,
+          maxAngle: rSky.maxAngle, blockedFrac: rSky.blockedFrac, edgeFrac: rSky.edgeFrac, edgeWall: rSky.edgeWall,
+        }, { adjacent: item.adj, thresholds: TW });
+        if (cmp?.ambiguous) amb++;
+        if (cmp?.isTwin) twins.push({ ...cmp, twinRank: rankTwinScore(cmp) });
+      }
+      twins.sort((a, b) => (b.twinRank - a.twinRank) || a.cell.localeCompare(b.cell));
+      const primaryTwin = twins[0] || null;
       const reasoning = mapReasoningMetrics(model, origin, sky.peaks, cells, 8, interval);
+      const strictGen1 = sky.passesSkyline && amb === 0 && !!primaryTwin && q.validation.ok && !q.lowConfidence;
       const scores = gridGen2Scores({
         sky, minHorizonRMS: minHD, minInteriorCue: minIC, minFeatureMargin: minFM,
         minAdjacentShift: minAdj, remoteCloseHorizon: remH, reasoning,
         originRow: origin.row, originCol: origin.column, divisions: 8, heading: q.camera.heading,
+        twins, primaryTwin, ambiguousCells: amb, strict: strictGen1,
       });
       uniquenessMargin = +minFM.toFixed(2);
       minInteriorCue = +minIC.toFixed(2);
@@ -81,12 +131,25 @@ function evaluateQuiz(mode, q) {
       estDifficulty = scores.estimatedDifficulty;
       estFairness = scores.estimatedFairness;
       estReadability = scores.estimatedReadability;
+      hasTwin = !!primaryTwin;
+      nonAdjTwin = !!(primaryTwin && !primaryTwin.adjacent);
+      sameCountTwin = !!primaryTwin?.sameCount;
+      twinSimilarity = primaryTwin ? primaryTwin.similarity : NaN;
+      decisiveDetailCount = primaryTwin ? primaryTwin.decisiveDetails.length : NaN;
+      targetReady = scores.targetReady;
     }
 
-    const strictPass = q.gen2 ? !!q.gen2.strict : (sky.passesSkyline && ambiguousCells === 0 && q.validation.ok && !q.lowConfidence);
+    const strictPass = q.gen2 ? !!q.gen2.strict : (sky.passesSkyline && ambiguousCells === 0 && !!hasTwin && q.validation.ok && !q.lowConfidence);
     return {
       ok: !!(q.validation.ok && !q.lowConfidence),
       strictPass,
+      strictSkyline: q.gen2 ? !!q.gen2.strictSkyline : (sky.passesSkyline && ambiguousCells === 0),
+      targetReady: !!targetReady,
+      hasTwin: !!hasTwin,
+      nonAdjTwin: !!nonAdjTwin,
+      sameCountTwin: !!sameCountTwin,
+      twinSimilarity,
+      decisiveDetailCount,
       search2Pass,
       edgeCut: sky.edgeCut,
       distinctPeaks: sky.distinctPeaks,
@@ -231,6 +294,12 @@ export async function runReport({
         failed: failed.length,
         valid: rows.filter((r) => r.ok).length,
         strictPass: rows.filter((r) => r.strictPass).length,
+        targetReady: rows.filter((r) => r.targetReady).length,
+        hasTwin: rows.filter((r) => r.hasTwin).length,
+        nonAdjTwin: rows.filter((r) => r.nonAdjTwin).length,
+        sameCountTwin: rows.filter((r) => r.sameCountTwin).length,
+        twinSimMean: mean(col('twinSimilarity')),
+        detailCountMean: mean(col('decisiveDetailCount')),
         search2Pass: rows.filter((r) => r.search2Pass).length,
         msMean: mean(allMs),
         msP50: quantile(allMs, 0.5),
@@ -256,9 +325,13 @@ export async function runReport({
             n: list.length,
             generated: okList.length,
             strictPass: okList.filter((x) => x.strictPass).length,
+            targetReady: okList.filter((x) => x.targetReady).length,
+            nonAdjTwin: okList.filter((x) => x.nonAdjTwin).length,
+            sameCountTwin: okList.filter((x) => x.sameCountTwin).length,
             msMean: mean(list.map((x) => x.ms)),
             edgeCutMean: mean(okList.map((x) => x.edgeCut)),
             secondaryPromMean: mean(okList.map((x) => x.secondaryProm)),
+            twinSimMean: mean(okList.map((x) => x.twinSimilarity).filter(Number.isFinite)),
             estDiffMean: mean(okList.map((x) => x.estDifficulty)),
           }];
         })),
@@ -271,33 +344,37 @@ export async function runReport({
 
 export function formatMarkdown(report) {
   const lines = [
-    '| mode | gen | generated | valid | strict gen2 | pre-filter | ms mean/p50/p90 | edgeCut mean/p90 (°) | peaks | prom1/prom2 (°) | local2/drop8 (°) | sep/cross (°) | uniqMargin mean/p10 | estD mean (≥8) | estF | estR |',
-    '|------|-----|-----------|-------|-------------|------------|-----------------|----------------------|-------|-----------------|------------------|---------------|---------------------|----------------|------|------|',
+    '| mode | gen | generated | valid | strict gen2 | targetReady | twin (nonAdj/sameCnt) | twinSim | ms mean/p50/p90 | edgeCut mean/p90 (°) | peaks | prom1/prom2 (°) | uniqMargin mean/p10 | estD mean (≥8) | estF | estR |',
+    '|------|-----|-----------|-------|-------------|-------------|-----------------------|---------|-----------------|----------------------|-------|-----------------|---------------------|----------------|------|------|',
   ];
   for (const [mode, pair] of Object.entries(report)) {
     for (const g of [1, 2]) {
       const m = pair[`gen${g}`];
       const pct = (v) => `${v}/${m.n} (${Math.round((v / m.n) * 100)}%)`;
+      const twinCol = mode === 'grid' ? `${m.hasTwin}/${m.n} (${m.nonAdjTwin}/${m.sameCountTwin})` : '—';
+      const readyCol = mode === 'grid' ? pct(m.targetReady) : '—';
       lines.push(
-        `| ${mode} | gen=${g} | ${m.generated}/${m.n} | ${m.valid}/${m.n} | ${pct(m.strictPass)} | ${pct(m.search2Pass)} `
+        `| ${mode} | gen=${g} | ${m.generated}/${m.n} | ${m.valid}/${m.n} | ${pct(m.strictPass)} | ${readyCol} | ${twinCol} | ${fmt(m.twinSimMean)} `
         + `| ${fmt(m.msMean, 0)}/${fmt(m.msP50, 0)}/${fmt(m.msP90, 0)} `
         + `| ${fmt(m.edgeCutMean)}/${fmt(m.edgeCutP90)} | ${fmt(m.peaksMean)} `
-        + `| ${fmt(m.primaryPromMean)}/${fmt(m.secondaryPromMean)} | ${fmt(m.secondaryLocalPromMean)} `
-        + `| ${fmt(m.peakSepMean, 1)} | ${fmt(m.uniquenessMean)}/${fmt(m.uniquenessP10)} `
+        + `| ${fmt(m.primaryPromMean)}/${fmt(m.secondaryPromMean)} `
+        + `| ${fmt(m.uniquenessMean)}/${fmt(m.uniquenessP10)} `
         + `| ${fmt(m.estDiffMean, 1)} (${m.estDiffGe8}/${m.n}) | ${fmt(m.estFairMean, 1)} | ${fmt(m.estReadMean, 1)} |`
       );
     }
   }
 
   lines.push('', '### Per-world breakdown (gen=1 vs gen=2)', '');
-  lines.push('| mode | world | n | gen=1 strict | gen=2 strict | gen=1 ms | gen=2 ms | gen=2 edgeCut | gen=2 prom2 | gen=2 estD |');
-  lines.push('|------|-------|---|--------------|--------------|----------|----------|---------------|-------------|------------|');
+  lines.push('| mode | world | n | gen=1 strict | gen=2 strict | gen=2 ready | gen=2 nonAdj/same | gen=1 ms | gen=2 ms | gen=2 edgeCut | gen=2 twinSim | gen=2 estD |');
+  lines.push('|------|-------|---|--------------|--------------|-------------|-------------------|----------|----------|---------------|---------------|------------|');
   for (const [mode, pair] of Object.entries(report)) {
     const g1 = pair.gen1.byWorld, g2 = pair.gen2.byWorld;
     for (const w of Object.keys(g2).sort()) {
       const a = g1[w] || { n: 0, strictPass: 0, msMean: NaN };
       const b = g2[w];
-      lines.push(`| ${mode} | ${w} | ${b.n} | ${a.strictPass}/${a.n} | ${b.strictPass}/${b.n} | ${fmt(a.msMean, 0)} | ${fmt(b.msMean, 0)} | ${fmt(b.edgeCutMean)} | ${fmt(b.secondaryPromMean)} | ${fmt(b.estDiffMean, 1)} |`);
+      const rdy = mode === 'grid' ? `${b.targetReady}/${b.n}` : '—';
+      const na = mode === 'grid' ? `${b.nonAdjTwin}/${b.sameCountTwin}` : '—';
+      lines.push(`| ${mode} | ${w} | ${b.n} | ${a.strictPass}/${a.n} | ${b.strictPass}/${b.n} | ${rdy} | ${na} | ${fmt(a.msMean, 0)} | ${fmt(b.msMean, 0)} | ${fmt(b.edgeCutMean)} | ${fmt(b.twinSimMean)} | ${fmt(b.estDiffMean, 1)} |`);
     }
   }
   return lines.join('\n');

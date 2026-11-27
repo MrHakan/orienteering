@@ -184,6 +184,81 @@ export function skylineReason(alternative) {
 }
 
 /**
+ * Structured decisive-detail reason for a gen=2 grid near-twin look-alike cell,
+ * directly naming the map-checkable contour summit(s) and visual difference.
+ */
+export function twinExplanationReason(primaryTwin, optionLabel) {
+  if (!primaryTwin || primaryTwin.cell !== optionLabel || !primaryTwin.decisiveDetails?.length) return null;
+  const d = primaryTwin.decisiveDetails[0];
+  if (d.type === 'crest-height') {
+    if (d.orderFlip && d.rivalPairCells?.[0] && d.rivalPairCells?.[1]) {
+      return {
+        type: 'twin-height-flip',
+        degrees: +d.size.toFixed(1),
+        side: d.tallerRivalSide || d.side,
+        otherSide: d.tallerOriginSide || (d.tallerRivalSide === 'left' ? 'right' : 'left'),
+        cell: d.tallerRivalSide === 'left' ? d.rivalPairCells[0] : d.rivalPairCells[1],
+        otherCell: d.tallerRivalSide === 'left' ? d.rivalPairCells[1] : d.rivalPairCells[0],
+      };
+    }
+    if (Number.isFinite(d.contrastDelta) && Number.isFinite(d.screenDelta)
+      && Math.abs(d.contrastDelta) > Math.abs(d.screenDelta) + 0.35
+      && d.rivalPairCells?.[0] && d.rivalPairCells?.[1]) {
+      return {
+        type: 'twin-height-gap',
+        degrees: +Math.abs(d.contrastDelta).toFixed(1),
+        cell: d.rivalPairCells[0],
+        otherCell: d.rivalPairCells[1],
+      };
+    }
+    const deg = Number.isFinite(d.screenDelta) && Math.abs(d.screenDelta) >= 0.85
+      ? Math.abs(d.screenDelta) : d.size;
+    return {
+      type: 'twin-crest-height',
+      degrees: +deg.toFixed(1),
+      direction: d.direction,
+      side: d.side,
+      cell: d.rivalCell || d.originCell || null,
+    };
+  }
+  if (d.type === 'crest-shift') {
+    return {
+      type: 'twin-crest-shift',
+      degrees: Math.round(d.size),
+      direction: d.direction,
+      side: d.side,
+      cell: d.rivalCell || d.originCell || null,
+    };
+  }
+  if (d.type === 'saddle-depth') {
+    return {
+      type: 'twin-saddle-depth',
+      degrees: +d.size.toFixed(1),
+      direction: d.direction,
+      cell: d.rivalPairCells?.[0] || d.pairCells?.[0] || null,
+      otherCell: d.rivalPairCells?.[1] || d.pairCells?.[1] || null,
+    };
+  }
+  if (d.type === 'summit-absent') {
+    return {
+      type: 'twin-summit-absent',
+      degrees: +d.size.toFixed(1),
+      side: d.side,
+      cell: d.originCell || null,
+    };
+  }
+  if (d.type === 'summit-extra') {
+    return {
+      type: 'twin-summit-extra',
+      degrees: +d.size.toFixed(1),
+      side: d.side,
+      cell: d.rivalCell || null,
+    };
+  }
+  return null;
+}
+
+/**
  * Facts for Grid and Friend grid answers. `cameraFor(q, option)` is the comparison camera of an
  * option or friend match; `alternatives` the explanation's comparison records.
  */
@@ -195,7 +270,8 @@ export function viewExplanationFacts(q, model, shown, { alternatives, cameraFor 
     facts.observer = observerFacts(model, q.camera, q.correctLabel);
     const option = q.options.find((o) => o.label === q.closestLabel);
     if (option && !option.correct) {
-      const reason = landmarkReason(model, items, q.camera, cameraFor(q, option))
+      const reason = (q.gen === 2 && twinExplanationReason(q.gen2?.primaryTwin, option.label))
+        || landmarkReason(model, items, q.camera, cameraFor(q, option))
         || skylineReason(alternatives.find((a) => a.label === option.label));
       facts.lookalike = { label: option.label, adjacent: adjacentCells(option.label, q.correctLabel), reason };
     }
@@ -345,6 +421,27 @@ function viewReason(r, features, omit, shown) {
     case 'landmark-range': return `${name} would look much ${r.looks}`;
     case 'skyline-higher': return `the skyline ${SIDE[r.side]} would sit higher`;
     case 'skyline-lower': return `the skyline ${SIDE[r.side]} would sit lower`;
+    case 'twin-height-flip': return r.cell && r.otherCell
+      ? `the ${r.side} summit (in ${r.cell}) would stand higher than ${r.otherCell} (a ${r.degrees.toFixed(1)}° swap)`
+      : `the taller summit would swap to the ${r.side} (${r.degrees.toFixed(1)}°)`;
+    case 'twin-height-gap': return r.cell && r.otherCell
+      ? `the height difference between ${r.cell} and ${r.otherCell} would shift by ${r.degrees.toFixed(1)}°`
+      : `the height difference between the crests would shift by ${r.degrees.toFixed(1)}°`;
+    case 'twin-crest-height': return r.cell
+      ? `the ${r.side} crest (in ${r.cell}) would sit ${r.degrees.toFixed(1)}° ${r.direction}`
+      : `the ${r.side} crest would sit ${r.degrees.toFixed(1)}° ${r.direction}`;
+    case 'twin-crest-shift': return r.cell
+      ? `the ${r.side} crest (in ${r.cell}) would shift ${r.degrees}° ${r.direction}`
+      : `the ${r.side} crest would shift ${r.degrees}° ${r.direction}`;
+    case 'twin-saddle-depth': return r.cell && r.otherCell
+      ? `the saddle between ${r.cell} and ${r.otherCell} would drop ${r.degrees.toFixed(1)}° ${r.direction}`
+      : `the saddle between the crests would drop ${r.degrees.toFixed(1)}° ${r.direction}`;
+    case 'twin-summit-absent': return r.cell
+      ? `the ${r.side} knoll (in ${r.cell}) would be missing`
+      : `the ${r.side} crest would be missing`;
+    case 'twin-summit-extra': return r.cell
+      ? `an extra summit (in ${r.cell}) would rise ${SIDE[r.side]}`
+      : `an extra summit would rise ${SIDE[r.side]}`;
     default: return null;
   }
 }

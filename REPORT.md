@@ -289,3 +289,126 @@ All 10 hashes below were verified with `generate(...)`, pass strict `gen=2` (`st
 | 8 | Resection | alpine | `seed=tg-gen2-r14&d=master&m=resection&ra=grid&g=8&w=alpine&gen=2` | E3 | 057° | **8.4** / **7.7** / **8.0** | `drop8 2.37° / 1.09°`, `prom 3.40° / 1.90°`, `peakSize 6.18° / 3.27°`, `apexOffset 0° / 0°`, `crossing 74.3°`, `tol 6.91°`, 12 weak rivals |
 | 9 | Friend | karst | `seed=tg-gen2-f1&d=master&m=friend&fa=grid&g=8&w=karst&gen=2` | E2 | 008° | **8.4** / **9.1** / **8.5** | `edgeCut -0.14°`, `fDist 145 m`, `skyAboveFriend 8.67°`, 2 prominent peaks (`C2` 5.28°/lp 3.23°, `B4` 2.84°/lp 2.84°), `sep 20.0°`, `minIC 3.48°`, 12 decoy pairs |
 | 10 | Friend | glacial | `seed=tg-gen2-f7&d=master&m=friend&fa=grid&g=8&w=glacial&gen=2` | B3 | 198° | **8.7** / **9.1** / **8.5** | `edgeCut -0.03°`, `fDist 145 m`, `skyAboveFriend 5.54°`, 2 crisp summits (`C2` 1.43°/lp 1.35°, `D3` 1.35°/lp 1.35°), `sep 30.5°`, `minIC 2.59°`, 62 decoy pairs |
+
+
+---
+
+# Round 3 — Look-Alike Parallel-Error Selection (Master Grid, North-Up)
+
+## 8. Diagnosis from Round 1 & Round 2 Blind Reviews
+
+Following the owner's Round 3 direction (master GRID, north-up, heading shown, no map rotation, no lost compass), we re-analyzed all regenerable blind-reviewed north-up grid quizzes across `gen2-data/round1/your-engine/` (Engine B), `gen2-data/round2/engine-A/`, and `gen2-data/reviews/rep32{s,u,v}/`:
+
+1. **Why Round 1 & Round 2 fair quizzes landed at D5–6 instead of D8+:** Every D5–6 fair quiz (`tg-gen2-g13`, `tg-gen2-g11`, `j1e`, `j2f`, `j5f`, `s4`, `t134`, plus Round 2 Engine A mean D 5.5) had **no true skyline near-twin**. Legacy `minHorizonRMS` often hit its minimum (`0.8°–1.3°`) on flat `0-peak` or `1-peak` cells whose average elevation happened to match the true skyline's mean — cells a solver dismisses on the contour map in a split second. Meanwhile, the gold-standard north-up D8 F8 R8 quiz `tg-2026-11-27-t109` (`F4`, facing 133°, summits `G8` at `108.5°` and `G5` at `151°`) had a genuine **non-adjacent same-count parallel-error twin** in `C5` (`D8` at `108.5°` — exact `0°` bearing match! — and `G8` at `145°`, with the height order flipped and right crest shifted `6°`).
+2. **Why giant towering relief lowered difficulty:** Across fair Round 1/2 reviews, views with very large relief (`> 5.5°`, e.g. `j2f` 5.9°, `t134` 6.7°, `j5f` 8.0°) or towering `3.3°–4.5°` prominence peaks (Round 2 Engine A D4–5 cases) made bearing intersection trivial; the D7–8 fair views (`t109` 4.1°, `t53` 2.9°, `g22` 3.0°, `a3` 3.4°, `j3a` 3.4°) all had moderate, crisp relief (`2.8°–4.4°`).
+3. **Why two Round 1 Engine B quizzes scored F5 despite passing Round 1 framing:** Visual inspection of `tg-gen2-g5-grid.png` and `tg-gen2-a10-grid.png` isolated the exact two gaps:
+   - `tg-gen2-g5` (F5): secondary crest `G4` was a broad flat-topped ridge shoulder (`localProm = 1.07°` vs `prom = 2.49°`, ratio `0.43`), whereas every Round 1 F≥8 quiz had `localProm / prom >= 0.82`.
+   - `tg-gen2-a10` (F5, unsolved): shallow overall skyline relief (`2.25°`) made crests too faint at phone size, whereas every Round 1 Engine B F≥8 quiz had `relief >= 3.0°` (`t53` was `2.9°`, `t109` was `4.1°`).
+
+---
+
+## 9. Round 3 Algorithm, Rule Set & Calibrated Thresholds
+
+### Files Updated in Round 3
+- [`src/engine/gen2.js`](file:///Users/mrhakan/Projects/orienteering-gen2-gemini/src/engine/gen2.js): tightened `GEN2_GRID_THRESHOLDS`, added `GEN2_TWIN_THRESHOLDS`, `extractSweepWindow`, `fastTwinScan`, `compareSkylineTwin`, `rankTwinScore`, and recalibrated `gridGen2Scores` with `targetReady`.
+- [`src/engine/gridQuiz.js`](file:///Users/mrhakan/Projects/orienteering-gen2-gemini/src/engine/gridQuiz.js): twin-first 60-heading + peak-pair scan (`fastTwinScan`), exact 0.5° twin verification on shortlisted rivals, strict twin requirement with safe fallback, `closestLabel` set to primary twin, and Round 3 `quiz.gen2` metadata.
+- [`src/engine/explanationFacts.js`](file:///Users/mrhakan/Projects/orienteering-gen2-gemini/src/engine/explanationFacts.js) & [`src/engine/answerExplanation.js`](file:///Users/mrhakan/Projects/orienteering-gen2-gemini/src/engine/answerExplanation.js): `twinExplanationReason` renders `"Not <twinCell>: from there ..."` naming the exact map-checkable decisive detail for `gen=2` grid quizzes while keeping `gen=1` byte-identical.
+- [`scripts/gen2-report.mjs`](file:///Users/mrhakan/Projects/orienteering-gen2-gemini/scripts/gen2-report.mjs) & [`test/gen2.test.js`](file:///Users/mrhakan/Projects/orienteering-gen2-gemini/test/gen2.test.js): apples-to-apples twin & `targetReady` metrics for `gen=1` vs `gen=2` plus mutation tests isolating lower-bound ambiguity, upper-bound glaring exclusion, map-checkability, and calibration.
+
+### Tightened Origin Phone-Legibility Rules (`GEN2_GRID_THRESHOLDS`)
+All Round 1 framing/edge/uniqueness rules remain intact, with three calibration tightening updates:
+- `minRelief: 2.5°` (up from `1.8°`; rejects `tg-gen2-a10` at `2.25°`).
+- `minSecondaryProm: 1.00°`, `minSecondaryLocalProm: 1.00°`, `minLocalPromRatio: 0.50` (unless `localProm >= 1.35°`; rejects broad flat shoulders like `tg-gen2-g5` at `0.43` while passing all Round 1 F≥8 quizzes).
+- `minPeakSharpness: 0.90` (up from `0.85`), `minPrimaryLocalProm: 1.15°`, `minAdjacentShift: 5.5°`, `minAdjacentCue: 1.55°`.
+
+### Feature-Based Twin Similarity & Decisive-Detail Rules (`GEN2_TWIN_THRESHOLDS`)
+Comparisons between origin `O` and rival `T` at the **same heading & FOV** operate strictly on **namable skyline features** (order-preserved matched crests, bearings, pitch-compensated heights via `framingPitch`, prominences, saddles, and contour-mapped summits — **zero foreground probes**):
+
+| Rule / Parameter | Threshold | Calibration Basis (Round 1/2 + `rep32` labels) |
+|---|---:|---|
+| Feature similarity (`minSimilarity` / `minAdjSimilarity`) | `>= 0.56` / `>= 0.64` | Weighted on matched crest bearings (`0.34`), pitch-adjusted heights (`0.26`), prominences (`0.18`), relief-normalized shape (`0.22`), times count factor (`1.0` same-count, `0.86` 3v2/2v3, `0.78` 2v1). Every D6 non-twin fell `<= 0.52`; `t109` (`C5`) scored `0.644`. |
+| Rival contour & vantage plausibility | `maxAngle <= 11°`, `blockedFrac <= 0.35`, `edgeFrac <= 0.45`, `!edgeWall`, `pitchShift <= 2.6°`, `>= 2` mapped rival crests (for `N1 >= 2`) | Rival must look plausible on both the contour map and in-frame 3D view; deliberately ignores terrain 15–20° outside the rival's FOV (fixes `t109` `C5`). |
+| Anchor lock & upper bounds ("not glaring") | `minD <= 4.5°`, `maxD <= 11.0°`, `maxDY <= 2.6°`, `maxDA <= 3.2°`, `shapeRMS <= min(2.25°, max(1.55°, 0.45·relief))`, `details <= 2` | D5–6 cases (`s4`, `j1e`, `j2f`, `t134`) had `maxD > 11°`, `maxDY > 3°`, or 3–4 simultaneous details. |
+| Decisive detail lower bounds ("phone-legible") | `crest-shift >= 5.0°`; `crest-height >= 1.0°` raw (`>= 0.85°` pitch-adjusted) or relative contrast `>= 1.15°` (height-order swap `>= 0.95°`); `saddle-depth >= 0.85°` (deeper `>= 1.1°`); `summit-absent/extra` mapped `prom 1.10°–3.20°` (`localProm >= 0.95°`, shared crests `<= 5.5°` / `<= 1.25°`) | `5°` spans ~90 px on a 1080 px phone frame at 60° FOV; `>= 1.0°` vertical / height-order swap is cleanly visible after camera auto-pitching. |
+| Ambiguity guard | `similarity >= 0.56` & `details === 0` & `intCue < 1.65°` -> rejected as ambiguous | Prevents gen=1-style sub-threshold look-alike unfairness (F2–5). |
+| Contour-map checkability | Every decisive detail requires `mapCheckable === true` (mapped closed-contour summit/knoll cells) | Guarantees the decisive cue is verifiable on the north-up contour map and namable in `"Not Y: ..."`. |
+| Preference hierarchy | Non-adjacent same-count bearing-locked (`maxD <= 4.5°`) & height-swap > non-adjacent same-count 1-detail > non-adjacent 3v2/2v3 > adjacent same-count > 2v1 | `2->1` twins (`g22` D7) never trigger `targetReady` or early-stop; `targetReady` requires `strict && min(N0,N1) >= 2 && estD >= 8.0 && estF >= 8.0 && estR >= 7.0`. |
+
+### Two-Stage Fast Search (Within `<= ~1.5 s` Budget)
+`fastTwinScan` reuses the single 1.5°-step 360° panorama sweep per walkable cell to scan all 60 6°-spaced headings **plus** exact peak-pair-centred headings and `±3°` refinements around top twin hits (zero extra raycasts). Only the top diverse twin-bearing `(origin, heading)` proposals go to exact 0.5° skyline verification and shortlisted rival `compareSkylineTwin` checks (cached per cell/heading). Search tries up to `maxTerrainAttempts = 5` terrains and stops immediately once a non-adjacent multi-crest `targetReady` twin is found.
+
+---
+
+## 10. Calibration Agreement Against Labelled North-Up Reviews
+
+Evaluated before (Round 1 estimator) vs after (Round 3 twin-calibrated `gridGen2Scores`) on all unique north-up labelled grid reviews:
+
+| Dataset | Metric | n | Before (Round 1) `r` / `rho` / `MAE` | After (Round 3) `r` / `rho` / `MAE` |
+|---|---|---:|---|---|
+| `round1/your-engine` (non-dunes, `F >= 8`) | Difficulty `D` | 8 | `0.469` / `0.397` / `1.74` (pred mean 8.1 vs real 6.4) | **`0.677` / `0.866` / `0.35`** |
+| `round1/your-engine` (all non-dunes) | Fairness `F` | 10 | `0.501` / `0.395` / `0.99` | **`0.913` / `0.541` / `1.04`** |
+| `round1/your-engine` (all non-dunes) | Readability `R` | 10 | `0.344` / `0.450` / `0.69` | **`0.622` / `0.696` / `0.41`** |
+| `reviews/rep32{s,u,v}` (unique north-up, `F >= 8`) | Difficulty `D` | 5 | — | **`0.869` / `0.949` / `0.60`** |
+| `reviews/rep32{s,u,v}` (all unique north-up) | Fairness `F` | 15 | — | **`0.796` / `0.654` / `1.39`** |
+| `reviews/rep32{s,u,v}` (all unique north-up) | Readability `R` | 15 | — | **`0.710` / `0.733` / `1.10`** |
+
+Honest caveat: sample sizes are small (`n = 5`–`15`), and Round 3 introduces stronger bearing-locked non-adjacent twins (`sim 0.65–0.77`) than existed in Round 1/2 (`t109` was `0.644`), so true blind D8+ rates above `t109` remain to be confirmed by the judge.
+
+---
+
+## 11. Measured `scripts/gen2-report.mjs` Results (Round 3, Grid N=40)
+
+### Run A: Balanced 5 Topographic Worlds (`classic,alpine,glacial,karst,canyon`, N=40, `prefix=r3b`)
+```text
+Gen=1 vs Gen=2 Report (d=master, g=8, N=40, worlds=classic,alpine,glacial,karst,canyon, prefix=r3b)
+
+| mode | gen | generated | valid | strict gen2 | targetReady | twin (nonAdj/sameCnt) | twinSim | ms mean/p50/p90 | edgeCut mean/p90 (°) | peaks | prom1/prom2 (°) | uniqMargin mean/p10 | estD mean (≥8) | estF | estR |
+|------|-----|-----------|-------|-------------|-------------|-----------------------|---------|-----------------|----------------------|-------|-----------------|---------------------|----------------|------|------|
+| grid | gen=1 | 40/40 | 40/40 | 0/40 (0%) | 0/40 (0%) | 0/40 (0/0) | — | 295/287/363 | 1.87/4.95 | 0.95 | 1.69/0.18 | 2.31/1.66 | 5.8 (0/40) | 3.4 | 4.5 |
+| grid | gen=2 | 40/40 | 40/40 | 33/40 (83%) | 20/40 (50%) | 33/40 (19/28) | 0.68 | 1163/1211/1679 | 0.00/0.17 | 2.08 | 2.68/1.69 | 2.63/2.02 | 7.7 (20/40) | 8.8 | 8.3 |
+
+### Per-world breakdown (gen=1 vs gen=2)
+
+| mode | world | n | gen=1 strict | gen=2 strict | gen=2 ready | gen=2 nonAdj/same | gen=1 ms | gen=2 ms | gen=2 edgeCut | gen=2 twinSim | gen=2 estD |
+|------|-------|---|--------------|--------------|-------------|-------------------|----------|----------|---------------|---------------|------------|
+| grid | alpine | 8 | 0/8 | 7/8 | 3/8 | 2/7 | 293 | 1287 | -0.03 | 0.69 | 7.3 |
+| grid | canyon | 8 | 0/8 | 4/8 | 3/8 | 1/4 | 288 | 1203 | -0.02 | 0.71 | 7.0 |
+| grid | classic | 8 | 0/8 | 6/8 | 3/8 | 3/5 | 304 | 1177 | 0.00 | 0.69 | 7.4 |
+| grid | glacial | 8 | 0/8 | 8/8 | 4/8 | 6/4 | 299 | 1335 | 0.02 | 0.64 | 8.0 |
+| grid | karst | 8 | 0/8 | 8/8 | 7/8 | 7/8 | 290 | 813 | 0.04 | 0.68 | 8.6 |
+```
+
+### Run B: Default `--world auto` (All 6 Worlds Including 8 `dunes`, N=40, `prefix=r3a`)
+```text
+Gen=1 vs Gen=2 Report (d=master, g=8, N=40, worlds=auto, prefix=r3a)
+
+| mode | gen | generated | valid | strict gen2 | targetReady | twin (nonAdj/sameCnt) | twinSim | ms mean/p50/p90 | edgeCut mean/p90 (°) | peaks | prom1/prom2 (°) | uniqMargin mean/p10 | estD mean (≥8) | estF | estR |
+|------|-----|-----------|-------|-------------|-------------|-----------------------|---------|-----------------|----------------------|-------|-----------------|---------------------|----------------|------|------|
+| grid | gen=1 | 40/40 | 38/40 | 0/40 (0%) | 0/40 (0%) | 1/40 (1/1) | 0.58 | 400/298/791 | 1.08/2.71 | 0.72 | 1.22/0.14 | 1.97/1.24 | 5.9 (1/40) | 3.0 | 4.6 |
+| grid | gen=2 | 40/40 | 32/40 | 23/40 (57%) | 14/40 (35%) | 23/40 (17/20) | 0.68 | 1279/1377/1898 | 0.00/0.18 | 1.70 | 2.50/1.38 | 2.50/1.39 | 7.3 (14/40) | 7.7 | 7.7 |
+```
+*(Timing note: Runs A & B executed concurrently on the same Mac alongside candidate search; single-threaded mean runtime on 25 non-dunes seeds was `1016 ms`, p95 `1361 ms`, comfortably under `<= 1.5 s`.)*
+
+### Verification & Recorded Assumptions (Round 3)
+- **Full test suite:** `npm test` passed **304/304** tests (`fail 0`), including unchanged `test/generation-golden.test.js` (`gen=1` byte-identical) and all 10 unit/mutation tests in `test/gen2.test.js`.
+- **Browser checks (`scripts/check-grid-browser.mjs`):** Still blocked by the sandbox on localhost navigation (`page.goto` fails in Chromium); skipped as instructed in `BRIEF.md`.
+- **Assumptions:** `dunes` remains a graceful fallback (`0/8` strict, never throws) because flat dune crests lack closed-contour summits; runtime selectors should filter on `quiz.gen2.targetReady === true` (and exclude `dunes`) for guaranteed D≥8 F≥8 R≥7 parallel-error master Reels.
+
+---
+
+## 12. 10 Verified Round 3 Grid Hashes (Predicted D≥8, F≥8, R≥7, North-Up, No Dunes)
+
+Every hash below passes `strict: true`, `targetReady: true`, `edgeCut <= 0.17°`, `ambiguousCells: 0`, and has a **non-adjacent, contour-mapped parallel-landform twin** (`2` each across `classic`, `alpine`, `karst`, `glacial`, `canyon`) spanning all four decisive-detail classes:
+
+| # | World | Hash | Ans (Hdg) | Twin Cell | Crests / Lock / Sim | `estD`/`estF`/`estR` | Decisive Detail & Rendered Explanation (`Not Y: ...`) |
+|---:|---|---|---|---|---|---:|---|
+| 1 | classic | `#seed=tg-r3-classic-11&d=master&m=grid&g=8&w=classic&gen=2` | **H3** (`36°`) | **H1** (non-adj) | `2→2` / anchor / `0.65` | **8.1** / **8.9** / **8.4** | `crest-shift` `6.0°` right + `crest-height` `2.1°` swap (`E4`/`E6` vs `C4`/`E4`): *"Not H1: from there the centre crest (in C4) would shift 6° right."* |
+| 2 | classic | `#seed=tg-r3-classic-6&d=master&m=grid&g=8&w=classic&gen=2` | **D1** (`102°`) | **F1** (non-adj) | `2→2` / anchor / `0.64` | **8.2** / **8.7** / **8.1** | `crest-shift` `7.5°` right (`C7`/`E6` vs `C7`/`G5`, left crest locked): *"Not F1: from there the centre crest (in G5) would shift 8° right."* |
+| 3 | alpine | `#seed=tg-r3-alpine-23&d=master&m=grid&g=8&w=alpine&gen=2` | **A3** (`158°`) | **C1** (non-adj) | `2→2` / **bearing-locked** / `0.68` | **8.5** / **9.1** / **8.3** | `crest-height` contrast `2.2°` (`E5`/`F3` vs `F3`/`F1` at matching bearings): *"Not C1: from there the height difference between F3 and F1 would shift by 2.2°."* |
+| 4 | alpine | `#seed=r3-eval-alpine-1&d=master&m=grid&g=8&w=alpine&gen=2` | **B7** (`201°`) | **A4** (non-adj) | `2→2` / anchor / `0.72` | **8.2** / **8.8** / **8.6** | `crest-shift` `6.0°` left + `crest-height` `1.2°` swap (`F7`/`E4` vs `E4`/`D1`): *"Not A4: from there the right crest (in D1) would shift 6° left."* |
+| 5 | karst | `#seed=tg-r3-karst-1&d=master&m=grid&g=8&w=karst&gen=2` | **C2** (`159°`) | **A4** (non-adj) | `2→2` / **bearing-locked** / `0.77` | **9.2** / **8.6** / **8.2** | `crest-height` contrast `1.6°` (`G4`/`D2` vs `G6`/`G4`, `shapeRMS 0.75°`): *"Not A4: from there the height difference between G6 and G4 would shift by 1.6°."* |
+| 6 | karst | `#seed=tg-r3-karst-4&d=master&m=grid&g=8&w=karst&gen=2` | **B5** (`298°`) | **G5** (non-adj) | `2→2` / **bearing-locked** / `0.74` | **9.1** / **8.8** / **8.5** | `saddle-depth` `1.0°` shallower (`A3`/`A4` vs `F2`/`F4` at matching bearings & heights): *"Not G5: from there the saddle between F2 and F4 would drop 1.0° shallower."* |
+| 7 | glacial | `#seed=r3-eval-glacial-0&d=master&m=grid&g=8&w=glacial&gen=2` | **G2** (`58°`) | **C3** (non-adj) | `2→2` / **bearing-locked** / `0.64` | **9.1** / **8.6** / **8.1** | `crest-height` `1.7°` **height-order swap** (`E6`/`F7` vs `B4`/`C5`, `shapeRMS 0.93°`): *"Not C3: from there the right summit (in C5) would stand higher than B4 (a 1.7° swap)."* |
+| 8 | glacial | `#seed=tg-r3-glacial-6&d=master&m=grid&g=8&w=glacial&gen=2` | **A5** (`225°`) | **C8** (non-adj) | `3→2` / anchor / `0.68` | **8.7** / **9.1** / **8.3** | `summit-absent` `2.4°` mapped knoll (`E4`/`B3`/`C1` vs 2-crest twin missing `B3`): *"Not C8: from there the right knoll (in B3) would be missing."* |
+| 9 | canyon | `#seed=tg-r3-canyon-11&d=master&m=grid&g=8&w=canyon&gen=2` | **A8** (`235°`) | **C7** (non-adj) | `2→2` / **bearing-locked** / `0.69` | **8.3** / **8.7** / **8.1** | `crest-height` `1.2°` (`D3`/`B5` vs `F3`/`D3` at matching bearings): *"Not C7: from there the centre crest (in F3) would sit 0.9° higher."* |
+| 10 | canyon | `#seed=tg-r3-canyon-20&d=master&m=grid&g=8&w=canyon&gen=2` | **C1** (`102°`) | **D3** (non-adj) | `2→2` / **bearing-locked** / `0.66` | **8.2** / **8.8** / **8.0** | `crest-height` contrast `2.0°` (`C3`/`G7` vs `D7`/`G7` at matching bearings): *"Not D3: from there the height difference between D7 and G7 would shift by 1.9°."* |

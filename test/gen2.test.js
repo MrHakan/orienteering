@@ -6,9 +6,9 @@ import { cellAt } from '../src/engine/gridQuiz.js';
 import { cellBorderMargin, personSight } from '../src/engine/friendQuiz.js';
 import { fixSlack, rivalFixes, RESECTION_BANDS } from '../src/engine/resectionQuiz.js';
 import {
-  normaliseGen, GEN2_GRID_THRESHOLDS, GEN2_RESECTION_THRESHOLDS, GEN2_FRIEND_THRESHOLDS,
+  normaliseGen, GEN2_GRID_THRESHOLDS, GEN2_TWIN_THRESHOLDS, GEN2_RESECTION_THRESHOLDS, GEN2_FRIEND_THRESHOLDS,
   analyzeSkylineFrame, interiorHorizonCue, descriptorHorizonPeaks, featureDistinction,
-  adjacentSummitShift, gridGen2Scores, analyzeResectionPeakView,
+  adjacentSummitShift, compareSkylineTwin, rankTwinScore, gridGen2Scores, analyzeResectionPeakView,
 } from '../src/engine/gen2.js';
 import { runReport, formatMarkdown } from '../scripts/gen2-report.mjs';
 
@@ -205,23 +205,132 @@ test('mutation-style rule isolation: resection peak analyzer separates sharp con
   assert.equal(flatMutated.strictOk, true, 'mutating sharpness thresholds allows the flat shoulder');
 });
 
-test('gridGen2Scores rewards decoy summit pairs, interior cells, and close-but-unique horizons', () => {
-  const sky = { skylineScore: 0.85, distinctPeaks: 2, secondaryLocalProm: 1.4, edgeCut: 0.05, edgeWall: false };
-  const easy = gridGen2Scores({
-    sky, minHorizonRMS: 1.9, minInteriorCue: 2.5, minFeatureMargin: 2.8, minAdjacentShift: 10,
-    remoteCloseHorizon: 0, reasoning: { mapSummits: 6, decoyPairs: 1, decoySameOrder: 1, singlePeakCells: 4 },
-    originRow: 0, originCol: 0, divisions: 8, heading: 135,
+test('mutation-style rule isolation: compareSkylineTwin enforces lower bound, upper bound, and map-checkability', () => {
+  const fov = 60;
+  const makeHorizon = (peaks, base = 1.0) => {
+    const h = new Float32Array(49);
+    for (let i = 0; i < 49; i++) {
+      const d = -fov / 2 + (fov * i) / 48;
+      let v = base;
+      for (const p of peaks) v += p.h * Math.exp(-0.5 * ((d - p.d) / (p.w ?? 4.5)) ** 2);
+      h[i] = v;
+    }
+    return h;
+  };
+  const pitchOf = (h) => (Math.min(...h) + Math.max(...h)) * 0.5;
+  const originHorizon = makeHorizon([{ d: -15, h: 2.2 }, { d: 14, h: 3.1 }]);
+  const originData = {
+    label: 'F4', fov, horizon: originHorizon, pitch: pitchOf(originHorizon), relief: 3.1,
+    maxAngle: 4.1, blockedFrac: 0, edgeFrac: 0, edgeWall: false,
+    peaks: [
+      { d: -15, az: 118, a: 3.2, prom: 2.0, localProm: 1.9, edgeDist: 15, summit: { x: 1600, y: 400, z: 160, cell: 'G8', kind: 'summit', prominence: 35 } },
+      { d: 14, az: 147, a: 4.1, prom: 2.9, localProm: 2.4, edgeDist: 16, summit: { x: 1100, y: 350, z: 175, cell: 'G5', kind: 'summit', prominence: 42 } },
+    ],
+    allSkylinePeaks: [],
+  };
+  originData.allSkylinePeaks = originData.peaks;
+
+  // 1. Bearing-locked non-adjacent parallel twin with a 1.6 deg height-order swap -> qualified twin!
+  const swapHorizon = makeHorizon([{ d: -14, h: 3.0 }, { d: 13.5, h: 2.1 }]);
+  const swapRival = {
+    label: 'C5', fov, horizon: swapHorizon, pitch: pitchOf(swapHorizon),
+    maxAngle: 4.0, blockedFrac: 0.05, edgeFrac: 0.05, edgeWall: false,
+    peaks: [
+      { d: -14, az: 119, a: 4.0, prom: 2.8, localProm: 2.3, edgeDist: 16, summit: { x: 1650, y: 1150, z: 170, cell: 'D8', kind: 'summit', prominence: 38 } },
+      { d: 13.5, az: 146.5, a: 3.1, prom: 1.9, localProm: 1.8, edgeDist: 16.5, summit: { x: 1600, y: 400, z: 160, cell: 'G8', kind: 'summit', prominence: 35 } },
+    ],
+  };
+  swapRival.allSkylinePeaks = swapRival.peaks;
+  const swapRes = compareSkylineTwin(originData, swapRival, { adjacent: false });
+  assert.equal(swapRes.isTwin, true, `expected bearing-locked height-swap twin: ${JSON.stringify(swapRes)}`);
+  assert.equal(swapRes.bearingLocked, true);
+  assert.equal(swapRes.parallelLandforms, true);
+  assert.equal(swapRes.decisiveDetails.length, 1);
+  assert.equal(swapRes.decisiveDetails[0].type, 'crest-height');
+  assert.equal(swapRes.decisiveDetails[0].orderFlip, true);
+  assert.ok(swapRes.similarity >= GEN2_TWIN_THRESHOLDS.minSimilarity);
+
+  // 2. Sub-threshold difference (0.25 deg height, 1 deg shift) -> rejected AND flagged ambiguous!
+  const ambHorizon = makeHorizon([{ d: -14.5, h: 2.3 }, { d: 14.5, h: 3.0 }]);
+  const ambRival = {
+    ...swapRival, label: 'E4', horizon: ambHorizon, pitch: pitchOf(ambHorizon),
+    allSkylinePeaks: [
+      { ...swapRival.peaks[0], d: -14.5, a: 3.3 },
+      { ...swapRival.peaks[1], d: 14.5, a: 4.0 },
+    ],
+  };
+  const ambRes = compareSkylineTwin(originData, ambRival, { adjacent: false });
+  assert.equal(ambRes.isTwin, false);
+  assert.equal(ambRes.ambiguous, true, 'near-identical rival without phone-legible cue must be flagged ambiguous');
+
+  // 3. Glaring upper-bound rival (15 deg shift on both crests) -> not a twin!
+  const glaringHorizon = makeHorizon([{ d: 0, h: 2.2 }, { d: 25, h: 3.1 }]);
+  const glaringRival = {
+    ...swapRival, label: 'A1', horizon: glaringHorizon, pitch: pitchOf(glaringHorizon),
+    allSkylinePeaks: [
+      { ...swapRival.peaks[0], d: 0, a: 3.2 },
+      { ...swapRival.peaks[1], d: 25, a: 4.1 },
+    ],
+  };
+  const glaringRes = compareSkylineTwin(originData, glaringRival, { adjacent: false });
+  assert.equal(glaringRes.isTwin, false);
+  assert.equal(glaringRes.notGlaring, false);
+
+  // 4. Unmapped rival crests -> not map-checkable, rejected as twin!
+  const unmappedRival = {
+    ...swapRival,
+    allSkylinePeaks: swapRival.peaks.map((p) => ({ ...p, summit: null })),
+  };
+  const unmappedRes = compareSkylineTwin(originData, unmappedRival, { adjacent: false });
+  assert.equal(unmappedRes.isTwin, false, 'twin without contour-mapped summits must be rejected');
+
+  // 5. Mutation check: raising minHeightContrastDetail & minOrderFlipContrast above swap size turns off the detail
+  const mutatedSwap = compareSkylineTwin(originData, swapRival, {
+    adjacent: false,
+    thresholds: { ...GEN2_TWIN_THRESHOLDS, minOrderFlipContrast: 5, minHeightContrastDetail: 5, minScreenHeightDetail: 5, minHeightDetail: 5 },
   });
-  const hard = gridGen2Scores({
-    sky, minHorizonRMS: 0.85, minInteriorCue: 2.0, minFeatureMargin: 2.6, minAdjacentShift: 9,
-    remoteCloseHorizon: 10, reasoning: { mapSummits: 15, decoyPairs: 22, decoySameOrder: 16, singlePeakCells: 18 },
-    originRow: 4, originCol: 3, divisions: 8, heading: 133,
-  });
-  assert.ok(hard.difficulty > easy.difficulty + 0.35, `hard ${hard.difficulty} should strongly exceed easy ${easy.difficulty}`);
-  assert.ok(hard.estimatedDifficulty >= 8.0 && easy.estimatedDifficulty < 7.2);
+  assert.equal(mutatedSwap.isTwin, false);
+  assert.equal(mutatedSwap.decisiveDetails.length, 0);
 });
 
-test('end-to-end master grid gen=2: deterministic, north-up, phone-fair metrics, and gen=1 untouched', async () => {
+test('gridGen2Scores calibrates non-twin views below 7 and rewards bearing-locked non-adjacent twins to 8+', () => {
+  const sky = { passesSkyline: true, skylineScore: 0.85, relief: 3.6, distinctPeaks: 2, secondaryProm: 1.5, secondaryLocalProm: 1.4, edgeCut: 0.05, edgeWall: false };
+  const noTwin = gridGen2Scores({
+    sky, minHorizonRMS: 1.4, minInteriorCue: 2.3, minFeatureMargin: 2.5, minAdjacentShift: 10,
+    remoteCloseHorizon: 0, reasoning: { mapSummits: 10, decoyPairs: 8, decoySameOrder: 4, singlePeakCells: 8 },
+    originRow: 4, originCol: 3, divisions: 8, heading: 133, strict: false,
+  });
+  const weak2v1 = {
+    cell: 'B1', adjacent: false, sameCount: false, originPeaks: 2, rivalPeaks: 1,
+    parallelLandforms: true, bearingLocked: false, similarity: 0.62, subtlety: 0.6, isTwin: true,
+    decisiveDetails: [{ type: 'summit-absent', size: 1.5, mapCheckable: true }],
+  };
+  const with2v1 = gridGen2Scores({
+    sky, minHorizonRMS: 0.9, minInteriorCue: 1.9, minFeatureMargin: 2.2, minAdjacentShift: 9,
+    remoteCloseHorizon: 2, reasoning: { mapSummits: 12, decoyPairs: 12, decoySameOrder: 8, singlePeakCells: 12 },
+    originRow: 4, originCol: 3, divisions: 8, heading: 133,
+    twins: [weak2v1], primaryTwin: weak2v1, ambiguousCells: 0, strict: true,
+  });
+  const strongTwin = {
+    cell: 'C5', adjacent: false, sameCount: true, originPeaks: 2, rivalPeaks: 2,
+    parallelLandforms: true, bearingLocked: true, similarity: 0.74, subtlety: 0.75, isTwin: true,
+    decisiveDetails: [{ type: 'crest-height', size: 1.6, orderFlip: true, mapCheckable: true }],
+  };
+  const withTwin = gridGen2Scores({
+    sky, minHorizonRMS: 0.85, minInteriorCue: 1.8, minFeatureMargin: 2.2, minAdjacentShift: 9,
+    remoteCloseHorizon: 4, reasoning: { mapSummits: 14, decoyPairs: 18, decoySameOrder: 12, singlePeakCells: 14 },
+    originRow: 4, originCol: 3, divisions: 8, heading: 133,
+    twins: [strongTwin], primaryTwin: strongTwin, ambiguousCells: 0, strict: true,
+  });
+  assert.ok(noTwin.estimatedDifficulty < 7.0 && noTwin.targetReady === false, `non-twin should stay <7, got ${noTwin.estimatedDifficulty}`);
+  assert.ok(with2v1.estimatedDifficulty < 8.0 && with2v1.targetReady === false, `2->1 twin should stay ~7, got ${with2v1.estimatedDifficulty}`);
+  assert.ok(withTwin.estimatedDifficulty >= 8.0 && withTwin.estimatedFairness >= 8.0 && withTwin.estimatedReadability >= 7.0);
+  assert.equal(withTwin.targetReady, true);
+  assert.ok(withTwin.difficulty > noTwin.difficulty + 0.35);
+  assert.ok(rankTwinScore(strongTwin) > rankTwinScore(weak2v1));
+});
+
+test('end-to-end master grid gen=2: deterministic, north-up, phone-fair near-twin look-alike, explanation, and gen=1 untouched', async () => {
   const opts = { seed: 'g2-unit-0', difficulty: 'master', mode: 'grid', gridSize: 8, world: 'karst', gen: 2 };
   const a = await generate(opts);
   const b = await generate(opts);
@@ -232,6 +341,17 @@ test('end-to-end master grid gen=2: deterministic, north-up, phone-fair metrics,
   assert.equal(a.mapRotation, 0);
   assert.equal(a.gen2.strict, true);
   assert.equal(a.gen2.fallback, false);
+  assert.equal(a.gen2.hasTwin, true);
+  assert.ok(a.gen2.twinCell && a.gen2.twinCell !== a.correctLabel);
+  assert.ok(a.gen2.twinSimilarity >= GEN2_TWIN_THRESHOLDS.minSimilarity);
+  assert.ok(a.gen2.decisiveDetailCount >= 1 && a.gen2.decisiveDetailCount <= GEN2_TWIN_THRESHOLDS.maxDecisiveDetails);
+  assert.ok(Array.isArray(a.gen2.twins) && a.gen2.twins.length >= 1);
+  assert.equal(typeof a.gen2.targetReady, 'boolean');
+  assert.equal(a.closestLabel, a.gen2.twinCell);
+  assert.equal(a.explanation.closestLabels[0], a.closestLabel);
+  assert.match(a.explanation.short, new RegExp(`Not ${a.gen2.twinCell}:`));
+  assert.ok(a.explanation.short.length <= 280);
+  assert.doesNotMatch(a.explanation.short, /\d\.\d\d°|undefined|NaN/);
   assert.equal(a.validation.ok, true);
   assert.equal(a.lowConfidence, false);
   assert.ok(a.gen2.edgeCut <= GEN2_GRID_THRESHOLDS.maxEdgeCut);
