@@ -1456,7 +1456,10 @@ async function exportImage(reveal) {
   stopPreview();
   setExportBusy(true);
   try {
-    const blob = await c.toImage({ reveal });
+    // data-review="1" (set by the fairness-review runtime, never by the UI): the review sheet with the clip's
+    // decisive moments under the question still. Same file name; the posted media never use it.
+    const sheet = !reveal && $('export-png').dataset.review === '1';
+    const blob = await (sheet ? c.toReviewImage() : c.toImage({ reveal }));
     download(blob, exportName(reveal ? '-answer' : '', 'png'));
     setExportStatus(`Saved ${exportName(reveal ? '-answer' : '', 'png')}`);
   } catch (error) {
@@ -1514,6 +1517,7 @@ $('export-handle').addEventListener('input', () => {
   exportUi.composer?.setOptions({ handle: opts.handle });
 });
 $('export-png').addEventListener('click', () => exportImage(false));
+$('export-png').dataset.reviewSheet = '1'; // feature flag: this build can export a review sheet (data-review="1")
 $('export-answer-png').addEventListener('click', () => exportImage(true));
 $('export-video').addEventListener('click', exportVideo);
 $('export-share').addEventListener('click', async () => {
