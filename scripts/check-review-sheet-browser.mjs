@@ -1,4 +1,5 @@
-// Optional Playwright check: the review sheet export (data-review="1" on #export-png) for friend and resection,
+// Optional Playwright check: the review sheet export (data-review="1" on #export-png) for friend and resection
+// (default moments and data-review-times="1,14"),
 // and the unchanged single question still without it. usage:
 // PLAYWRIGHT_MODULE=... CHROME_EXECUTABLE=... node scripts/check-review-sheet-browser.mjs [outdir]
 import assert from 'node:assert/strict';
@@ -23,12 +24,12 @@ const browser = await chromium.launch({ ...(process.env.CHROME_EXECUTABLE ? { ex
 const errors = [], url = `http://localhost:${server.address().port}`;
 const pngSize = (buf) => ({ width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) });
 
-async function questionPng(hash, review) {
+async function questionPng(hash, review, times = null) {
   const page = await browser.newPage({ viewport: { width: 1400, height: 1000 }, acceptDownloads: true });
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`${url}/#${hash}`);
   await page.waitForFunction(() => document.getElementById('loading').classList.contains('hidden'), null, { timeout: 120000 });
-  assert.equal(await page.evaluate(() => document.getElementById('export-png').dataset.reviewSheet), '1', 'feature flag');
+  assert.equal(await page.evaluate(() => document.getElementById('export-png').dataset.reviewSheet), '2', 'feature flag');
   for (let i = 0; ; i++) {
     await page.click('#open-export');
     if (await page.waitForFunction(() => document.getElementById('export-dialog').open, null, { timeout: 5000 }).then(() => true, () => false)) break;
@@ -36,7 +37,7 @@ async function questionPng(hash, review) {
   }
   await page.check('input[name=format][value=reels]');
   await page.uncheck('#export-reveal');
-  if (review) await page.evaluate(() => { document.getElementById('export-png').dataset.review = '1'; });
+  if (review) await page.evaluate((t) => { const b = document.getElementById('export-png'); b.dataset.review = '1'; if (t) b.dataset.reviewTimes = t; }, times);
   await page.waitForFunction(() => !document.querySelector('#export-png').disabled, null, { timeout: 60000 });
   const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 120000 }), page.click('#export-png')]);
   const buf = await readFile(await dl.path());
@@ -57,6 +58,11 @@ try {
     if (out) { await writeFile(join(out, `${name}-sheet.png`), sheet); await writeFile(join(out, `${name}-still.png`), still); }
     console.log(`${name}: still 1080x1920, sheet ${pngSize(sheet).width}x${pngSize(sheet).height}`);
   }
+  // Runtime-chosen moments: resection at 1 s (top still, P1) and 14 s (strip, P2).
+  const timed = await questionPng('seed=tg-2026-11-28-2a&d=master&m=resection&ra=grid&g=8', true, '1,14');
+  assert.deepEqual(pngSize(timed), { width: 1080, height: 1920 + 56 + 625 }, 'resection 1,14: one strip');
+  if (out) await writeFile(join(out, 'resection-1-14-sheet.png'), timed);
+  console.log(`resection 1,14: sheet ${pngSize(timed).width}x${pngSize(timed).height}`);
   assert.deepEqual(errors, []);
   console.log('review sheet browser check passed');
 } finally {

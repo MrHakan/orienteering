@@ -32,7 +32,7 @@ import { MapRenderer, quizMarkers } from '../render/mapRenderer.js';
 import { drawCompassTape } from '../render/compassTape.js';
 import { relativeBearing } from '../render/relativeBearing.js';
 import { drawSkylineOverlay } from '../render/skylineOverlay.js';
-import { ExportComposer, exportDuration, exportObserver } from '../export/composer.js';
+import { ExportComposer, exportDuration, exportObserver, parseReviewTimes } from '../export/composer.js';
 import { planForChoice, describePlan, EASTER_CHOICES } from '../easter/index.js';
 import { EXPORT_FPS, encodeCanvasVideo, pickVideoPath } from '../export/recorder.js';
 
@@ -1460,8 +1460,10 @@ async function exportImage(reveal) {
   try {
     // data-review="1" (set by the fairness-review runtime, never by the UI): the review sheet with the clip's
     // decisive moments under the question still. Same file name; the posted media never use it.
+    // data-review-times="1,14" (same runtime): the top still and the strips at those clip seconds instead.
     const sheet = !reveal && $('export-png').dataset.review === '1';
-    const blob = await (sheet ? c.toReviewImage() : c.toImage({ reveal }));
+    const times = sheet ? parseReviewTimes($('export-png').dataset.reviewTimes, c.options.duration) : null;
+    const blob = await (sheet ? c.toReviewImage({ times }) : c.toImage({ reveal }));
     download(blob, exportName(reveal ? '-answer' : '', 'png'));
     setExportStatus(`Saved ${exportName(reveal ? '-answer' : '', 'png')}`);
   } catch (error) {
@@ -1519,7 +1521,7 @@ $('export-handle').addEventListener('input', () => {
   exportUi.composer?.setOptions({ handle: opts.handle });
 });
 $('export-png').addEventListener('click', () => exportImage(false));
-$('export-png').dataset.reviewSheet = '1'; // feature flag: this build can export a review sheet (data-review="1")
+$('export-png').dataset.reviewSheet = '2'; // feature flag: review sheet (data-review="1"); 2 = also data-review-times
 $('export-answer-png').addEventListener('click', () => exportImage(true));
 $('export-video').addEventListener('click', exportVideo);
 $('export-share').addEventListener('click', async () => {

@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generate } from '../src/engine/quiz.js';
-import { reviewFrameTimes, REVIEW_STRIP_LABEL } from '../src/export/composer.js';
+import { reviewFrameTimes, REVIEW_STRIP_LABEL, parseReviewTimes, reviewMoment } from '../src/export/composer.js';
 import { friendVideoZoom, friendSceneFrame } from '../src/export/friendZoom.js';
 import { resectionFrame } from '../src/engine/resectionQuiz.js';
 
@@ -28,6 +28,20 @@ test('reviewFrameTimes: friend -> the 3x zoom moment; resection -> the view to e
   const grid = await generate({ seed: 'tg-2026-11-29-1f', difficulty: 'master', mode: 'grid', gridSize: 8, world: 'glacial' });
   assert.deepEqual(reviewFrameTimes(grid), []);
   assert.equal(REVIEW_STRIP_LABEL, 56);
+});
+
+test('review times chosen by the runtime (data-review-times): resection at 1 s and 14 s faces P1, then P2', async () => {
+  assert.equal(parseReviewTimes(undefined), null);
+  assert.equal(parseReviewTimes(' '), null);
+  assert.deepEqual(parseReviewTimes('1,14'), [1, 14]);
+  assert.deepEqual(parseReviewTimes(' 1 , 6.5 ,14', 15), [1, 6.5, 14]);
+  for (const bad of ['14', '1,', '1,x', '14,1', '1,1', '-1,4', '1,15', '1,2,3,4,5'])
+    assert.throws(() => parseReviewTimes(bad, 15), /invalid review times/, bad);
+  const res = await generate({ seed: 'tg-2026-11-28-2a', difficulty: 'master', mode: 'resection', resectionAnswer: 'grid', gridSize: 8 });
+  assert.equal(resectionFrame(res, 1).focus, 0, 'the still at 1 s looks at P1');
+  assert.deepEqual(reviewMoment(res, 14), { time: 14, animated: false, label: 'SAME CLIP AT 14 s · VIEW TO P2' });
+  const grid = await generate({ seed: 'tg-2026-11-29-1f', difficulty: 'master', mode: 'grid', gridSize: 8, world: 'glacial' });
+  assert.deepEqual(reviewMoment(grid, 14), { time: 14, animated: false, label: 'SAME CLIP AT 14 s' });
 });
 
 test('friend high-visibility drawing: the walker figure only (never the sniper target), fog share 0.35', async () => {
