@@ -19,6 +19,7 @@ import { usesSunWatch, sunWatchFrame } from '../engine/sunWatch.js';
 import { sniperFrame, sniperWeather } from '../engine/sniper.js';
 import { drawSniperOverlay } from '../render/sniperOverlay.js';
 import { isMapMode, CLIP_DURATION } from '../engine/mapModes.js';
+import { resectionFrame } from '../engine/resectionQuiz.js';
 import { normaliseFriendSkin } from '../engine/friendAppearance.js';
 import { modeTitle, modeSubtitle, modeCaption, modeFrame, drawModeOverlay } from '../render/mapModesView.js';
 
@@ -75,6 +76,29 @@ export function reviewFrameTimes(quiz) {
   return [];
 }
 export const REVIEW_STRIP_LABEL = 56;
+
+/**
+ * Review moments chosen by the caller (data-review-times="1,14" on #export-png, set by the fairness-review
+ * runtime): comma-separated seconds inside the clip, 2-4 of them, strictly ascending. The first is the sheet's
+ * top still, the rest become labelled strips. Absent -> null (default sheet); malformed -> throws.
+ */
+export function parseReviewTimes(text, duration = CLIP_DURATION) {
+  if (text === undefined || text === null || String(text).trim() === '') return null;
+  const times = String(text).split(',').map((v) => (v.trim() === '' ? NaN : Number(v)));
+  const bad = times.length < 2 || times.length > 4 || times.some((t, i) => !Number.isFinite(t) || t < 0 || t >= duration || (i && t <= times[i - 1]));
+  if (bad) throw new Error(`invalid review times "${String(text).slice(0, 40)}"`);
+  return times;
+}
+
+/** One strip at a caller-chosen time; resection names the peak the camera faces then. */
+export function reviewMoment(quiz, time) {
+  let view = '';
+  if (quiz.mode === 'resection' && quiz.resection?.peaks?.length) {
+    const i = resectionFrame(quiz, time).focus, p = quiz.resection.peaks[i];
+    if (p) view = ` · VIEW TO ${p.label || `P${i + 1}`}`;
+  }
+  return { time, animated: false, label: `SAME CLIP AT ${time} s${view}` };
+}
 
 export class ExportComposer {
   /**
@@ -338,9 +362,12 @@ export class ExportComposer {
    * Review sheet (fairness review only, never posted): the question still with the scene of every
    * reviewFrameTimes() moment inserted under its own scene, each strip labelled; the map and text are unchanged.
    * Without extra moments it equals the question still. Returns a PNG blob of 1080 x (1920 + k strips).
+   * `times` (parseReviewTimes): the top still is the clip at times[0], one strip per later time.
    */
-  async toReviewImage() {
-    const extra = reviewFrameTimes(this.quiz), S = this.layout.scene, W = this.canvas.width, H = this.canvas.height;
+  async toReviewImage({ times = null } = {}) {
+    const still = times ? times[0] : this.questionTime();
+    const extra = times ? times.slice(1).map((t) => reviewMoment(this.quiz, t)) : reviewFrameTimes(this.quiz);
+    const S = this.layout.scene, W = this.canvas.width, H = this.canvas.height;
     const strips = [];
     for (const f of extra) {
       this.animated = !!f.animated;
@@ -351,7 +378,7 @@ export class ExportComposer {
       strips.push({ ...f, canvas: c });
     }
     this.animated = false;
-    await this.drawFrameReady(this.questionTime(), { reveal: false });
+    await this.drawFrameReady(still, { reveal: false });
     if (!strips.length) return new Promise((resolve) => this.canvas.toBlob(resolve, 'image/png'));
     const cut = S.y + S.h, step = REVIEW_STRIP_LABEL + S.h, out = document.createElement('canvas');
     out.width = W; out.height = H + strips.length * step;
